@@ -1,4 +1,4 @@
-﻿# Build output
+# Build output
 target/
 dist/
 temp-build/
@@ -35,7 +35,5 @@ fresh-postcard/
 # Kernel build scripts live in the micro-host repo
 /scripts/*.sh
 
-# Previous copy kept until the live copy is confirmed
-workspace-prototype.old/
 !.env.example
 !workspace-prototype/.env.example

@@ -1,4 +1,4 @@
-﻿# Post Card Spatial OS
+# Post Card Spatial OS
 
 The spatial workspace: a 3D (Three.js) desktop that runs and displays guest
 operating systems (Windows, Linux, macOS, Kali, AI copilot) as cards in space.
@@ -29,3 +29,7 @@ Guest disk images and overlays live in `workspace-prototype/data/` and are
 
 ## Secrets
 Never commit keys. Use environment variables (for example `STRIPE_SECRET_KEY`).
+
+## License
+
+Copyright (c) 2026 peoplescasey0. All rights reserved. See [LICENSE](LICENSE).
