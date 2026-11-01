@@ -4,10 +4,10 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "node --input-type=module -e \"import p from 'node:path';import u from 'node:url';const d=p.dirname(process.env.npm_package_json||process.env.INIT_CWD);process.argv=['node','run-vite.mjs','dev'];await import(u.pathToFileURL(p.join(d,'run-vite.mjs')).href)\"",
-    "build": "node --input-type=module -e \"import p from 'node:path';import u from 'node:url';const d=p.dirname(process.env.npm_package_json||process.env.INIT_CWD);process.argv=['node','run-vite.mjs','build'];await import(u.pathToFileURL(p.join(d,'run-vite.mjs')).href)\"",
-    "preview": "node --input-type=module -e \"import p from 'node:path';import u from 'node:url';const d=p.dirname(process.env.npm_package_json||process.env.INIT_CWD);process.argv=['node','run-vite.mjs','preview'];await import(u.pathToFileURL(p.join(d,'run-vite.mjs')).href)\"",
-    "test": "node --input-type=module -e \"import p from 'node:path';import u from 'node:url';const d=p.dirname(process.env.npm_package_json||process.env.INIT_CWD);process.argv=['node','run-vite.mjs','test'];await import(u.pathToFileURL(p.join(d,'run-vite.mjs')).href)\""
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "test": "node --test"
   },
   "dependencies": {
     "@novnc/novnc": "^1.7.0",
@@ -17,8 +17,5 @@
     "@types/three": "^0.180.0",
     "typescript": "^5.9.3",
     "vite": "^7.1.12"
-  },
-  "optionalDependencies": {
-    "@rollup/rollup-linux-x64-gnu": "^4.67.2"
   }
 }

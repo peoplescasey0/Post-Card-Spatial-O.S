@@ -2,10 +2,10 @@ import { spawn } from "node:child_process";
 import { execFile } from "node:child_process";
 import { createConnection, isIP } from "node:net";
 import { availableParallelism } from "node:os";
-import { createHash, createHmac, timingSafeEqual } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { promisify } from "node:util";
-import { copyFile, mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
-import { constants as fsConstants, existsSync, readFileSync } from "node:fs";
+import { copyFile, lstat, mkdir, readdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
+import { constants as fsConstants, existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -32,7 +32,6 @@ const WINDOWS_OS = "windows";
 const LINUX_OS = "linux";
 const ANDROID_OS = "android";
 const MACOS_OS = "macos";
-const VALID_GUEST_OSES = new Set([LINUX_OS, WINDOWS_OS, ANDROID_OS, MACOS_OS]);
 
 function resolveCardMemoryMb(os, profile = "eco") {
   if (os === WINDOWS_OS || os === MACOS_OS) {
@@ -91,91 +90,6 @@ async function readJson(request, maxBytes = 2048) {
   } catch {
     throw new GuestApiError(400, "Request body must be valid JSON.");
   }
-}
-
-async function readRawBody(request, maxBytes = 65536) {
-  let body = "";
-  for await (const chunk of request) {
-    body += chunk;
-    if (body.length > maxBytes) {
-      throw new GuestApiError(413, "Request body is too large.");
-    }
-  }
-  return body;
-}
-
-function verifyStripeSignature(rawBody, sigHeader, webhookSecret, toleranceSeconds = 300) {
-  if (!sigHeader || !webhookSecret) return false;
-  const elements = sigHeader.split(",");
-  let timestamp = null;
-  const signatures = [];
-  for (const element of elements) {
-    const [prefix, value] = element.trim().split("=");
-    if (prefix === "t") timestamp = parseInt(value, 10);
-    if (prefix === "v1") signatures.push(value);
-  }
-  if (!timestamp || signatures.length === 0) return false;
-  const currentTimestamp = Math.floor(Date.now() / 1000);
-  if (Math.abs(currentTimestamp - timestamp) > toleranceSeconds) return false;
-
-  const signedPayload = `${timestamp}.${rawBody}`;
-  const hmac = createHmac("sha256", webhookSecret).update(signedPayload).digest("hex");
-  return signatures.some((sig) => {
-    try {
-      return timingSafeEqual(Buffer.from(sig, "hex"), Buffer.from(hmac, "hex"));
-    } catch {
-      return false;
-    }
-  });
-}
-
-function loadStripeEnv() {
-  const envFilePath = path.resolve(appDirectory, ".env");
-  let secretKey = process.env.STRIPE_SECRET_KEY || process.env.STRIPE_API_KEY;
-  let publishableKey = process.env.STRIPE_PUBLISHABLE_KEY;
-  let webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
-  let priceProMonthly = process.env.STRIPE_PRICE_PRO_MONTHLY || process.env.STRIPE_PRICE_PRO;
-  let priceProAnnual = process.env.STRIPE_PRICE_PRO_ANNUAL;
-  let priceEnterpriseMonthly = process.env.STRIPE_PRICE_ENTERPRISE_MONTHLY || process.env.STRIPE_PRICE_ENTERPRISE;
-  let priceEnterpriseAnnual = process.env.STRIPE_PRICE_ENTERPRISE_ANNUAL;
-
-  if (existsSync(envFilePath)) {
-    try {
-      const content = readFileSync(envFilePath, "utf8");
-      for (const line of content.split("\n")) {
-        const match = line.trim().match(/^([A-Za-z0-9_]+)\s*=\s*(.*)$/);
-        if (match) {
-          const key = match[1];
-          const val = match[2].trim().replace(/^["']|["']$/g, "");
-          if (key === "STRIPE_SECRET_KEY" || key === "STRIPE_API_KEY") secretKey = secretKey || val;
-          if (key === "STRIPE_PUBLISHABLE_KEY") publishableKey = publishableKey || val;
-          if (key === "STRIPE_WEBHOOK_SECRET") webhookSecret = webhookSecret || val;
-          if (key === "STRIPE_PRICE_PRO_MONTHLY" || key === "STRIPE_PRICE_PRO") priceProMonthly = priceProMonthly || val;
-          if (key === "STRIPE_PRICE_PRO_ANNUAL") priceProAnnual = priceProAnnual || val;
-          if (key === "STRIPE_PRICE_ENTERPRISE_MONTHLY" || key === "STRIPE_PRICE_ENTERPRISE") priceEnterpriseMonthly = priceEnterpriseMonthly || val;
-          if (key === "STRIPE_PRICE_ENTERPRISE_ANNUAL") priceEnterpriseAnnual = priceEnterpriseAnnual || val;
-        }
-      }
-    } catch {}
-  }
-  const isLiveKey = Boolean(secretKey && !secretKey.includes("your_restricted_key_here"));
-  return {
-    secretKey: isLiveKey ? secretKey : null,
-    publishableKey: publishableKey || null,
-    webhookSecret: webhookSecret || null,
-    prices: {
-      proMonthly: priceProMonthly || null,
-      proAnnual: priceProAnnual || null,
-      enterpriseMonthly: priceEnterpriseMonthly || null,
-      enterpriseAnnual: priceEnterpriseAnnual || null,
-    },
-    tiers: {
-      community: true,
-      pro: Boolean(priceProMonthly),
-      enterprise: Boolean(priceEnterpriseMonthly),
-    },
-    isLive: isLiveKey,
-  };
 }
 
 function findExecutable(environmentKey, defaultPath, executableName) {
@@ -245,21 +159,7 @@ async function createEmptyDiskIfNeeded(diskPath, qemuImgPath, diskSize = DEFAULT
 
 async function createOverlayIfNeeded(baseDiskPath, overlayPath, qemuImgPath) {
   const verifyBacking = async () => {
-    let info = await imageInfo(qemuImgPath, overlayPath);
-    const backing = info["backing-filename"];
-    if (
-      info.format === "qcow2" &&
-      backing &&
-      path.resolve(backing) !== baseDiskPath &&
-      path.win32.basename(backing) === path.basename(baseDiskPath)
-    ) {
-      await execFileAsync(
-        qemuImgPath,
-        ["rebase", "-u", "-b", baseDiskPath, "-F", "qcow2", overlayPath],
-        { windowsHide: true, timeout: 30_000 },
-      );
-      info = await imageInfo(qemuImgPath, overlayPath);
-    }
+    const info = await imageInfo(qemuImgPath, overlayPath);
     if (
       info.format !== "qcow2" ||
       !info["backing-filename"] ||
@@ -384,10 +284,6 @@ function qemuArguments({ bootMode, cardId, diskPath, isoPath, ports, networkMode
 function windowsPathToWsl(windowsPath) {
   if (typeof windowsPath !== "string") return "";
   const cleaned = windowsPath.replaceAll("\\", "/");
-  const wslUncMatch = /^\/\/(?:wsl\.localhost|wsl\$)\/[^/]+\/(.*)$/i.exec(cleaned);
-  if (wslUncMatch) {
-    return `/${wslUncMatch[1]}`;
-  }
   if (cleaned.startsWith("/mnt/")) return cleaned;
   const match = /^([a-zA-Z]):\/(.*)$/.exec(cleaned);
   if (match) {
@@ -690,10 +586,20 @@ function waitForExit(child, timeoutMs, guestName) {
   });
 }
 
-export function createGuestApi() {
+export function createGuestApi(options = {}) {
   const dataDirectory = process.env.POSTCARD_VM_DATA
     ? path.resolve(process.env.POSTCARD_VM_DATA)
     : path.join(appDirectory, "data");
+  const cardIdRegistryPath = path.join(dataDirectory, "card-id-registry.json");
+  const defaultReservedCardIds = [
+    "android",
+    "windows",
+    "linux",
+    "macos",
+    "kali-red",
+    "workspace-fallback",
+    "windows-5",
+  ];
   const baseDiskPath = process.env.POSTCARD_LINUX_BASE
     ? path.resolve(process.env.POSTCARD_LINUX_BASE)
     : path.join(dataDirectory, "master-images", "debian-golden.qcow2");
@@ -705,8 +611,6 @@ export function createGuestApi() {
   const networkModesPath = path.join(dataDirectory, "network-modes.json");
   const memoryProfilesPath = path.join(dataDirectory, "memory-profiles.json");
   const cpuProfilesPath = path.join(dataDirectory, "cpu-profiles.json");
-  const pairDropRoomsPath = path.join(dataDirectory, "pairdrop-rooms.json");
-  const integrationsDir = path.join(projectDirectory, "integrations");
   const androidIsoPath = process.env.POSTCARD_ANDROID_ISO
     ? path.resolve(process.env.POSTCARD_ANDROID_ISO)
     : path.join(projectDirectory, "archive", "guest-vm-setup", "android-x86_64.iso");
@@ -728,6 +632,114 @@ export function createGuestApi() {
   const windowsDiskDirectory = path.join(dataDirectory, "windows", "disks");
   const windowsFirmwareDirectory = path.join(dataDirectory, "windows", "firmware");
   const windowsTpmDirectory = path.join(dataDirectory, "windows", "tpm");
+  let registryMutationQueue = Promise.resolve();
+  function withRegistryMutation(operation) {
+    const result = registryMutationQueue.then(operation);
+    registryMutationQueue = result.catch(() => undefined);
+    return result;
+  }
+
+  async function readCardIdRegistry() {
+    let raw;
+    try {
+      raw = await readFile(cardIdRegistryPath, "utf8");
+    } catch (error) {
+      if (error.code === "ENOENT") {
+        return {
+          version: 1,
+          nextId: 1,
+          reservedIds: [...defaultReservedCardIds],
+          deletedIds: [],
+        };
+      }
+      throw new GuestApiError(500, `Could not read the card ID registry: ${error.message}`);
+    }
+
+    let parsed;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      throw new GuestApiError(500, "The card ID registry is invalid; allocations and deletions are paused to prevent ID reuse.");
+    }
+    const validIds = (ids) =>
+      Array.isArray(ids) &&
+      ids.every((id) => typeof id === "string" && /^[a-z0-9][a-z0-9_-]{0,63}$/.test(id));
+    if (
+      !parsed ||
+      typeof parsed !== "object" ||
+      parsed.version !== 1 ||
+      !Number.isSafeInteger(parsed.nextId) ||
+      parsed.nextId < 1 ||
+      !validIds(parsed.reservedIds) ||
+      !validIds(parsed.deletedIds)
+    ) {
+      throw new GuestApiError(500, "The card ID registry is invalid; allocations and deletions are paused to prevent ID reuse.");
+    }
+    return {
+      version: 1,
+      nextId: parsed.nextId,
+      reservedIds: [...new Set([...defaultReservedCardIds, ...parsed.reservedIds])],
+      deletedIds: [...new Set(parsed.deletedIds)],
+    };
+  }
+
+  async function writeCardIdRegistry(registry) {
+    const temporaryPath = `${cardIdRegistryPath}.${process.pid}.${randomUUID()}.tmp`;
+    try {
+      await mkdir(dataDirectory, { recursive: true });
+      await writeFile(temporaryPath, JSON.stringify(registry, null, 2), {
+        encoding: "utf8",
+        flag: "wx",
+      });
+      await rename(temporaryPath, cardIdRegistryPath);
+    } catch (error) {
+      await rm(temporaryPath, { force: true }).catch(() => undefined);
+      throw new GuestApiError(500, `Could not save the card ID registry: ${error.message}`);
+    }
+  }
+
+  async function allocateCardId({ prefix, existingIds }) {
+    if (typeof prefix !== "string" || !/^[a-z0-9][a-z0-9_-]{0,20}$/.test(prefix)) {
+      throw new GuestApiError(400, "prefix must be a short lowercase card ID prefix.");
+    }
+    if (
+      !Array.isArray(existingIds) ||
+      existingIds.length > 512 ||
+      existingIds.some((id) => typeof id !== "string" || !/^[a-z0-9][a-z0-9_-]{0,63}$/.test(id))
+    ) {
+      throw new GuestApiError(400, "existingIds must contain valid card identifiers.");
+    }
+
+    const allocatedCardId = await withRegistryMutation(async () => {
+      const registry = await readCardIdRegistry();
+      const existing = new Set([
+        ...registry.reservedIds,
+        ...registry.deletedIds,
+        ...existingIds,
+        ...await preparedCardIds(),
+        ...await preparedWindowsCardIds(),
+        ...[...guests.values()].map((guest) => guest.cardId),
+      ]);
+      registry.reservedIds = [...new Set([...registry.reservedIds, ...existingIds])];
+
+      let candidate;
+      do {
+        if (!Number.isSafeInteger(registry.nextId) || registry.nextId >= Number.MAX_SAFE_INTEGER) {
+          throw new GuestApiError(507, "The card ID allocator is exhausted.");
+        }
+        candidate = `${prefix}-${registry.nextId}`;
+        registry.nextId += 1;
+      } while (existing.has(candidate));
+
+      registry.reservedIds.push(candidate);
+      await writeCardIdRegistry(registry);
+      return candidate;
+    });
+
+    const result = await status();
+    result.allocatedCardId = allocatedCardId;
+    return result;
+  }
   const wslDistribution = process.env.POSTCARD_WSL_DISTRO ?? "Ubuntu";
   const wslPath = process.env.POSTCARD_WSL ?? "wsl.exe";
   const wslQemuPath = process.env.POSTCARD_WSL_QEMU ?? "qemu-system-x86_64";
@@ -771,28 +783,93 @@ export function createGuestApi() {
   }
   runtimeStore[GUEST_RUNTIME_KEY] = guests;
 
-  async function isBaseReady(strict = false) {
+  function resolveDataChild(parent, entryName) {
+    const dataRoot = path.resolve(dataDirectory);
+    const resolvedParent = path.resolve(parent);
+    const relativeParent = path.relative(dataRoot, resolvedParent);
+    if (
+      relativeParent === ".." ||
+      relativeParent.startsWith(`..${path.sep}`) ||
+      path.isAbsolute(relativeParent)
+    ) {
+      throw new GuestApiError(409, "Card data path is outside the configured VM data directory.");
+    }
+
+    const candidate = path.resolve(resolvedParent, entryName);
+    if (path.dirname(candidate) !== resolvedParent) {
+      throw new GuestApiError(400, "Card data path must be a direct child of its storage directory.");
+    }
+    return { candidate, relativeParent, resolvedParent };
+  }
+
+  async function inspectOwnedPath(parent, entryName, expectedType = "any") {
+    const { candidate, relativeParent, resolvedParent } = resolveDataChild(parent, entryName);
+    let dataRoot;
+    let actualParent;
+    try {
+      dataRoot = await realpath(dataDirectory);
+      actualParent = await realpath(resolvedParent);
+    } catch (error) {
+      if (error.code === "ENOENT") return undefined;
+      throw new GuestApiError(500, `Could not verify card data directory: ${error.message}`);
+    }
+
+    const expectedParent = path.resolve(dataRoot, relativeParent);
+    if (path.relative(expectedParent, actualParent) !== "") {
+      throw new GuestApiError(409, "Card data directory resolves outside its owned location.");
+    }
+
+    let details;
+    try {
+      details = await lstat(candidate);
+    } catch (error) {
+      if (error.code === "ENOENT") return undefined;
+      throw new GuestApiError(500, `Could not inspect card data: ${error.message}`);
+    }
+    if (details.isSymbolicLink()) {
+      throw new GuestApiError(409, "Refusing to delete a symbolic link in card data.");
+    }
+    if (
+      (expectedType === "file" && !details.isFile()) ||
+      (expectedType === "directory" && !details.isDirectory())
+    ) {
+      throw new GuestApiError(409, "Card data path has an unexpected file type.");
+    }
+    return { path: candidate, details };
+  }
+
+  async function readDeleteMetadata(fileName, expectedShape) {
+    const file = await inspectOwnedPath(dataDirectory, fileName, "file");
+    if (!file) return { exists: false, value: expectedShape === "array" ? [] : {} };
+
+    let value;
+    try {
+      value = JSON.parse(await readFile(file.path, "utf8"));
+    } catch (error) {
+      throw new GuestApiError(500, `Could not read ${fileName} before deleting card data: ${error.message}`);
+    }
+    const valid =
+      expectedShape === "array"
+        ? Array.isArray(value)
+        : value !== null && typeof value === "object" && !Array.isArray(value);
+    if (!valid) {
+      throw new GuestApiError(500, `${fileName} has an invalid format; card data was not deleted.`);
+    }
+    return { exists: true, path: file.path, value };
+  }
+
+  async function isBaseReady() {
     let marker;
     try {
       marker = JSON.parse(await readFile(readyMarkerPath, "utf8"));
     } catch (error) {
       if (error.code === "ENOENT") return false;
-      if (!strict) return false;
       throw new GuestApiError(500, `Could not read Debian base status: ${error.message}`);
     }
-    const markerFile = typeof marker?.baseDiskPath === "string"
-      ? path.win32.basename(marker.baseDiskPath)
-      : "";
-    const expectedFile = path.basename(baseDiskPath);
-    if (
-      marker.version !== 1 ||
-      (path.resolve(marker.baseDiskPath) !== baseDiskPath && markerFile !== expectedFile)
-    ) {
-      if (!strict) return false;
+    if (marker.version !== 1 || path.resolve(marker.baseDiskPath) !== baseDiskPath) {
       throw new GuestApiError(409, "The Debian base marker does not match the configured base image.");
     }
     if (!existsSync(baseDiskPath)) {
-      if (!strict) return false;
       throw new GuestApiError(409, "The Debian golden image is missing. Remove its ready marker before reinstalling.");
     }
     return true;
@@ -903,18 +980,16 @@ export function createGuestApi() {
     if (bootMode === "disk" && !diskExists) {
       throw new GuestApiError(409, "Install Windows 11 before booting this card from disk.");
     }
-    if (bootMode === "installer") {
-      try {
-        if (!(await stat(windowsIsoPath)).isFile()) throw new Error("not a file");
-      } catch {
-        throw new GuestApiError(503, `Windows 11 ISO was not found at ${windowsIsoPath}. Set POSTCARD_WINDOWS_ISO to its path.`);
-      }
+    try {
+      if (!(await stat(windowsIsoPath)).isFile()) throw new Error("not a file");
+    } catch {
+      throw new GuestApiError(503, `Windows 11 ISO was not found at ${windowsIsoPath}. Set POSTCARD_WINDOWS_ISO to its path.`);
     }
     await mkdir(windowsDiskDirectory, { recursive: true });
     await mkdir(windowsFirmwareDirectory, { recursive: true });
     await mkdir(windowsTpmDirectory, { recursive: true });
     const checkAndPrepare = [
-      ...(bootMode === "installer" ? [`test -r ${shellQuote(isoWslPath)}`] : []),
+      `test -r ${shellQuote(isoWslPath)}`,
       `test -r ${shellQuote(linuxFirmwarePath)}`,
       `test -r ${shellQuote(linuxVarsTemplatePath)}`,
       `command -v ${shellQuote(wslQemuPath)} >/dev/null`,
@@ -979,46 +1054,13 @@ export function createGuestApi() {
     );
   }
 
-  async function readPairDropRooms() {
-    try {
-      const raw = await readFile(pairDropRoomsPath, "utf8");
-      const parsed = JSON.parse(raw);
-      return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
-    } catch {
-      return {};
-    }
-  }
-
-  async function writePairDropRooms(rooms) {
-    await mkdir(dataDirectory, { recursive: true });
-    await writeFile(pairDropRoomsPath, JSON.stringify(rooms, null, 2), "utf8");
-  }
-
   async function status() {
     const baseReady = await isBaseReady();
-    const pairDropRooms = await readPairDropRooms();
     return {
       baseReady,
       baseDiskExists: existsSync(baseDiskPath),
       baseDiskPath,
-      pairDropRooms,
-      integrations: {
-        bitvisor: existsSync(path.join(integrationsDir, "hypervisor", "bitvisor-3.0")),
-        cosmosOs: existsSync(path.join(integrationsDir, "hypervisor", "cosmos-os")),
-        easyGpuPv: existsSync(path.join(integrationsDir, "hypervisor", "easy-gpu-pv")),
-        nvidiaOpenShell: existsSync(path.join(integrationsDir, "sandbox", "nvidia-openshell")),
-        openSandbox: existsSync(path.join(integrationsDir, "sandbox", "opensandbox")),
-        openFang: existsSync(path.join(integrationsDir, "sandbox", "bin", "openfang.exe")),
-        pairDrop: existsSync(path.join(integrationsDir, "network-transfer", "pairdrop")),
-        localSend: existsSync(
-          path.join(integrationsDir, "network-transfer", "bin", "LocalSend-1.18.2-windows-x86-64.exe"),
-        ),
-        turboVnc: existsSync(
-          path.join(integrationsDir, "network-transfer", "bin", "TurboVNC-3.1-x86.exe"),
-        ),
-        rustDeskServer: existsSync(path.join(integrationsDir, "network-transfer", "rustdesk-server")),
-        nextDns: existsSync(path.join(integrationsDir, "network-transfer", "nextdns")),
-      },
+      deletedCardIds: (await readCardIdRegistry()).deletedIds,
       preparedCardIds: await preparedCardIds(),
       preparedWindowsCardIds: await preparedWindowsCardIds(),
       installedWindowsCardIds: await installedWindowsCardIds(),
@@ -1038,6 +1080,7 @@ export function createGuestApi() {
           bootMode: guest.bootMode,
           error: guest.error,
           websocketPort: guest.ports?.websocketPort ?? null,
+          qmpPort: guest.ports?.qmpPort ?? null,
           serialPort: guest.ports?.serialPort ?? null,
           serialOutput: guest.serialOutput ?? "",
           memoryMb: guest.memoryMb ?? resolveCardMemoryMb(guest.os ?? LINUX_OS, "eco"),
@@ -1126,7 +1169,7 @@ export function createGuestApi() {
   }
 
   async function start(os, bootMode, cardId) {
-    if (!VALID_GUEST_OSES.has(os)) {
+    if (os !== LINUX_OS && os !== WINDOWS_OS && os !== ANDROID_OS && os !== MACOS_OS) {
       throw new GuestApiError(400, "os must be 'linux', 'windows', 'android', or 'macos'.");
     }
     if (bootMode !== "installer" && bootMode !== "disk") {
@@ -1501,26 +1544,160 @@ export function createGuestApi() {
     guest.child = undefined;
     if (guest.tpmChild?.exitCode === null) guest.tpmChild.kill();
     guest.tpmChild = undefined;
-    if (os === WINDOWS_OS && process.platform === "win32") {
-      try {
-        await runWsl("pkill", ["-f", `qemu-system-x86_64.*${cardId}`], "Stopping QEMU in WSL");
-      } catch {}
-      try {
-        await runWsl("pkill", ["-f", `swtpm.*${cardId}`], "Stopping swtpm in WSL");
-      } catch {}
-    }
     guest.phase = "offline";
     guest.ports = undefined;
     guest.error = undefined;
     return status();
   }
 
+  async function deleteCard(body) {
+    return withRegistryMutation(() => deleteCardInternal(body));
+  }
+
+  async function deleteCardInternal({ cardId, os = LINUX_OS, confirm }) {
+    if (typeof cardId !== "string" || !/^[a-z0-9][a-z0-9_-]{0,63}$/.test(cardId)) {
+      throw new GuestApiError(400, "cardId must be a lowercase card identifier.");
+    }
+    if (![LINUX_OS, WINDOWS_OS, ANDROID_OS, MACOS_OS].includes(os)) {
+      throw new GuestApiError(400, "os must be 'linux', 'windows', 'android', or 'macos'.");
+    }
+    if (confirm !== true) {
+      throw new GuestApiError(400, "Explicit final confirmation is required to delete a card.");
+    }
+
+    const key = guestKey(os, cardId);
+    const targetGuest = guests.get(key);
+    if (targetGuest) normalizeGuestState(targetGuest);
+    if (
+      targetGuest?.phase === "starting" ||
+      targetGuest?.phase === "stopping"
+    ) {
+      throw new GuestApiError(409, "Wait for this guest to finish starting or stopping before deleting it.");
+    }
+
+    const cardFiles = os === WINDOWS_OS
+      ? [
+          { parent: windowsDiskDirectory, name: `${cardId}.qcow2`, type: "file", disk: true },
+          { parent: windowsFirmwareDirectory, name: `${cardId}-VARS.fd`, type: "file" },
+          { parent: windowsTpmDirectory, name: cardId, type: "directory" },
+        ]
+      : [
+          { parent: overlayDirectory, name: `${cardId}.qcow2`, type: "file", disk: true },
+          { parent: overlayDirectory, name: `${cardId}.qcow2.checkpoint`, type: "file" },
+        ];
+    cardFiles.push({
+      parent: paperPlanesDropDir,
+      name: cardId,
+      type: "directory",
+    });
+
+    const filesToRemove = [];
+    for (const entry of cardFiles) {
+      const ownedPath = await inspectOwnedPath(entry.parent, entry.name, entry.type);
+      if (!ownedPath) continue;
+
+      if (entry.disk) {
+        if (path.resolve(ownedPath.path) === path.resolve(baseDiskPath)) {
+          throw new GuestApiError(409, "Refusing to delete the shared Debian golden image.");
+        }
+        try {
+          const baseDetails = await stat(baseDiskPath);
+          if (ownedPath.details.dev === baseDetails.dev && ownedPath.details.ino === baseDetails.ino) {
+            throw new GuestApiError(409, "Refusing to delete a card disk that is the shared Debian golden image.");
+          }
+        } catch (error) {
+          if (error instanceof GuestApiError) throw error;
+          if (error.code !== "ENOENT") {
+            throw new GuestApiError(500, `Could not verify the shared Debian image before deletion: ${error.message}`);
+          }
+        }
+      }
+      filesToRemove.push({ ...entry, path: ownedPath.path });
+    }
+
+    const metadataUpdates = [];
+    for (const fileName of [
+      "checkpoints.json",
+      "network-modes.json",
+      "memory-profiles.json",
+      "cpu-profiles.json",
+    ]) {
+      const metadata = await readDeleteMetadata(fileName, "object");
+      if (metadata.exists && Object.prototype.hasOwnProperty.call(metadata.value, cardId)) {
+        delete metadata.value[cardId];
+        metadataUpdates.push({ path: metadata.path, value: metadata.value });
+      }
+    }
+
+    const planes = await readDeleteMetadata("paper-planes.json", "array");
+    if (planes.exists) {
+      for (const plane of planes.value) {
+        if (
+          !plane ||
+          typeof plane !== "object" ||
+          typeof plane.fromCardId !== "string" ||
+          typeof plane.toCardId !== "string"
+        ) {
+          throw new GuestApiError(500, "paper-planes.json has an invalid record; card data was not deleted.");
+        }
+      }
+      const retainedPlanes = planes.value.filter(
+        (plane) => plane.fromCardId !== cardId && plane.toCardId !== cardId,
+      );
+      if (retainedPlanes.length !== planes.value.length) {
+        metadataUpdates.push({ path: planes.path, value: retainedPlanes });
+      }
+    }
+
+    const isRunning = typeof options.isGuestRunning === "function"
+      ? await options.isGuestRunning(cardId, os)
+      : targetGuest?.phase === "running";
+    if (isRunning) {
+      const forceStop = typeof options.forceStopGuest === "function"
+        ? options.forceStopGuest
+        : (selectedCardId, selectedOs) => stop(selectedCardId, selectedOs, true);
+      await forceStop(cardId, os);
+      const afterStop = guests.get(key);
+      if (afterStop) {
+        normalizeGuestState(afterStop);
+        if (afterStop.phase === "starting" || afterStop.phase === "running" || afterStop.phase === "stopping") {
+          throw new GuestApiError(409, "The selected guest is still running; its files were kept.");
+        }
+      }
+    }
+
+    for (const entry of filesToRemove) {
+      const currentPath = await inspectOwnedPath(entry.parent, entry.name, entry.type);
+      if (!currentPath || currentPath.path !== entry.path) {
+        throw new GuestApiError(409, "Card data changed during deletion; no success was reported.");
+      }
+      await rm(currentPath.path, { recursive: entry.type === "directory", force: false });
+    }
+
+    for (const update of metadataUpdates) {
+      const currentPath = await inspectOwnedPath(dataDirectory, path.basename(update.path), "file");
+      if (!currentPath || currentPath.path !== update.path) {
+        throw new GuestApiError(409, "Card metadata changed during deletion; no success was reported.");
+      }
+      await writeFile(currentPath.path, JSON.stringify(update.value, null, 2), "utf8");
+    }
+
+    guests.delete(key);
+    const registry = await readCardIdRegistry();
+    registry.reservedIds = [...new Set([...registry.reservedIds, cardId])];
+    registry.deletedIds = [...new Set([...registry.deletedIds, cardId])].sort();
+    const result = await status();
+    result.deletedCardIds = registry.deletedIds;
+    await writeCardIdRegistry(registry);
+    return result;
+  }
+
   async function resetOverlay(cardId, os = LINUX_OS) {
     if (typeof cardId !== "string" || !/^[a-z0-9][a-z0-9_-]{0,63}$/.test(cardId)) {
       throw new GuestApiError(400, "cardId must be a lowercase card identifier.");
     }
-    if (!VALID_GUEST_OSES.has(os)) {
-      throw new GuestApiError(400, "os must be 'linux', 'windows', 'android', 'macos', or 'eve'.");
+    if (os !== LINUX_OS && os !== WINDOWS_OS && os !== ANDROID_OS && os !== MACOS_OS) {
+      throw new GuestApiError(400, "os must be 'linux', 'windows', 'android', or 'macos'.");
     }
     const existing = guests.get(guestKey(os, cardId));
     if (existing) normalizeGuestState(existing);
@@ -1554,8 +1731,8 @@ export function createGuestApi() {
     if (sourceCardId === targetCardId) {
       throw new GuestApiError(400, "sourceCardId and targetCardId must be different.");
     }
-    if (!VALID_GUEST_OSES.has(os)) {
-      throw new GuestApiError(400, "os must be 'linux', 'windows', 'android', 'macos', or 'eve'.");
+    if (os !== LINUX_OS && os !== WINDOWS_OS && os !== ANDROID_OS && os !== MACOS_OS) {
+      throw new GuestApiError(400, "os must be 'linux', 'windows', 'android', or 'macos'.");
     }
     for (const id of [sourceCardId, targetCardId]) {
       const g = guests.get(guestKey(os, id));
@@ -1612,85 +1789,6 @@ export function createGuestApi() {
     if (!raw) return { delivered: false, info: "" };
     if (raw.length > 256) {
       throw new GuestApiError(400, "remoteTarget must be at most 256 characters.");
-    }
-
-    if (raw.startsWith("pairdrop://")) {
-      const roomOrKey = raw.slice("pairdrop://".length).trim().replace(/^\/+/, "");
-      if (!/^(?:\d{6}|[a-z]{5})$/.test(roomOrKey)) {
-        throw new GuestApiError(
-          400,
-          "pairdrop:// remoteTarget must be a 6-digit pairKey or 5-letter lowercase room code.",
-        );
-      }
-      const rooms = await readPairDropRooms();
-      const room = rooms[roomOrKey];
-      const peers = Array.isArray(room?.peers)
-        ? room.peers.filter((p) => p !== payload.fromCardId)
-        : [];
-      for (const peerCardId of peers) {
-        const peerDropDir = path.join(paperPlanesDropDir, peerCardId);
-        await mkdir(peerDropDir, { recursive: true });
-        await writeFile(path.join(peerDropDir, "latest.txt"), `${payload.message}\n`, "utf8");
-        await writeFile(
-          path.join(peerDropDir, `pairdrop-${Date.now()}.txt`),
-          `PairDrop Room: ${roomOrKey}\nFrom: ${payload.fromCardId}\nSent: ${payload.sentAt}\n\n${payload.message}\n`,
-          "utf8",
-        );
-      }
-      return {
-        delivered: true,
-        info: `pairdrop://${roomOrKey} (${peers.length} paired peer${peers.length === 1 ? "" : "s"})`,
-      };
-    }
-
-    if (raw.startsWith("localsend://")) {
-      const hostPort = raw.slice("localsend://".length).trim().replace(/^\/+/, "");
-      let parsedLs;
-      try {
-        parsedLs = new URL(`http://${hostPort}`);
-      } catch {
-        throw new GuestApiError(400, "localsend:// remoteTarget must be a valid host:port.");
-      }
-      if (!parsedLs.port) parsedLs.port = "53317";
-      parsedLs.pathname = "/api/guest/localsend/v2/prepare-upload";
-      let lsResponse;
-      try {
-        lsResponse = await fetch(parsedLs.toString(), {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            info: {
-              alias: `Post Card (${payload.fromCardId})`,
-              version: "2.1",
-              deviceModel: "Post Card Hypervisor",
-              deviceType: "desktop",
-            },
-            toCardId: payload.toCardId,
-            text: payload.message,
-            files: {
-              "plane-1": {
-                id: "plane-1",
-                fileName: "paper-plane.txt",
-                size: Buffer.byteLength(payload.message, "utf8"),
-                fileType: "text/plain",
-              },
-            },
-          }),
-          signal: AbortSignal.timeout(3500),
-        });
-      } catch (error) {
-        throw new GuestApiError(
-          502,
-          `Could not reach LocalSend peer at ${parsedLs.host}: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
-      if (!lsResponse.ok) {
-        throw new GuestApiError(
-          502,
-          `LocalSend peer at ${parsedLs.host} returned HTTP ${lsResponse.status}.`,
-        );
-      }
-      return { delivered: true, info: `localsend://${parsedLs.host}` };
     }
 
     if (raw.startsWith("tcp://")) {
@@ -1774,8 +1872,8 @@ export function createGuestApi() {
     if (fromCardId === toCardId && !remoteTarget) {
       throw new GuestApiError(400, "fromCardId and toCardId must be different.");
     }
-    if (!VALID_GUEST_OSES.has(os) && os !== "remote") {
-      throw new GuestApiError(400, "os must be 'linux', 'windows', 'android', 'macos', 'eve', or 'remote'.");
+    if (os !== LINUX_OS && os !== WINDOWS_OS && os !== "android" && os !== "remote") {
+      throw new GuestApiError(400, "os must be 'linux', 'windows', 'android', or 'remote'.");
     }
     if (typeof message !== "string" || message.trim().length === 0 || message.length > 160) {
       throw new GuestApiError(400, "message must be a non-empty string up to 160 characters.");
@@ -1850,8 +1948,8 @@ export function createGuestApi() {
     if (typeof cardId !== "string" || !/^[a-z0-9][a-z0-9_-]{0,63}$/.test(cardId)) {
       throw new GuestApiError(400, "cardId must be a lowercase card identifier.");
     }
-    if (!VALID_GUEST_OSES.has(os)) {
-      throw new GuestApiError(400, "os must be 'linux', 'windows', 'android', 'macos', or 'eve'.");
+    if (os !== LINUX_OS && os !== WINDOWS_OS && os !== ANDROID_OS && os !== MACOS_OS) {
+      throw new GuestApiError(400, "os must be 'linux', 'windows', 'android', or 'macos'.");
     }
     const targetGuest = guests.get(guestKey(os, cardId));
     if (targetGuest) normalizeGuestState(targetGuest);
@@ -1890,6 +1988,31 @@ export function createGuestApi() {
     return status();
   }
 
+  async function wakeGuestScreen({ cardId, os = LINUX_OS }) {
+    if (typeof cardId !== "string" || !/^[a-z0-9][a-z0-9_-]{0,63}$/.test(cardId)) {
+      throw new GuestApiError(400, "cardId must be a lowercase card identifier.");
+    }
+    if (os !== LINUX_OS && os !== WINDOWS_OS && os !== ANDROID_OS && os !== MACOS_OS) {
+      throw new GuestApiError(400, "os must be 'linux', 'windows', 'android', or 'macos'.");
+    }
+    const targetGuest = guests.get(guestKey(os, cardId));
+    if (targetGuest) normalizeGuestState(targetGuest);
+    if (targetGuest?.phase !== "running" || !targetGuest.ports?.qmpPort) {
+      throw new GuestApiError(409, "Start this guest before waking its screen.");
+    }
+
+    await requestQmpCommands(targetGuest.ports.qmpPort, [
+      {
+        execute: "send-key",
+        arguments: {
+          keys: [{ type: "qcode", data: "shift" }],
+          "hold-time": 20,
+        },
+      },
+    ]);
+    return status();
+  }
+
   async function readCheckpoints() {
     try {
       const raw = await readFile(checkpointsPath, "utf8");
@@ -1909,8 +2032,8 @@ export function createGuestApi() {
     if (typeof cardId !== "string" || !/^[a-z0-9][a-z0-9_-]{0,63}$/.test(cardId)) {
       throw new GuestApiError(400, "cardId must be a lowercase card identifier.");
     }
-    if (!VALID_GUEST_OSES.has(os)) {
-      throw new GuestApiError(400, "os must be 'linux', 'windows', 'android', 'macos', or 'eve'.");
+    if (os !== LINUX_OS && os !== WINDOWS_OS && os !== ANDROID_OS && os !== MACOS_OS) {
+      throw new GuestApiError(400, "os must be 'linux', 'windows', 'android', or 'macos'.");
     }
     if (action !== "save" && action !== "rewind") {
       throw new GuestApiError(400, "action must be 'save' or 'rewind'.");
@@ -2198,8 +2321,8 @@ export function createGuestApi() {
     if (typeof sourceCardId !== "string" || !/^[a-z0-9][a-z0-9_-]{0,63}$/.test(sourceCardId)) {
       throw new GuestApiError(400, "sourceCardId must be a lowercase card identifier.");
     }
-    if (!VALID_GUEST_OSES.has(os)) {
-      throw new GuestApiError(400, "os must be 'linux', 'windows', 'android', 'macos', or 'eve'.");
+    if (os !== LINUX_OS && os !== WINDOWS_OS && os !== ANDROID_OS && os !== MACOS_OS) {
+      throw new GuestApiError(400, "os must be 'linux', 'windows', 'android', or 'macos'.");
     }
     const forkCount = Math.min(Math.max(Number(count) || 2, 1), 4);
     const createdCardIds = [];
@@ -2287,8 +2410,8 @@ export function createGuestApi() {
     if (typeof cardId !== "string" || !/^[a-z0-9][a-z0-9_-]{0,63}$/.test(cardId)) {
       throw new GuestApiError(400, "cardId must be a lowercase card identifier.");
     }
-    if (!VALID_GUEST_OSES.has(os)) {
-      throw new GuestApiError(400, "os must be 'linux', 'windows', 'android', 'macos', or 'eve'.");
+    if (os !== LINUX_OS && os !== WINDOWS_OS && os !== ANDROID_OS && os !== MACOS_OS) {
+      throw new GuestApiError(400, "os must be 'linux', 'windows', 'android', or 'macos'.");
     }
     if (typeof command !== "string" || command.trim().length === 0 || command.length > 160) {
       throw new GuestApiError(400, "command must be a non-empty string up to 160 characters.");
@@ -2340,397 +2463,32 @@ export function createGuestApi() {
     };
   }
 
-  async function pairdropAction({
-    action = "pair-initiate",
-    cardId = "linux",
-    pairKey = "",
-    roomId = "",
-    message = "",
-    domain = "https://pairdrop.net/",
-  }) {
-    if (typeof cardId !== "string" || !/^[a-z0-9][a-z0-9_-]{0,63}$/.test(cardId)) {
-      throw new GuestApiError(400, "cardId must be a lowercase card identifier.");
-    }
-    const rooms = await readPairDropRooms();
-
-    if (action === "pair-initiate") {
-      let generatedKey = "";
-      for (let attempt = 0; attempt < 16; attempt += 1) {
-        const num = 100000 + Math.floor(Math.random() * 900000);
-        const candidate = String(num);
-        if (!rooms[candidate]) {
-          generatedKey = candidate;
-          break;
-        }
-      }
-      if (!generatedKey) {
-        generatedKey = String(100000 + (Date.now() % 900000));
-      }
-      const roomSecret = createHash("sha256")
-        .update(`pairdrop:${cardId}:${generatedKey}:${Date.now()}`)
-        .digest("hex");
-      rooms[generatedKey] = {
-        type: "pair-key",
-        pairKey: generatedKey,
-        roomSecret,
-        initiator: cardId,
-        peers: [cardId],
-        createdAt: new Date().toISOString(),
-      };
-      await writePairDropRooms(rooms);
-      const currentStatus = await status();
-      return {
-        ...currentStatus,
-        pairdropResult: {
-          action,
-          pairKey: generatedKey,
-          roomSecret,
-          peers: [cardId],
-          remoteTarget: `pairdrop://${generatedKey}`,
-        },
-      };
-    }
-
-    if (action === "pair-join") {
-      const cleanKey = String(pairKey ?? "").trim();
-      if (!/^\d{6}$/.test(cleanKey)) {
-        throw new GuestApiError(400, "pairKey must be a 6-digit numeric code.");
-      }
-      const room = rooms[cleanKey];
-      if (!room) {
-        throw new GuestApiError(404, `PairDrop key ${cleanKey} was not found or has expired.`);
-      }
-      if (!Array.isArray(room.peers)) room.peers = [];
-      if (!room.peers.includes(cardId)) {
-        room.peers.push(cardId);
-      }
-      await writePairDropRooms(rooms);
-      const currentStatus = await status();
-      return {
-        ...currentStatus,
-        pairdropResult: {
-          action,
-          pairKey: cleanKey,
-          roomSecret: room.roomSecret,
-          peers: room.peers,
-          remoteTarget: `pairdrop://${cleanKey}`,
-        },
-      };
-    }
-
-    if (action === "public-room") {
-      let cleanRoom = String(roomId ?? "").trim().toLowerCase();
-      if (!cleanRoom) {
-        const alphabet = "abcdefghijklmnopqrstuvwxyz";
-        cleanRoom = Array.from({ length: 5 }, () => alphabet[Math.floor(Math.random() * 26)]).join("");
-      }
-      if (!/^[a-z]{5}$/.test(cleanRoom)) {
-        throw new GuestApiError(400, "roomId must be a 5-letter lowercase room code (a-z).");
-      }
-      if (!rooms[cleanRoom]) {
-        rooms[cleanRoom] = {
-          type: "public-room",
-          roomId: cleanRoom,
-          peers: [cardId],
-          createdAt: new Date().toISOString(),
-        };
-      } else if (!rooms[cleanRoom].peers.includes(cardId)) {
-        rooms[cleanRoom].peers.push(cardId);
-      }
-      await writePairDropRooms(rooms);
-      const currentStatus = await status();
-      return {
-        ...currentStatus,
-        pairdropResult: {
-          action,
-          roomId: cleanRoom,
-          peers: rooms[cleanRoom].peers,
-          remoteTarget: `pairdrop://${cleanRoom}`,
-        },
-      };
-    }
-
-    if (action === "deeplink") {
-      if (typeof message !== "string" || message.trim().length === 0) {
-        throw new GuestApiError(400, "message is required to build a PairDrop deep-link.");
-      }
-      const cleanDomain =
-        typeof domain === "string" && /^https?:\/\//.test(domain)
-          ? domain.replace(/\/?$/, "/")
-          : "https://pairdrop.net/";
-      const encoded = Buffer.from(message.trim(), "utf8").toString("base64");
-      const url = `${cleanDomain}?base64text=hash#${encoded}`;
-      const currentStatus = await status();
-      return {
-        ...currentStatus,
-        pairdropResult: {
-          action,
-          url,
-        },
-      };
-    }
-
-    throw new GuestApiError(
-      400,
-      "action must be 'pair-initiate', 'pair-join', 'public-room', or 'deeplink'.",
-    );
-  }
-
-  function localSendInfo() {
-    const binPath = path.join(
-      integrationsDir,
-      "network-transfer",
-      "bin",
-      "LocalSend-1.18.2-windows-x86-64.exe",
-    );
-    return {
-      alias: "Post Card Spatial OS",
-      version: "2.1",
-      deviceModel: "Post Card Hypervisor",
-      deviceType: "desktop",
-      fingerprint: createHash("sha256").update(projectDirectory).digest("hex").slice(0, 32),
-      port: 53317,
-      protocol: "http",
-      download: true,
-      binaryAvailable: existsSync(binPath),
-      binaryPath: binPath,
-    };
-  }
-
-  async function localSendPrepareUpload(body) {
-    const senderAlias =
-      typeof body?.info?.alias === "string" && body.info.alias.trim()
-        ? body.info.alias
-            .trim()
-            .toLowerCase()
-            .replace(/[^a-z0-9_-]/g, "-")
-            .replace(/^-+|-+$/g, "")
-            .slice(0, 48) || "localsend-peer"
-        : "localsend-peer";
-    const toCardId =
-      typeof body?.toCardId === "string" && /^[a-z0-9][a-z0-9_-]{0,63}$/.test(body.toCardId)
-        ? body.toCardId
-        : "linux";
-    const filesObj = body?.files && typeof body.files === "object" ? body.files : {};
-    const fileEntries = Object.entries(filesObj);
-    const tokens = {};
-    for (const [fileId] of fileEntries) {
-      tokens[fileId] = `token-${fileId}-${Date.now()}`;
-    }
-
-    const textMessage =
-      typeof body?.text === "string" && body.text.trim()
-        ? body.text.trim().slice(0, 160)
-        : fileEntries.length > 0
-          ? `📡 LocalSend from ${senderAlias}: ${fileEntries.map(([, f]) => f?.fileName ?? "file").join(", ")}`.slice(
-              0,
-              160,
-            )
-          : `📡 LocalSend ping from ${senderAlias}`;
-
-    await sendPaperPlane({
-      fromCardId: senderAlias === toCardId ? `ls-${senderAlias}` : senderAlias,
-      toCardId,
-      os: LINUX_OS,
-      message: textMessage,
-      injectToVm: false,
-    });
-
-    return {
-      sessionId: `ls-session-${Date.now()}`,
-      files: tokens,
-      deliveredToCardId: toCardId,
-    };
-  }
-
-  async function synthesizeGpuPv({
-    cardId = "windows",
-    gpuName = "AUTO",
-    vramPercent = 50,
-  }) {
-    if (typeof cardId !== "string" || !/^[a-z0-9][a-z0-9_-]{0,63}$/.test(cardId)) {
-      throw new GuestApiError(400, "cardId must be a lowercase card identifier.");
-    }
-    const pct = Number(vramPercent);
-    if (!Number.isFinite(pct) || pct < 10 || pct > 100) {
-      throw new GuestApiError(400, "vramPercent must be between 10 and 100.");
-    }
-    const fraction = (pct / 100).toFixed(2);
-    const vmName = `PostCard-${cardId}`;
-    const easyGpuPvDir = path.join(integrationsDir, "hypervisor", "easy-gpu-pv");
-    const commands = [
-      `$VMName = '${vmName}'`,
-      `Add-VMGpuPartitionAdapter -VMName $VMName`,
-      `Set-VMGpuPartitionAdapter -VMName $VMName -MinPartitionVRAM ([math]::round(1000000000 * ${fraction})) -MaxPartitionVRAM ([math]::round(1000000000 * ${fraction})) -OptimalPartitionVRAM ([math]::round(1000000000 * ${fraction}))`,
-      `Set-VM -GuestControlledCacheTypes $true -VMName $VMName`,
-      `Set-VM -LowMemoryMappedIoSpace 1Gb -VMName $VMName`,
-      `Set-VM -HighMemoryMappedIoSpace 32GB -VMName $VMName`,
-    ];
-    const currentStatus = await status();
-    return {
-      ...currentStatus,
-      gpuPvResult: {
-        cardId,
-        vmName,
-        gpuName: String(gpuName || "AUTO"),
-        vramPercent: pct,
-        scriptDirectory: easyGpuPvDir,
-        available: existsSync(easyGpuPvDir),
-        powershellScript: commands.join("\n"),
-      },
-    };
-  }
-
   return async (request, response, next) => {
     const url = new URL(request.url ?? "/", "http://localhost");
-    if (!url.pathname.startsWith("/api/guest/") && !url.pathname.startsWith("/api/stripe/")) {
+    if (!url.pathname.startsWith("/api/guest/")) {
       next();
       return;
     }
 
-    const isStripeRoute = url.pathname.startsWith("/api/stripe/");
     const isNetworkPlaneRoute =
       (request.method === "POST" && url.pathname === "/api/guest/paper-plane/inbox") ||
-      (request.method === "GET" && url.pathname === "/api/guest/paper-plane/catch") ||
-      (request.method === "GET" && url.pathname === "/api/guest/localsend/v2/info") ||
-      (request.method === "POST" && url.pathname === "/api/guest/localsend/v2/prepare-upload");
-    if (!isNetworkPlaneRoute && !isStripeRoute && !isLoopback(request.socket.remoteAddress)) {
+      (request.method === "GET" && url.pathname === "/api/guest/paper-plane/catch");
+    if (!isNetworkPlaneRoute && !isLoopback(request.socket.remoteAddress)) {
       sendJson(response, 403, { error: "Guest controls are available only from this computer." });
       return;
     }
 
     try {
-      if (request.method === "GET" && url.pathname === "/api/stripe/config") {
-        const stripeEnv = loadStripeEnv();
-        sendJson(response, 200, {
-          ok: true,
-          isLive: stripeEnv.isLive,
-          publishableKey: stripeEnv.publishableKey,
-          prices: stripeEnv.prices,
-          tiers: stripeEnv.tiers,
-        });
-        return;
-      }
-
-      if (request.method === "POST" && url.pathname === "/api/stripe/checkout-session") {
-        const body = await readJson(request);
-        const tier = String(body?.tier || "pro").toLowerCase();
-        const interval = String(body?.interval || "month").toLowerCase();
-        const quantity = Math.max(1, parseInt(body?.quantity || "1", 10));
-        const stripeEnv = loadStripeEnv();
-
-        let resolvedPriceId = body?.priceId;
-        if (!resolvedPriceId) {
-          if (tier === "pro") {
-            resolvedPriceId = interval === "year" ? stripeEnv.prices.proAnnual : stripeEnv.prices.proMonthly;
-          } else if (tier === "enterprise") {
-            resolvedPriceId = interval === "year" ? stripeEnv.prices.enterpriseAnnual : stripeEnv.prices.enterpriseMonthly;
-          }
-        }
-
-        const origin = request.headers.origin || `http://${request.headers.host || "localhost:5173"}`;
-        const successUrl = body?.successUrl || `${origin}/?session_id={CHECKOUT_SESSION_ID}&upgrade_success=true&tier=${tier}`;
-        const cancelUrl = body?.cancelUrl || `${origin}/?upgrade_cancelled=true`;
-
-        if (stripeEnv.secretKey && resolvedPriceId && resolvedPriceId.startsWith("price_")) {
-          const formParams = new URLSearchParams();
-          formParams.append("mode", "subscription");
-          formParams.append("payment_method_types[]", "card");
-          formParams.append("line_items[0][price]", resolvedPriceId);
-          formParams.append("line_items[0][quantity]", String(quantity));
-          formParams.append("success_url", successUrl);
-          formParams.append("cancel_url", cancelUrl);
-          formParams.append("metadata[tier]", tier);
-          formParams.append("metadata[product]", "post-card-spatial-os");
-          formParams.append("managed_payments[enabled]", "false");
-
-          const stripeRes = await fetch("https://api.stripe.com/v1/checkout/sessions", {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${stripeEnv.secretKey}`,
-              "Content-Type": "application/x-www-form-urlencoded",
-            },
-            body: formParams.toString(),
-          });
-
-          const sessionData = await stripeRes.json();
-          if (!stripeRes.ok) {
-            throw new GuestApiError(stripeRes.status, sessionData.error?.message || "Failed to create Stripe Checkout Session.");
-          }
-
-          sendJson(response, 200, {
-            ok: true,
-            mode: "live",
-            sessionId: sessionData.id,
-            url: sessionData.url,
-            checkoutUrl: sessionData.url,
-            tier,
-          });
-          return;
-        }
-
-        const simSessionId = `sim_test_${Date.now()}_${tier}`;
-        const simUrl = `${origin}/?session_id=${simSessionId}&upgrade_success=true&tier=${tier}`;
-        sendJson(response, 200, {
-          ok: true,
-          mode: "simulated",
-          sessionId: simSessionId,
-          url: simUrl,
-          checkoutUrl: simUrl,
-          tier,
-          message: "Stripe Demo Simulation: Instant entitlement preview unlocked.",
-        });
-        return;
-      }
-
-      if (request.method === "POST" && url.pathname === "/api/stripe/webhook") {
-        const rawBody = await readRawBody(request);
-        const sigHeader = request.headers["stripe-signature"];
-        const stripeEnv = loadStripeEnv();
-
-        if (stripeEnv.webhookSecret) {
-          const isValid = verifyStripeSignature(rawBody, sigHeader, stripeEnv.webhookSecret);
-          if (!isValid) {
-            throw new GuestApiError(400, "Stripe signature verification failed.");
-          }
-        }
-
-        let event;
-        try {
-          event = JSON.parse(rawBody);
-        } catch {
-          throw new GuestApiError(400, "Invalid webhook JSON payload.");
-        }
-
-        const eventType = event.type;
-        let handled = false;
-        let activeTier = null;
-
-        if (eventType === "checkout.session.completed") {
-          const session = event.data?.object;
-          activeTier = session?.metadata?.tier || "pro";
-          handled = true;
-        } else if (eventType === "customer.subscription.updated") {
-          const subscription = event.data?.object;
-          if (subscription?.status === "active") {
-            activeTier = subscription?.metadata?.tier || "pro";
-          }
-          handled = true;
-        } else if (eventType === "customer.subscription.deleted") {
-          activeTier = "community";
-          handled = true;
-        }
-
-        sendJson(response, 200, {
-          received: true,
-          type: eventType,
-          handled,
-          activeTier,
-        });
-        return;
-      }
       if (request.method === "GET" && url.pathname === "/api/guest/status") {
         sendJson(response, 200, await status());
+        return;
+      }
+      if (request.method === "POST" && url.pathname === "/api/guest/allocate-card-id") {
+        const body = await readJson(request);
+        sendJson(response, 200, await allocateCardId({
+          prefix: body?.prefix,
+          existingIds: body?.existingIds,
+        }));
         return;
       }
       if (request.method === "POST" && url.pathname === "/api/guest/start") {
@@ -2749,10 +2507,17 @@ export function createGuestApi() {
           throw new GuestApiError(400, "cardId must be a lowercase card identifier.");
         }
         const os = body.os ?? LINUX_OS;
-        if (!VALID_GUEST_OSES.has(os)) {
-          throw new GuestApiError(400, "os must be 'linux', 'windows', 'android', 'macos', or 'eve'.");
-        }
+        if (os !== LINUX_OS && os !== WINDOWS_OS) throw new GuestApiError(400, "os must be 'linux' or 'windows'.");
         sendJson(response, 200, await stop(body.cardId, os));
+        return;
+      }
+      if (request.method === "POST" && url.pathname === "/api/guest/delete") {
+        const body = await readJson(request);
+        sendJson(response, 200, await deleteCard({
+          cardId: body?.cardId,
+          os: body?.os ?? LINUX_OS,
+          confirm: body?.confirm,
+        }));
         return;
       }
       if (request.method === "POST" && url.pathname === "/api/guest/restore-checkpoint") {
@@ -2766,9 +2531,7 @@ export function createGuestApi() {
           throw new GuestApiError(400, "cardId must be a lowercase card identifier.");
         }
         const os = body.os ?? LINUX_OS;
-        if (!VALID_GUEST_OSES.has(os)) {
-          throw new GuestApiError(400, "os must be 'linux', 'windows', 'android', 'macos', or 'eve'.");
-        }
+        if (os !== LINUX_OS && os !== WINDOWS_OS) throw new GuestApiError(400, "os must be 'linux' or 'windows'.");
         sendJson(response, 200, await stop(body.cardId, os, true));
         return;
       }
@@ -2861,6 +2624,18 @@ export function createGuestApi() {
             cardId: body?.cardId,
             os: body?.os ?? LINUX_OS,
             message: body?.message,
+          }),
+        );
+        return;
+      }
+      if (request.method === "POST" && url.pathname === "/api/guest/wake") {
+        const body = await readJson(request);
+        sendJson(
+          response,
+          200,
+          await wakeGuestScreen({
+            cardId: body?.cardId,
+            os: body?.os ?? LINUX_OS,
           }),
         );
         return;
@@ -2971,84 +2746,6 @@ export function createGuestApi() {
             command: body?.command,
           }),
         );
-        return;
-      }
-      if (request.method === "POST" && url.pathname === "/api/guest/pairdrop") {
-        const body = await readJson(request);
-        sendJson(
-          response,
-          200,
-          await pairdropAction({
-            action: body?.action ?? "pair-initiate",
-            cardId: body?.cardId ?? "linux",
-            pairKey: body?.pairKey ?? "",
-            roomId: body?.roomId ?? "",
-            message: body?.message ?? "",
-            domain: body?.domain ?? "https://pairdrop.net/",
-          }),
-        );
-        return;
-      }
-      if (request.method === "GET" && url.pathname === "/api/guest/localsend/v2/info") {
-        sendJson(response, 200, localSendInfo());
-        return;
-      }
-      if (request.method === "POST" && url.pathname === "/api/guest/localsend/v2/prepare-upload") {
-        const body = await readJson(request, 64 * 1024);
-        sendJson(response, 200, await localSendPrepareUpload(body));
-        return;
-      }
-      if (request.method === "POST" && url.pathname === "/api/guest/gpu-pv") {
-        const body = await readJson(request);
-        sendJson(
-          response,
-          200,
-          await synthesizeGpuPv({
-            cardId: body?.cardId ?? "windows",
-            gpuName: body?.gpuName ?? "AUTO",
-            vramPercent: body?.vramPercent ?? 50,
-          }),
-        );
-        return;
-      }
-      if (request.method === "POST" && url.pathname === "/api/guest/open-native-viewer") {
-        const body = await readJson(request);
-        const cardId = body?.cardId ?? "linux";
-        const os = body?.os ?? LINUX_OS;
-        const targetGuest = guests.get(guestKey(os, cardId));
-        if (targetGuest) normalizeGuestState(targetGuest);
-        if (!targetGuest || targetGuest.phase !== "running" || !targetGuest.ports?.vncPort) {
-          throw new GuestApiError(409, "Start this guest before opening it in a native VNC viewer.");
-        }
-        const vncEndpoint = `127.0.0.1:${targetGuest.ports.vncPort}`;
-        const viewerCandidates = [
-          process.env.POSTCARD_VNC_VIEWER,
-          "C:\\Program Files\\TurboVNC\\vncviewer.exe",
-          "C:\\Program Files (x86)\\TurboVNC\\vncviewer.exe",
-        ].filter(Boolean);
-        let launched = false;
-        for (const viewerBin of viewerCandidates) {
-          if (existsSync(viewerBin)) {
-            const child = spawn(viewerBin, [vncEndpoint], {
-              detached: true,
-              stdio: "ignore",
-              windowsHide: false,
-            });
-            child.unref();
-            launched = true;
-            break;
-          }
-        }
-        const currentStatus = await status();
-        sendJson(response, 200, {
-          ...currentStatus,
-          nativeViewerResult: {
-            cardId,
-            os,
-            vncEndpoint,
-            launched,
-          },
-        });
         return;
       }
       sendJson(response, 404, { error: "Unknown guest API endpoint." });

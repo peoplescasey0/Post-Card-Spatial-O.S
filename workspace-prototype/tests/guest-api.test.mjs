@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
-import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, test } from "node:test";
 import { createGuestApi } from "../guest-api.mjs";
@@ -9,12 +8,15 @@ import { createGuestApi } from "../guest-api.mjs";
 let server;
 let baseUrl;
 let previousDataDirectory;
+let previousLinuxBase;
 let testDataDirectory;
 
 before(async () => {
   previousDataDirectory = process.env.POSTCARD_VM_DATA;
-  testDataDirectory = await mkdtemp(path.join(tmpdir(), "post-card-guest-api-"));
+  previousLinuxBase = process.env.POSTCARD_LINUX_BASE;
+  testDataDirectory = await mkdtemp(path.join(process.cwd(), ".post-card-guest-api-"));
   process.env.POSTCARD_VM_DATA = testDataDirectory;
+  delete process.env.POSTCARD_LINUX_BASE;
   server = createServer(createGuestApi());
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
@@ -29,6 +31,8 @@ after(async () => {
   } finally {
     if (previousDataDirectory === undefined) delete process.env.POSTCARD_VM_DATA;
     else process.env.POSTCARD_VM_DATA = previousDataDirectory;
+    if (previousLinuxBase === undefined) delete process.env.POSTCARD_LINUX_BASE;
+    else process.env.POSTCARD_LINUX_BASE = previousLinuxBase;
     await rm(testDataDirectory, { recursive: true, force: true });
   }
 });
@@ -125,6 +129,32 @@ test("guest control requires JSON and rejects unknown endpoints", async () => {
   assert.equal(unknownEndpoint.status, 404);
 });
 
+test("wake-screen validates guest identifiers and rejects offline guests", async () => {
+  const invalidCardResponse = await fetch(`${baseUrl}/api/guest/wake`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ cardId: "../outside", os: "linux" }),
+  });
+  assert.equal(invalidCardResponse.status, 400);
+  assert.match((await invalidCardResponse.json()).error, /cardId/);
+
+  const invalidOsResponse = await fetch(`${baseUrl}/api/guest/wake`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ cardId: "studio", os: "haiku" }),
+  });
+  assert.equal(invalidOsResponse.status, 400);
+  assert.match((await invalidOsResponse.json()).error, /os must/);
+
+  const offlineResponse = await fetch(`${baseUrl}/api/guest/wake`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ cardId: "studio", os: "windows" }),
+  });
+  assert.equal(offlineResponse.status, 409);
+  assert.match((await offlineResponse.json()).error, /Start this guest before waking/);
+});
+
 test("force stop is idempotent for an offline card", async () => {
   const response = await fetch(`${baseUrl}/api/guest/force-stop`, {
     method: "POST",
@@ -134,6 +164,182 @@ test("force stop is idempotent for an offline card", async () => {
   assert.equal(response.status, 200);
   const status = await response.json();
   assert.equal(status.guests.some((guest) => guest.cardId === "offline-card"), false);
+});
+
+test("offline card deletion removes only its scoped Linux files and keyed metadata", async () => {
+  const cardId = "delete-offline";
+  const overlayDir = path.join(testDataDirectory, "overlays");
+  const spoolDir = path.join(testDataDirectory, "paper-planes");
+  const masterDir = path.join(testDataDirectory, "master-images");
+  const basePath = path.join(masterDir, "debian-golden.qcow2");
+  const markerPath = path.join(testDataDirectory, "debian-golden.ready.json");
+  await mkdir(overlayDir, { recursive: true });
+  await mkdir(masterDir, { recursive: true });
+  await mkdir(path.join(spoolDir, cardId), { recursive: true });
+  await mkdir(path.join(spoolDir, "keep-card"), { recursive: true });
+  const ownedDisk = path.join(overlayDir, `${cardId}.qcow2`);
+  const ownedCheckpoint = `${ownedDisk}.checkpoint`;
+  await writeFile(ownedDisk, "private overlay fixture");
+  await writeFile(ownedCheckpoint, "private checkpoint fixture");
+  await writeFile(basePath, "shared Debian base fixture");
+  await writeFile(markerPath, JSON.stringify({ version: 1, baseDiskPath: basePath }));
+  await writeFile(path.join(spoolDir, cardId, "latest.txt"), "private spool");
+  await writeFile(path.join(spoolDir, "keep-card", "latest.txt"), "other card spool");
+  await writeFile(
+    path.join(testDataDirectory, "checkpoints.json"),
+    JSON.stringify({ [cardId]: { tag: "saved" }, "keep-card": { tag: "keep" } }),
+  );
+  await writeFile(
+    path.join(testDataDirectory, "network-modes.json"),
+    JSON.stringify({ [cardId]: "airgap", "keep-card": "nat" }),
+  );
+  await writeFile(
+    path.join(testDataDirectory, "memory-profiles.json"),
+    JSON.stringify({ [cardId]: "eco", "keep-card": "balanced" }),
+  );
+  await writeFile(
+    path.join(testDataDirectory, "cpu-profiles.json"),
+    JSON.stringify({ [cardId]: "gaming", "keep-card": "balanced" }),
+  );
+  await writeFile(
+    path.join(testDataDirectory, "paper-planes.json"),
+    JSON.stringify([
+      { id: "to-card", fromCardId: "other", toCardId: cardId },
+      { id: "from-card", fromCardId: cardId, toCardId: "other" },
+      { id: "unrelated", fromCardId: "keep-card", toCardId: "other" },
+    ]),
+  );
+
+  const response = await fetch(`${baseUrl}/api/guest/delete`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ cardId, os: "linux", confirm: true }),
+  });
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).guests.some((guest) => guest.cardId === cardId), false);
+  await assert.rejects(readFile(ownedDisk), { code: "ENOENT" });
+  await assert.rejects(readFile(ownedCheckpoint), { code: "ENOENT" });
+  assert.equal(await readFile(basePath, "utf8"), "shared Debian base fixture");
+  assert.equal(
+    await readFile(markerPath, "utf8"),
+    JSON.stringify({ version: 1, baseDiskPath: basePath }),
+  );
+  await assert.rejects(readFile(path.join(spoolDir, cardId, "latest.txt")), { code: "ENOENT" });
+  assert.equal(await readFile(path.join(spoolDir, "keep-card", "latest.txt"), "utf8"), "other card spool");
+  assert.deepEqual(JSON.parse(await readFile(path.join(testDataDirectory, "checkpoints.json"), "utf8")), {
+    "keep-card": { tag: "keep" },
+  });
+  assert.deepEqual(JSON.parse(await readFile(path.join(testDataDirectory, "network-modes.json"), "utf8")), {
+    "keep-card": "nat",
+  });
+  assert.deepEqual(JSON.parse(await readFile(path.join(testDataDirectory, "memory-profiles.json"), "utf8")), {
+    "keep-card": "balanced",
+  });
+  assert.deepEqual(JSON.parse(await readFile(path.join(testDataDirectory, "cpu-profiles.json"), "utf8")), {
+    "keep-card": "balanced",
+  });
+  assert.deepEqual(JSON.parse(await readFile(path.join(testDataDirectory, "paper-planes.json"), "utf8")), [
+    { id: "unrelated", fromCardId: "keep-card", toCardId: "other" },
+  ]);
+  await rm(path.join(testDataDirectory, "paper-planes.json"), { force: true });
+  await rm(basePath, { force: true });
+  await rm(markerPath, { force: true });
+});
+
+test("confirmed deletion calls the mock force-stop for only the selected running guest first", async () => {
+  const cardId = "running-fixture";
+  const diskPath = path.join(testDataDirectory, "overlays", `${cardId}.qcow2`);
+  await mkdir(path.dirname(diskPath), { recursive: true });
+  await writeFile(diskPath, "running guest disk fixture");
+  const sequence = [];
+  const mockServer = createServer(createGuestApi({
+    isGuestRunning: (selectedCardId, os) => {
+      sequence.push(`check:${os}:${selectedCardId}`);
+      return selectedCardId === cardId && os === "linux";
+    },
+    forceStopGuest: async (selectedCardId, os) => {
+      sequence.push(`stop:${os}:${selectedCardId}`);
+      assert.equal(await readFile(diskPath, "utf8"), "running guest disk fixture");
+    },
+  }));
+  await new Promise((resolve) => mockServer.listen(0, "127.0.0.1", resolve));
+  const address = mockServer.address();
+  try {
+    const response = await fetch(`http://127.0.0.1:${address.port}/api/guest/delete`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ cardId, os: "linux", confirm: true }),
+    });
+    assert.equal(response.status, 200);
+    assert.deepEqual(sequence, [`check:linux:${cardId}`, `stop:linux:${cardId}`]);
+    await assert.rejects(readFile(diskPath), { code: "ENOENT" });
+  } finally {
+    await new Promise((resolve, reject) => {
+      mockServer.close((error) => error ? reject(error) : resolve());
+    });
+  }
+});
+
+test("card deletion validates OS, identifier, and explicit confirmation", async () => {
+  const invalidCases = [
+    { cardId: "..\\outside", os: "linux", confirm: true },
+    { cardId: "valid-card", os: "haiku", confirm: true },
+    { cardId: "valid-card", os: "linux", confirm: false },
+  ];
+  for (const body of invalidCases) {
+    const response = await fetch(`${baseUrl}/api/guest/delete`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    assert.equal(response.status, 400);
+    assert.match((await response.json()).error, /cardId|os must|confirmation/i);
+  }
+});
+
+test("Windows card deletion removes private TPM and UEFI state while preserving shared base and firmware", async () => {
+  const cardId = "windows-owned";
+  const masterDir = path.join(testDataDirectory, "master-images");
+  const windowsRoot = path.join(testDataDirectory, "windows");
+  const disksDir = path.join(windowsRoot, "disks");
+  const firmwareDir = path.join(windowsRoot, "firmware");
+  const tpmDir = path.join(windowsRoot, "tpm");
+  await mkdir(masterDir, { recursive: true });
+  await mkdir(disksDir, { recursive: true });
+  await mkdir(firmwareDir, { recursive: true });
+  await mkdir(path.join(tpmDir, cardId), { recursive: true });
+  await mkdir(path.join(tpmDir, "windows-keep"), { recursive: true });
+  const basePath = path.join(masterDir, "debian-golden.qcow2");
+  const markerPath = path.join(testDataDirectory, "debian-golden.ready.json");
+  const windowsDisk = path.join(disksDir, `${cardId}.qcow2`);
+  const windowsVars = path.join(firmwareDir, `${cardId}-VARS.fd`);
+  const templatePath = path.join(firmwareDir, "OVMF_VARS_TEMPLATE.fd");
+  await writeFile(basePath, "shared Debian base fixture");
+  await writeFile(markerPath, JSON.stringify({ version: 1, baseDiskPath: basePath }));
+  await writeFile(windowsDisk, "private Windows disk fixture");
+  await writeFile(windowsVars, "private UEFI variables fixture");
+  await writeFile(path.join(tpmDir, cardId, "state.bin"), "private TPM fixture");
+  await writeFile(path.join(tpmDir, "windows-keep", "state.bin"), "other TPM fixture");
+  await writeFile(templatePath, "shared firmware template fixture");
+  await writeFile(path.join(disksDir, "windows-keep.qcow2"), "other Windows disk fixture");
+
+  const response = await fetch(`${baseUrl}/api/guest/delete`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ cardId, os: "windows", confirm: true }),
+  });
+  assert.equal(response.status, 200);
+  await assert.rejects(readFile(windowsDisk), { code: "ENOENT" });
+  await assert.rejects(readFile(windowsVars), { code: "ENOENT" });
+  await assert.rejects(readFile(path.join(tpmDir, cardId, "state.bin")), { code: "ENOENT" });
+  assert.equal(await readFile(basePath, "utf8"), "shared Debian base fixture");
+  assert.equal(await readFile(markerPath, "utf8"), JSON.stringify({ version: 1, baseDiskPath: basePath }));
+  assert.equal(await readFile(templatePath, "utf8"), "shared firmware template fixture");
+  assert.equal(await readFile(path.join(disksDir, "windows-keep.qcow2"), "utf8"), "other Windows disk fixture");
+  assert.equal(await readFile(path.join(tpmDir, "windows-keep", "state.bin"), "utf8"), "other TPM fixture");
+  await rm(basePath, { force: true });
+  await rm(markerPath, { force: true });
+  await rm(windowsRoot, { recursive: true, force: true });
 });
 
 test("clone-overlay and reset-overlay manage card disk overlays safely", async () => {
@@ -338,103 +544,4 @@ test("ai-command synthesizes OS-specific SecOps playbooks and snapshot manages T
   const memProfilePayload = await memProfileRes.json();
   assert.equal(memProfilePayload.memoryProfiles["windows-2"], "eco");
   assert.equal(memProfilePayload.maxConcurrentGuests, 6);
-});
-
-test("PairDrop 6-digit pairing, 5-letter public rooms, and pairdrop:// Paper Plane delivery work end-to-end", async () => {
-  const initRes = await fetch(`${baseUrl}/api/guest/pairdrop`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ action: "pair-initiate", cardId: "linux" }),
-  });
-  assert.equal(initRes.status, 200);
-  const initPayload = await initRes.json();
-  const pairKey = initPayload.pairdropResult.pairKey;
-  assert.match(pairKey, /^\d{6}$/);
-  assert.equal(initPayload.pairdropResult.roomSecret.length, 64);
-
-  const joinRes = await fetch(`${baseUrl}/api/guest/pairdrop`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ action: "pair-join", cardId: "windows", pairKey }),
-  });
-  assert.equal(joinRes.status, 200);
-  const joinPayload = await joinRes.json();
-  assert.deepEqual(joinPayload.pairdropResult.peers, ["linux", "windows"]);
-
-  const planeRes = await fetch(`${baseUrl}/api/guest/paper-plane`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      fromCardId: "linux",
-      toCardId: "windows",
-      os: "windows",
-      message: "pairdrop mesh payload",
-      remoteTarget: `pairdrop://${pairKey}`,
-    }),
-  });
-  assert.equal(planeRes.status, 200);
-  const planePayload = await planeRes.json();
-  const lastPlane = planePayload.paperPlanes.at(-1);
-  assert.equal(lastPlane.deliveredToRemote, true);
-  assert.match(lastPlane.remoteDeliveryInfo, new RegExp(`pairdrop://${pairKey}`));
-
-  const winDropped = await readFile(
-    path.join(testDataDirectory, "paper-planes", "windows", "latest.txt"),
-    "utf8",
-  );
-  assert.equal(winDropped, "pairdrop mesh payload\n");
-
-  const roomRes = await fetch(`${baseUrl}/api/guest/pairdrop`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ action: "public-room", cardId: "linux", roomId: "alpha" }),
-  });
-  assert.equal(roomRes.status, 200);
-  const roomPayload = await roomRes.json();
-  assert.equal(roomPayload.pairdropResult.roomId, "alpha");
-
-  const linkRes = await fetch(`${baseUrl}/api/guest/pairdrop`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ action: "deeplink", cardId: "linux", message: "hello pairdrop cli" }),
-  });
-  assert.equal(linkRes.status, 200);
-  const linkPayload = await linkRes.json();
-  assert.match(linkPayload.pairdropResult.url, /\?base64text=hash#/);
-});
-
-test("LocalSend v2 info, prepare-upload, and EVE-OS + Easy-GPU-PV integrations report status cleanly", async () => {
-  const infoRes = await fetch(`${baseUrl}/api/guest/localsend/v2/info`);
-  assert.equal(infoRes.status, 200);
-  const info = await infoRes.json();
-  assert.equal(info.version, "2.1");
-  assert.equal(info.port, 53317);
-
-  const hostPort = new URL(baseUrl).host;
-  const lsPlaneRes = await fetch(`${baseUrl}/api/guest/paper-plane`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      fromCardId: "windows",
-      toCardId: "linux",
-      os: "linux",
-      message: "localsend lan transfer",
-      remoteTarget: `localsend://${hostPort}`,
-    }),
-  });
-  assert.equal(lsPlaneRes.status, 200);
-  const lsPlanePayload = await lsPlaneRes.json();
-  assert.equal(lsPlanePayload.paperPlanes.at(-1).deliveredToRemote, true);
-  assert.equal(lsPlanePayload.integrations.bitvisor, true);
-  assert.equal(lsPlanePayload.integrations.nvidiaOpenShell, true);
-  assert.equal(lsPlanePayload.integrations.pairDrop, true);
-
-  const gpuPvRes = await fetch(`${baseUrl}/api/guest/gpu-pv`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ cardId: "windows", gpuName: "RTX-4090", vramPercent: 50 }),
-  });
-  assert.equal(gpuPvRes.status, 200);
-  const gpuPvPayload = await gpuPvRes.json();
-  assert.match(gpuPvPayload.gpuPvResult.powershellScript, /Add-VMGpuPartitionAdapter/);
 });

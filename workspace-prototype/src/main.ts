@@ -16,6 +16,7 @@ type GuestStatus = {
   bootMode?: GuestBootMode;
   error?: string;
   websocketPort: number | null;
+  qmpPort: number | null;
   serialPort?: number | null;
   serialOutput?: string;
   memoryMb?: number;
@@ -58,7 +59,8 @@ type GuestServiceStatus = {
   baseReady: boolean;
   baseDiskExists: boolean;
   baseDiskPath: string;
-  pairDropRooms?: Record<string, { pairKey?: string; roomId?: string; peers?: string[] }>;
+  deletedCardIds: string[];
+  allocatedCardId?: string;
   preparedCardIds: string[];
   preparedWindowsCardIds: string[];
   installedWindowsCardIds?: string[];
@@ -72,15 +74,6 @@ type GuestServiceStatus = {
   aiResult?: AiCommandResult;
   swarmResult?: { sourceCardId: string; os: string; createdCardIds: string[] };
   serialExecResult?: { cardId: string; os: string; command: string; output: string };
-  pairdropResult?: {
-    action: string;
-    pairKey?: string;
-    roomId?: string;
-    roomSecret?: string;
-    peers?: string[];
-    remoteTarget?: string;
-    url?: string;
-  };
 };
 
 type SystemCard = {
@@ -102,6 +95,7 @@ type SystemCard = {
   clonedFrom?: string;
   liveCanvas?: HTMLCanvasElement;
   serialOutput?: string;
+  removable?: boolean;
   layoutOffset: THREE.Vector3;
   layoutPosition: THREE.Vector3;
   orbitAngle: number;
@@ -133,42 +127,47 @@ const FACET_META: Record<
     badge: "01 / 06",
     header: "POST CARD OS",
     shortLabel: "display",
-    accent: "#8a909e",
+    accent: "#62d8d0",
   },
   back: {
     badge: "02 / 06",
     header: "CARD SETTINGS",
     shortLabel: "settings",
-    accent: "#FFB81C",
+    accent: "#c5a9ff",
   },
   left: {
     badge: "03 / 06",
     header: "SECURITY & ISOLATION",
     shortLabel: "security",
-    accent: "#8a909e",
+    accent: "#8caef4",
   },
   right: {
     badge: "04 / 06",
     header: "PAPER PLANES",
     shortLabel: "paper planes",
-    accent: "#FFB81C",
+    accent: "#f0a7a3",
   },
   top: {
     badge: "05 / 06",
     header: "QUICK ACTIONS",
     shortLabel: "quick actions",
-    accent: "#8a909e",
+    accent: "#9b9eff",
   },
   bottom: {
     badge: "06 / 06",
     header: "TELEMETRY & PORTS",
     shortLabel: "telemetry",
-    accent: "#FFB81C",
+    accent: "#77d2e8",
   },
 };
 
 const container = document.querySelector<HTMLDivElement>("#scene");
+const studioView = document.querySelector<HTMLElement>("#studio-view");
 const facetBar = document.querySelector<HTMLElement>("#facet-bar");
+const roomCardNav = document.querySelector<HTMLElement>("#room-card-nav");
+const roomCardSummary = document.querySelector<HTMLElement>("#room-card-summary");
+const roomSelectedName = document.querySelector<HTMLElement>("#room-selected-name");
+const roomSelectedStatus = document.querySelector<HTMLElement>("#room-selected-status");
 const secopsToggle = document.querySelector<HTMLButtonElement>("#secops-toggle");
 const omniForm = document.querySelector<HTMLFormElement>("#omni-form");
 const omniInput = document.querySelector<HTMLInputElement>("#omni-input");
@@ -203,6 +202,21 @@ const graphicsProfileSelect = document.querySelector<HTMLSelectElement>("#graphi
 const performanceGpuInfo = document.querySelector<HTMLElement>("#performance-gpu-info");
 const performanceNotice = document.querySelector<HTMLElement>("#performance-notice");
 const helpDialog = document.querySelector<HTMLDialogElement>("#help-dialog");
+const profileControl = document.querySelector<HTMLElement>("#profile-control");
+const profileButton = document.querySelector<HTMLButtonElement>("#profile-button");
+const profilePopover = document.querySelector<HTMLElement>("#profile-popover");
+const profileMenuName = document.querySelector<HTMLElement>("#profile-menu-name");
+const profileMenuInitials = document.querySelector<HTMLElement>("#profile-menu-initials");
+const profileEditOption = document.querySelector<HTMLButtonElement>("#profile-edit-option");
+const profilePerformanceOption = document.querySelector<HTMLButtonElement>("#profile-performance-option");
+const profileHelpOption = document.querySelector<HTMLButtonElement>("#profile-help-option");
+const profileAboutOption = document.querySelector<HTMLButtonElement>("#profile-about-option");
+const profileEditDialog = document.querySelector<HTMLDialogElement>("#profile-edit-dialog");
+const profileEditForm = document.querySelector<HTMLFormElement>("#profile-edit-form");
+const profileNameInput = document.querySelector<HTMLInputElement>("#profile-name-input");
+const profileInitialsInput = document.querySelector<HTMLInputElement>("#profile-initials-input");
+const profileEditError = document.querySelector<HTMLElement>("#profile-edit-error");
+const profileAboutDialog = document.querySelector<HTMLDialogElement>("#profile-about-dialog");
 const guestDialog = document.querySelector<HTMLDialogElement>("#guest-dialog");
 const guestDisplay = document.querySelector<HTMLDivElement>("#guest-display");
 const guestState = document.querySelector<HTMLParagraphElement>("#guest-state");
@@ -215,25 +229,29 @@ const guestBootDiskButton = document.querySelector<HTMLButtonElement>("#guest-bo
 const guestCloneCardButton = document.querySelector<HTMLButtonElement>("#guest-clone-card");
 const guestResetOverlayButton = document.querySelector<HTMLButtonElement>("#guest-reset-overlay");
 const guestInjectPlaneButton = document.querySelector<HTMLButtonElement>("#guest-inject-plane");
+const guestWakeScreenButton = document.querySelector<HTMLButtonElement>("#guest-wake-screen");
 const guestSavepointButton = document.querySelector<HTMLButtonElement>("#guest-savepoint");
 const guestRewindButton = document.querySelector<HTMLButtonElement>("#guest-rewind");
 const guestRestoreCheckpointButton = document.querySelector<HTMLButtonElement>("#guest-restore-checkpoint");
 const guestShutdownButton = document.querySelector<HTMLButtonElement>("#guest-shutdown");
 const guestForceStopButton = document.querySelector<HTMLButtonElement>("#guest-force-stop");
 const toast = document.querySelector<HTMLDivElement>("#toast");
-const tourButton = document.querySelector<HTMLButtonElement>("#tour-button");
-const recordTourButton = document.querySelector<HTMLButtonElement>("#record-tour-button");
-const selectedTier = document.querySelector<HTMLSpanElement>("#selected-tier");
-const tourOverlay = document.querySelector<HTMLDivElement>("#tour-overlay");
-const tourStepBadge = document.querySelector<HTMLSpanElement>("#tour-step-badge");
-const tourStatusLabel = document.querySelector<HTMLSpanElement>("#tour-status-label");
-const tourStepTitle = document.querySelector<HTMLDivElement>("#tour-step-title");
-const tourStepDesc = document.querySelector<HTMLDivElement>("#tour-step-desc");
-const tourProgressFill = document.querySelector<HTMLDivElement>("#tour-progress-fill");
+const trashTarget = document.querySelector<HTMLDivElement>("#trash-target");
+const trashDialog = document.querySelector<HTMLDialogElement>("#trash-dialog");
+const trashCardName = document.querySelector<HTMLElement>("#trash-card-name");
+const trashCardId = document.querySelector<HTMLElement>("#trash-card-id");
+const trashError = document.querySelector<HTMLElement>("#trash-error");
+const trashCancelButton = document.querySelector<HTMLButtonElement>("#trash-cancel");
+const trashConfirmButton = document.querySelector<HTMLButtonElement>("#trash-confirm");
 
 if (
   !container ||
+  !studioView ||
   !facetBar ||
+  !roomCardNav ||
+  !roomCardSummary ||
+  !roomSelectedName ||
+  !roomSelectedStatus ||
   !secopsToggle ||
   !omniForm ||
   !omniInput ||
@@ -266,6 +284,21 @@ if (
   !performanceGpuInfo ||
   !performanceNotice ||
   !helpDialog ||
+  !profileControl ||
+  !profileButton ||
+  !profilePopover ||
+  !profileMenuName ||
+  !profileMenuInitials ||
+  !profileEditOption ||
+  !profilePerformanceOption ||
+  !profileHelpOption ||
+  !profileAboutOption ||
+  !profileEditDialog ||
+  !profileEditForm ||
+  !profileNameInput ||
+  !profileInitialsInput ||
+  !profileEditError ||
+  !profileAboutDialog ||
   !guestDialog ||
   !guestDisplay ||
   !guestState ||
@@ -278,36 +311,31 @@ if (
   !guestCloneCardButton ||
   !guestResetOverlayButton ||
   !guestInjectPlaneButton ||
+  !guestWakeScreenButton ||
   !guestSavepointButton ||
   !guestRewindButton ||
   !guestShutdownButton ||
   !guestForceStopButton ||
   !toast ||
-  !tourButton ||
-  !recordTourButton ||
-  !selectedTier ||
-  !tourOverlay ||
-  !tourStepBadge ||
-  !tourStatusLabel ||
-  !tourStepTitle ||
-  !tourStepDesc ||
-  !tourProgressFill
+  !trashTarget ||
+  !trashDialog ||
+  !trashCardName ||
+  !trashCardId ||
+  !trashError ||
+  !trashCancelButton ||
+  !trashConfirmButton
 ) {
   throw new Error("Workspace UI is missing a required element.");
 }
 
 const sceneElement = container;
+const studioViewElement = studioView;
 const facetBarElement = facetBar;
+const roomCardNavElement = roomCardNav;
+const roomCardSummaryElement = roomCardSummary;
+const roomSelectedNameElement = roomSelectedName;
+const roomSelectedStatusElement = roomSelectedStatus;
 const secopsToggleElement = secopsToggle;
-const tourButtonElement = tourButton;
-const recordTourButtonElement = recordTourButton;
-const selectedTierElement = selectedTier;
-const tourOverlayElement = tourOverlay;
-const tourStepBadgeElement = tourStepBadge;
-const tourStatusLabelElement = tourStatusLabel;
-const tourStepTitleElement = tourStepTitle;
-const tourStepDescElement = tourStepDesc;
-const tourProgressFillElement = tourProgressFill;
 const omniFormElement = omniForm;
 const omniInputElement = omniInput;
 const omniChipsElement = omniChips;
@@ -327,11 +355,33 @@ const cpuProfileSelectElement = cpuProfileSelect;
 const graphicsProfileSelectElement = graphicsProfileSelect;
 const performanceGpuInfoElement = performanceGpuInfo;
 const performanceNoticeElement = performanceNotice;
+const profileControlElement = profileControl;
+const profileButtonElement = profileButton;
+const profilePopoverElement = profilePopover;
+const profileMenuNameElement = profileMenuName;
+const profileMenuInitialsElement = profileMenuInitials;
+const profileEditOptionElement = profileEditOption;
+const profilePerformanceOptionElement = profilePerformanceOption;
+const profileHelpOptionElement = profileHelpOption;
+const profileAboutOptionElement = profileAboutOption;
+const profileEditDialogElement = profileEditDialog;
+const profileEditFormElement = profileEditForm;
+const profileNameInputElement = profileNameInput;
+const profileInitialsInputElement = profileInitialsInput;
+const profileEditErrorElement = profileEditError;
+const profileAboutDialogElement = profileAboutDialog;
 const cloneButtonElement = cloneButton;
 const resetButtonElement = resetButton;
 const recipientSelectElement = recipientSelect;
 const remoteTargetInputElement = remoteTargetInput;
 const toastElement = toast;
+const trashTargetElement = trashTarget;
+const trashDialogElement = trashDialog;
+const trashCardNameElement = trashCardName;
+const trashCardIdElement = trashCardId;
+const trashErrorElement = trashError;
+const trashCancelButtonElement = trashCancelButton;
+const trashConfirmButtonElement = trashConfirmButton;
 const shareDialogElement = shareDialog;
 const messageInputElement = messageInput;
 const guestDisplayElement = guestDisplay;
@@ -346,28 +396,21 @@ const guestBootDiskButtonElement = guestBootDiskButton;
 const guestCloneCardButtonElement = guestCloneCardButton;
 const guestResetOverlayButtonElement = guestResetOverlayButton;
 const guestInjectPlaneButtonElement = guestInjectPlaneButton;
+const guestWakeScreenButtonElement = guestWakeScreenButton;
 const guestSavepointButtonElement = guestSavepointButton;
 const guestRewindButtonElement = guestRewindButton;
 const guestShutdownButtonElement = guestShutdownButton;
 const guestForceStopButtonElement = guestForceStopButton;
 
-const pricingDialogElement = document.querySelector<HTMLDialogElement>("#pricing-dialog");
-const pricingButtonElement = document.querySelector<HTMLButtonElement>("#pricing-button");
-const cancelPricingElement = document.querySelector<HTMLButtonElement>("#cancel-pricing");
-const intervalMonthlyElement = document.querySelector<HTMLInputElement>("#pricing-interval-monthly");
-const intervalAnnualElement = document.querySelector<HTMLInputElement>("#pricing-interval-annual");
-const proPriceDisplayElement = document.querySelector<HTMLDivElement>("#pro-price-display");
-const enterprisePriceDisplayElement = document.querySelector<HTMLDivElement>("#enterprise-price-display");
-
 const scene = new THREE.Scene();
-scene.background = new THREE.Color("#07090E");
-scene.fog = new THREE.FogExp2("#07090E", 0.026);
+scene.background = new THREE.Color("#0a1020");
+scene.fog = new THREE.FogExp2("#101a30", 0.022);
 
 const camera = new THREE.PerspectiveCamera(37, 1, 0.1, 100);
 camera.position.set(0, 4.48, 17.2);
 camera.lookAt(0, 2.42, -0.25);
 
-const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, preserveDrawingBuffer: true });
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.75));
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -382,9 +425,9 @@ renderer.domElement.setAttribute(
 );
 container.appendChild(renderer.domElement);
 
-scene.add(new THREE.HemisphereLight("#f4f5f7", "#0d111a", 1.65));
-const keyLight = new THREE.DirectionalLight("#FFB81C", 2.75);
-keyLight.position.set(-5, 10, 7);
+scene.add(new THREE.HemisphereLight("#d9e7ff", "#11162d", 1.35));
+const keyLight = new THREE.DirectionalLight("#8fe3e2", 2.2);
+keyLight.position.set(-4, 9, 6);
 keyLight.castShadow = true;
 keyLight.shadow.mapSize.set(1024, 1024);
 keyLight.shadow.camera.left = -11;
@@ -393,19 +436,22 @@ keyLight.shadow.camera.top = 11;
 keyLight.shadow.camera.bottom = -7;
 keyLight.shadow.bias = -0.0003;
 scene.add(keyLight);
-const fillLight = new THREE.PointLight("#8a909e", 26, 24);
+const fillLight = new THREE.PointLight("#a89bff", 34, 26);
 fillLight.position.set(6, 5, -5);
 scene.add(fillLight);
-const rimLight = new THREE.PointLight("#FFB81C", 28, 22);
+const rimLight = new THREE.PointLight("#54d6cf", 25, 24);
 rimLight.position.set(-6, 4, 2);
+const duskLight = new THREE.PointLight("#e495a4", 12, 18);
+duskLight.position.set(0, 7, -7);
+scene.add(duskLight);
 scene.add(rimLight);
 
 const floor = new THREE.Mesh(
   new THREE.PlaneGeometry(200, 200),
   new THREE.MeshStandardMaterial({
-    color: "#0D111A",
-    roughness: 0.86,
-    metalness: 0.22,
+    color: "#10172b",
+    roughness: 0.82,
+    metalness: 0.28,
   }),
 );
 floor.rotation.x = -Math.PI / 2;
@@ -415,9 +461,9 @@ scene.add(floor);
 
 // Grand Architectural Observatory Window overlooking the Cosmic Starfield
 const studioWallMat = new THREE.MeshStandardMaterial({
-  color: "#0D111A",
-  roughness: 0.92,
-  metalness: 0.18,
+  color: "#111a31",
+  roughness: 0.88,
+  metalness: 0.24,
 });
 // Flanking architectural walls
 const leftWall = new THREE.Mesh(new THREE.PlaneGeometry(10.5, 14), studioWallMat);
@@ -437,7 +483,7 @@ scene.add(leftWall, rightWall, lowerSill, upperBulkhead);
 
 // Tinted Observatory Window Glass Pane
 const glassMaterial = new THREE.MeshPhysicalMaterial({
-  color: "#0d111a",
+  color: "#121a35",
   transparent: true,
   opacity: 0.28,
   roughness: 0.14,
@@ -450,14 +496,14 @@ scene.add(windowGlass);
 
 // Observatory Window Mullions & Framing
 const frameMat = new THREE.MeshStandardMaterial({
-  color: "#1e2736",
+  color: "#273450",
   metalness: 0.74,
   roughness: 0.32,
 });
 const frameGoldMat = new THREE.MeshStandardMaterial({
-  color: "#FFB81C",
-  emissive: "#FFB81C",
-  emissiveIntensity: 0.35,
+  color: "#63d9d2",
+  emissive: "#4ecac8",
+  emissiveIntensity: 0.28,
   metalness: 0.85,
   roughness: 0.25,
 });
@@ -486,13 +532,13 @@ const starCount = 650;
 const starPositions = new Float32Array(starCount * 3);
 const starColors = new Float32Array(starCount * 3);
 const starPalette = [
-  new THREE.Color("#ffffff"),
-  new THREE.Color("#f4f5f7"),
-  new THREE.Color("#f4f5f7"),
-  new THREE.Color("#8a909e"),
-  new THREE.Color("#f4f5f7"),
-  new THREE.Color("#FFB81C"),
-  new THREE.Color("#FFB81C"),
+  new THREE.Color("#e6f4ff"),
+  new THREE.Color("#d9e7ff"),
+  new THREE.Color("#f4eaff"),
+  new THREE.Color("#94dfdc"),
+  new THREE.Color("#d9e7ff"),
+  new THREE.Color("#c6a9ff"),
+  new THREE.Color("#e49aa4"),
 ];
 
 for (let i = 0; i < starCount; i++) {
@@ -513,7 +559,7 @@ const starGeometry = new THREE.BufferGeometry();
 starGeometry.setAttribute("position", new THREE.BufferAttribute(starPositions, 3));
 starGeometry.setAttribute("color", new THREE.BufferAttribute(starColors, 3));
 const starMaterial = new THREE.PointsMaterial({
-  size: 0.088,
+  size: 0.075,
   vertexColors: true,
   transparent: true,
   opacity: 0.95,
@@ -524,9 +570,9 @@ scene.add(cosmicStarfield);
 
 // Distant soft nebula glow in deep space
 for (const [x, y, z, color, opacity, radius] of [
-  [-4.5, 7.2, -22, "#8a909e", 0.07, 7.5],
-  [5.2, 5.8, -24, "#FFB81C", 0.06, 8.2],
-  [0.2, 8.8, -25, "#8a909e", 0.05, 6.8],
+  [-4.5, 7.2, -22, "#6279d8", 0.09, 8.2],
+  [5.2, 5.8, -24, "#67d8d1", 0.065, 8.2],
+  [0.2, 8.8, -25, "#d08bb8", 0.055, 7.6],
 ] as const) {
   const nebulaGlow = new THREE.Mesh(
     new THREE.CircleGeometry(radius, 48),
@@ -543,15 +589,15 @@ for (const [x, y, z, color, opacity, radius] of [
 
 const dais = new THREE.Mesh(
   new THREE.CylinderGeometry(7.7, 8.05, 0.2, 96, 1, false),
-  new THREE.MeshStandardMaterial({ color: "#0d111a", metalness: 0.48, roughness: 0.46 }),
+  new THREE.MeshStandardMaterial({ color: "#111a30", metalness: 0.58, roughness: 0.4 }),
 );
 dais.position.set(0, -0.015, -0.25);
 dais.receiveShadow = true;
 dais.castShadow = true;
 scene.add(dais);
 for (const [radius, tube, color] of [
-  [7.74, 0.035, "#FFB81C"],
-  [7.48, 0.012, "#262A33"],
+  [7.74, 0.028, "#65d9d3"],
+  [7.48, 0.012, "#384568"],
 ] as const) {
   const ring = new THREE.Mesh(
     new THREE.TorusGeometry(radius, tube, 8, 128),
@@ -565,9 +611,9 @@ for (const [radius, tube, color] of [
 const glowDisc = new THREE.Mesh(
   new THREE.CircleGeometry(6.2, 80),
   new THREE.MeshBasicMaterial({
-    color: "#FFB81C",
+    color: "#67d7d0",
     transparent: true,
-    opacity: 0.08,
+    opacity: 0.06,
     depthWrite: false,
   }),
 );
@@ -577,8 +623,8 @@ scene.add(glowDisc);
 
 // Studio Furniture & Architectural Details (G-III Twin-Star Sanctuary)
 for (const [innerR, tubeR, ringColor, emissiveHex] of [
-  [4.85, 0.018, "#262A33", "#1E2736"],
-  [2.95, 0.015, "#FFB81C", "#B45309"],
+  [4.85, 0.018, "#384568", "#293957"],
+  [2.95, 0.014, "#b9a2ff", "#7666b8"],
 ] as const) {
   const innerRing = new THREE.Mesh(
     new THREE.TorusGeometry(innerR, tubeR, 8, 96),
@@ -597,9 +643,9 @@ for (const [innerR, tubeR, ringColor, emissiveHex] of [
 
 // 12 radial turntable compass ticks on the dais floor
 const tickMaterial = new THREE.MeshStandardMaterial({
-  color: "#FFB81C",
-  emissive: "#FFB81C",
-  emissiveIntensity: 0.45,
+  color: "#77d2e8",
+  emissive: "#58c5d6",
+  emissiveIntensity: 0.34,
 });
 for (let i = 0; i < 12; i++) {
   const angle = (i * Math.PI) / 6;
@@ -611,7 +657,7 @@ for (let i = 0; i < 12; i++) {
 
 // Twin Neural Monolith Racks flanking the back studio corners
 const monolithBodyMat = new THREE.MeshStandardMaterial({
-  color: "#0d111a",
+  color: "#121b32",
   metalness: 0.62,
   roughness: 0.34,
 });
@@ -634,21 +680,21 @@ for (const side of [-1, 1] as const) {
   const consoleStrip = new THREE.Mesh(
     new THREE.BoxGeometry(1.9, 0.035, 0.04),
     new THREE.MeshStandardMaterial({
-      color: side < 0 ? "#8a909e" : "#FFB81C",
-      emissive: side < 0 ? "#8a909e" : "#FFB81C",
-      emissiveIntensity: 0.9,
+      color: side < 0 ? "#68d7d2" : "#a99afa",
+      emissive: side < 0 ? "#68d7d2" : "#a99afa",
+      emissiveIntensity: 0.58,
     }),
   );
   consoleStrip.position.set(side * -1.85, 0.72, 0.87);
   towerGroup.add(consoleStrip);
 
   for (let row = 0; row < 7; row++) {
-    const isAmber = (row + (side > 0 ? 1 : 0)) % 2 === 0;
-    const ledColor = isAmber ? "#FFB81C" : "#8a909e";
+    const isCyan = (row + (side > 0 ? 1 : 0)) % 2 === 0;
+    const ledColor = isCyan ? "#69d8d2" : "#a99afa";
     const ledMat = new THREE.MeshStandardMaterial({
       color: ledColor,
       emissive: ledColor,
-      emissiveIntensity: 0.85,
+      emissiveIntensity: 0.62,
     });
     monolithLedMats.push(ledMat);
     const blade = new THREE.Mesh(new THREE.BoxGeometry(1.02, 0.045, 0.04), ledMat);
@@ -666,9 +712,9 @@ const overheadHaloGroup = new THREE.Group();
 const outerHalo = new THREE.Mesh(
   new THREE.TorusGeometry(5.4, 0.045, 12, 96),
   new THREE.MeshStandardMaterial({
-    color: "#1e2736",
-    emissive: "#8a909e",
-    emissiveIntensity: 0.35,
+    color: "#344360",
+    emissive: "#79d7dc",
+    emissiveIntensity: 0.42,
     metalness: 0.82,
     roughness: 0.22,
   }),
@@ -679,9 +725,9 @@ overheadHaloGroup.add(outerHalo);
 const innerHalo = new THREE.Mesh(
   new THREE.TorusGeometry(3.6, 0.03, 12, 96),
   new THREE.MeshStandardMaterial({
-    color: "#14161b",
-    emissive: "#FFB81C",
-    emissiveIntensity: 0.55,
+    color: "#1c2440",
+    emissive: "#b49eff",
+    emissiveIntensity: 0.38,
     metalness: 0.82,
     roughness: 0.22,
   }),
@@ -695,8 +741,8 @@ scene.add(overheadHaloGroup);
 const moteCount = 56;
 const motePositions = new Float32Array(moteCount * 3);
 const moteColors = new Float32Array(moteCount * 3);
-const emeraldColor = new THREE.Color("#8a909e");
-const amberColor = new THREE.Color("#FFB81C");
+const emeraldColor = new THREE.Color("#77d7d1");
+const amberColor = new THREE.Color("#b69eff");
 for (let i = 0; i < moteCount; i++) {
   const angle = (i / moteCount) * Math.PI * 2;
   const radius = 5.2 + (i % 7) * 0.65;
@@ -757,7 +803,36 @@ const dragPoint = new THREE.Vector3();
 const cards: SystemCard[] = [];
 let selectedCard: SystemCard | null = null;
 let selectedIndex = 2;
-let cloneCounter = 1;
+const CARD_STATE_STORAGE_KEY = "postcard.os.room-state.v1";
+const protectedExistingCardIds = new Set(["windows-5"]);
+const loadedCardState = (() => {
+  try {
+    const raw = window.localStorage.getItem(CARD_STATE_STORAGE_KEY);
+    if (!raw) return { deletedIds: [] as string[], nextId: 1 };
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return { deletedIds: [] as string[], nextId: 1 };
+    const value = parsed as { deletedIds?: unknown; nextId?: unknown };
+    return {
+      deletedIds: Array.isArray(value.deletedIds)
+        ? value.deletedIds.filter(
+            (id): id is string => typeof id === "string" && /^[a-z0-9][a-z0-9_-]{0,63}$/.test(id),
+          )
+        : [],
+      nextId: typeof value.nextId === "number" && Number.isSafeInteger(value.nextId) && value.nextId > 0
+        ? value.nextId
+        : 1,
+    };
+  } catch {
+    return { deletedIds: [] as string[], nextId: 1 };
+  }
+})();
+// Older versions wrote this list before the delete request completed. Keep those
+// IDs reserved, but only the guest service's durable registry is authoritative
+// enough to hide a card after a reload.
+const legacyDeletedCardIds = new Set(loadedCardState.deletedIds);
+const deletedCardIds = new Set<string>();
+let nextCardIdNumber = loadedCardState.nextId;
+let cardIdRegistryReady = false;
 let guestRfb: RFB | undefined;
 let guestServiceStatus: GuestServiceStatus | undefined;
 let guestTargetCardId: string | undefined;
@@ -766,28 +841,6 @@ let secOpsMode = false;
 let cardZoomed = false;
 let studioGraphicsProfile: GraphicsProfile = "balanced";
 const cameraLookTarget = new THREE.Vector3(0, 2.42, -0.25);
-
-type MonetizationTier = "COMMUNITY" | "PRO" | "ENTERPRISE";
-
-function getCardTier(card: SystemCard): MonetizationTier {
-  if (card.id === "postcard-os" || card.id === "kali-red") return "ENTERPRISE";
-  if (card.id === "windows" || card.id === "macos") return "PRO";
-  return "COMMUNITY";
-}
-
-let tourActive = false;
-let tourStartTime = 0;
-let tourStage = 0;
-let isTourRecording = false;
-let mediaRecorder: MediaRecorder | null = null;
-let recordedChunks: Blob[] = [];
-
-let tourCameraOverridePos: THREE.Vector3 | null = null;
-let tourCameraOverrideLook: THREE.Vector3 | null = null;
-
-let tourPaperPlaneFired = false;
-let tourPerformanceSwitched = false;
-let tourSecOpsSwitched = false;
 const rolodexRadius = 8.4;
 const rolodexAngleStep = 0.44;
 const INITIAL_CARD_INDEX = 2; // Linux · Dev Space starts in center
@@ -815,15 +868,107 @@ let drag:
       card?: SystemCard;
       pointerId: number;
       mode: "carousel" | "move" | "flip";
+      flipAxis?: "horizontal" | "vertical";
       offset?: THREE.Vector3;
       startX: number;
       startY: number;
       lastX: number;
       lastY: number;
+      lastMoveX: number;
+      lastMoveY: number;
+      lastMoveAt: number;
+      lastMoveSpeed: number;
       moved: boolean;
       hitUv?: THREE.Vector2;
+      originalPosition?: THREE.Vector3;
+      originalRotation?: THREE.Euler;
+      originalScale?: THREE.Vector3;
+      originalLayoutOffset?: THREE.Vector3;
+      originalSelectedCard?: SystemCard | null;
+      originalTurntableAngle?: number;
+      originalTargetTurntableAngle?: number;
+      originalCardZoomed?: boolean;
     }
   | undefined;
+type TrashRestoreState = {
+  card: SystemCard;
+  position: THREE.Vector3;
+  rotation: THREE.Euler;
+  scale: THREE.Vector3;
+  layoutOffset: THREE.Vector3;
+  targetRotation: number;
+  tiltX: number;
+  tiltZ: number;
+  selectedCard: SystemCard | null;
+  turntableAngle: number;
+  targetTurntableAngle: number;
+  cardZoomed: boolean;
+};
+type TrashFlight = {
+  card: SystemCard;
+  from: THREE.Vector3;
+  to: THREE.Vector3;
+  fromScale: THREE.Vector3;
+  toScale: THREE.Vector3;
+  fromRotation: THREE.Euler;
+  toRotation: THREE.Euler;
+  startedAt: number;
+  duration: number;
+  returning: boolean;
+  restoreState: TrashRestoreState;
+};
+let pendingTrash: TrashRestoreState | undefined;
+let trashFlight: TrashFlight | undefined;
+let trashDeleteInProgress = false;
+let trashReturnFocus: HTMLElement | undefined;
+let reconcilingDeletedCards = false;
+
+function persistCardState(): boolean {
+  try {
+    window.localStorage.setItem(
+      CARD_STATE_STORAGE_KEY,
+      JSON.stringify({
+        deletedIds: [...new Set([...legacyDeletedCardIds, ...deletedCardIds])].sort(),
+        nextId: nextCardIdNumber,
+      }),
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function allocateCardId(prefix: string): Promise<string> {
+  if (!cardIdRegistryReady) {
+    updateGuestCardStatus(await requestGuestApi("/api/guest/status"));
+  }
+  const existingIds = [
+    ...new Set([
+      ...cards.map((card) => card.id),
+      ...protectedExistingCardIds,
+      ...legacyDeletedCardIds,
+      ...deletedCardIds,
+      ...(guestServiceStatus?.preparedCardIds ?? []),
+      ...(guestServiceStatus?.preparedWindowsCardIds ?? []),
+      ...(guestServiceStatus?.guests.map((guest) => guest.cardId) ?? []),
+    ]),
+  ];
+  const status = await requestGuestApi("/api/guest/allocate-card-id", {
+    prefix,
+    existingIds,
+  });
+  if (!status.allocatedCardId) {
+    throw new Error("The guest service did not reserve a new card ID.");
+  }
+  updateGuestCardStatus(status);
+  const numericSuffix = Number(status.allocatedCardId.match(/-(\d+)$/)?.[1]);
+  if (Number.isSafeInteger(numericSuffix)) {
+    nextCardIdNumber = Math.max(nextCardIdNumber, numericSuffix + 1);
+    persistCardState();
+  }
+  return status.allocatedCardId;
+}
+
 let toastTimeout = 0;
 let airplane:
   | {
@@ -839,13 +984,6 @@ let airplane:
       message: string;
     }
   | undefined;
-const reducedMotionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
-let reduceMotion = reducedMotionQuery.matches;
-
-reducedMotionQuery.addEventListener("change", (event) => {
-  reduceMotion = event.matches;
-});
-
 const airplaneGeometry = new THREE.BufferGeometry();
 airplaneGeometry.setAttribute(
   "position",
@@ -872,21 +1010,30 @@ const airplaneMaterial = new THREE.MeshStandardMaterial({
   side: THREE.DoubleSide,
 });
 
+// Reconcile durable deletion receipts before rendering built-in cards, so a
+// successful delete cannot flash back into the room while startup catches up.
+try {
+  const startupStatus = await requestGuestApi("/api/guest/status");
+  guestServiceStatus = startupStatus;
+  cardIdRegistryReady = true;
+  for (const id of startupStatus.deletedCardIds) {
+    legacyDeletedCardIds.delete(id);
+    deletedCardIds.add(id);
+  }
+  persistCardState();
+} catch {
+  // Keep the room usable when the local service is unavailable. New IDs remain
+  // disabled until a successful status/registry check prevents accidental reuse.
+  cardIdRegistryReady = false;
+}
+
 const initialCards = [
-  {
-    id: "postcard-os",
-    name: "Post Card · Spatial OS",
-    os: "LINUX",
-    detail: "Bare-metal Multiboot2 micro-kernel, Ring 3 isolation & spatial shell.",
-    color: "#00E5FF",
-    status: "STANDBY · READY",
-  },
   {
     id: "android",
     name: "Android · Pocket Lab",
     os: "ANDROID",
     detail: "Your mobile world, brought into the room.",
-    color: "#8a909e",
+    color: "#70d5cf",
     status: "DEMO · DISCONNECTED",
   },
   {
@@ -894,7 +1041,7 @@ const initialCards = [
     name: "Windows · Studio",
     os: "WINDOWS",
     detail: "A familiar world, with room to roam.",
-    color: "#8a909e",
+    color: "#8baef0",
     status: "DEMO · DISCONNECTED",
   },
   {
@@ -902,23 +1049,15 @@ const initialCards = [
     name: "Linux · Dev Space",
     os: "LINUX",
     detail: "Build, explore, make things happen.",
-    color: "#FFB81C",
+    color: "#bca8ff",
     status: "DEMO · DISCONNECTED",
   },
   {
     id: "macos",
-    name: "macOS · Pure Studio",
+    name: "macOS · Cupertino",
     os: "MACOS",
-    detail: "Darwin micro-kernel, Metal acceleration & Unix studio.",
-    color: "#e2e8f0",
-    status: "DEMO · DISCONNECTED",
-  },
-  {
-    id: "agent-sandbox",
-    name: "Agent · OpenSandbox",
-    os: "LINUX",
-    detail: "Apache-2.0 micro-sandbox, golden templates & credential vault.",
-    color: "#FFB81C",
+    detail: "Precision craft, OpenCore UEFI & Darwin studio.",
+    color: "#eea3a6",
     status: "DEMO · DISCONNECTED",
   },
   {
@@ -926,19 +1065,45 @@ const initialCards = [
     name: "Kali · Cyber Range",
     os: "LINUX",
     detail: "Offensive SecOps, AI recon & isolated VLAN lab.",
-    color: "#8a909e",
+    color: "#929bf2",
     status: "DEMO · DISCONNECTED",
   },
 ];
 
-for (const [index, definition] of initialCards.entries()) {
-  cards.push(createCard(definition, index));
+for (const definition of initialCards) {
+  if (deletedCardIds.has(definition.id)) continue;
+  cards.push(createCard(definition, cards.length));
+}
+if (cards.length === 0) {
+  cards.push(
+    createCard(
+      {
+        id: "workspace-fallback",
+        name: "Studio · Welcome Space",
+        os: "LINUX",
+        detail: "Your room is ready for a new Post Card.",
+        color: "#bca8ff",
+        status: "DEMO · DISCONNECTED",
+        removable: false,
+      },
+      0,
+    ),
+  );
 }
 arrangeCards();
-selectCard(cards[0]);
+selectCard(cards.find((card) => card.id === "linux") ?? cards[Math.min(INITIAL_CARD_INDEX, cards.length - 1)]);
 updateCardCount();
 updateRecipientOptions();
 resize();
+
+roomCardNavElement.addEventListener("click", (event) => {
+  const button = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-room-card]");
+  const card = button?.dataset.cardId
+    ? cards.find((item) => item.id === button.dataset.cardId)
+    : undefined;
+  if (card) selectCard(card, true);
+});
+
 void refreshGuestStatus().catch((error: unknown) => {
   setGuestError(error instanceof Error ? error.message : "The local guest service is unavailable.");
 });
@@ -1106,6 +1271,10 @@ guestInjectPlaneButtonElement.addEventListener("click", () => {
   void injectLatestPaperPlaneIntoVm();
 });
 
+guestWakeScreenButtonElement.addEventListener("click", () => {
+  void wakeGuestScreen();
+});
+
 guestSavepointButtonElement.addEventListener("click", () => {
   const card = cards.find((item) => item.id === guestTargetCardId) ?? selectedCard;
   if (card) void runTimeTravelSnapshot("save", card);
@@ -1137,50 +1306,8 @@ guestRestoreCheckpointButton?.addEventListener("click", () => {
   })();
 });
 
-document.querySelector<HTMLButtonElement>("#guest-native-viewer")?.addEventListener("click", () => {
-  if (!guestTargetCardId) return;
-  void (async () => {
-    try {
-      const status = (await requestGuestApi("/api/guest/open-native-viewer", {
-        cardId: guestTargetCardId ?? "linux",
-        os: guestTargetOs,
-      })) as GuestServiceStatus & {
-        nativeViewerResult?: { vncEndpoint: string; launched: boolean };
-      };
-      updateGuestCardStatus(status);
-      const res = status.nativeViewerResult;
-      if (res?.launched) {
-        showToast(`🖥️ Opened ${res.vncEndpoint} in native TurboVNC viewer.`);
-      } else if (res?.vncEndpoint) {
-        showToast(`🖥️ VNC ready at ${res.vncEndpoint} (install TurboVNC or set POSTCARD_VNC_VIEWER).`);
-      }
-    } catch (error) {
-      reportGuestError(error);
-    }
-  })();
-});
-
 secopsToggleElement.addEventListener("click", () => {
   toggleSecOpsLabMode();
-});
-
-tourButtonElement.addEventListener("click", () => {
-  if (tourActive) {
-    stopGuidedTour();
-    if (isTourRecording) stopTourRecording();
-  } else {
-    startGuidedTour();
-  }
-});
-
-recordTourButtonElement.addEventListener("click", () => {
-  if (isTourRecording) {
-    stopTourRecording();
-    stopGuidedTour();
-  } else {
-    startTourRecording();
-    startGuidedTour();
-  }
 });
 
 omniFormElement.addEventListener("submit", (event) => {
@@ -1238,6 +1365,12 @@ quickFileInput?.addEventListener("change", () => {
 });
 
 window.addEventListener("keydown", (event) => {
+  if (studioViewElement.hidden) return;
+  if (profilePopoverOpen && event.key === "Escape") {
+    event.preventDefault();
+    closeProfilePopover(true);
+    return;
+  }
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
     event.preventDefault();
     omniInputElement.focus();
@@ -1249,12 +1382,11 @@ window.addEventListener("keydown", (event) => {
     activeTag === "INPUT" ||
     activeTag === "TEXTAREA" ||
     activeTag === "SELECT" ||
-    activeTag === "BUTTON" ||
     guestDialogElement.open ||
+    trashDialogElement.open ||
     shareDialog.open ||
     performanceDialogElement.open ||
-    helpDialog.open ||
-    (pricingDialogElement && pricingDialogElement.open)
+    helpDialog.open
   ) {
     return;
   }
@@ -1289,53 +1421,65 @@ guestCloseButton.addEventListener("click", () => {
 
 guestDialogElement.addEventListener("close", disconnectGuestDisplay);
 
+trashCancelButtonElement.addEventListener("click", cancelTrashConfirmation);
+trashConfirmButtonElement.addEventListener("click", () => {
+  void confirmTrashDeletion();
+});
+trashDialogElement.addEventListener("cancel", (event) => {
+  event.preventDefault();
+  cancelTrashConfirmation();
+});
+trashDialogElement.addEventListener("close", () => {
+  if (pendingTrash && !trashDeleteInProgress) cancelTrashConfirmation();
+});
+
 sendButton.addEventListener("click", () => {
   openShareDialog();
 });
 
-addButton.addEventListener("click", () => {
-  const index = cards.length;
+addButton.addEventListener("click", async () => {
   const definitions = [
     {
-      id: `windows-${index}`,
       name: "Windows · New Space",
       os: "WINDOWS",
       detail: "A new card for another Windows world.",
-      color: "#8a909e",
+      color: "#8baef0",
       status: "DEMO · DISCONNECTED",
     },
     {
-      id: `linux-${index}`,
       name: "Linux · New Space",
       os: "LINUX",
       detail: "A new card for another Linux world.",
-      color: "#FFB81C",
+      color: "#bca8ff",
       status: "DEMO · DISCONNECTED",
     },
     {
-      id: `android-${index}`,
       name: "Android · New Space",
       os: "ANDROID",
       detail: "A new card for another Android world.",
-      color: "#8a909e",
+      color: "#70d5cf",
       status: "DEMO · DISCONNECTED",
     },
     {
-      id: `agent-${index}`,
-      name: "Agent · OpenSandbox",
-      os: "LINUX",
-      detail: "A new lightweight OpenSandbox agent card.",
-      color: "#FFB81C",
+      name: "macOS · New Space",
+      os: "MACOS",
+      detail: "A new card for another Darwin / Cupertino world.",
+      color: "#eea3a6",
       status: "DEMO · DISCONNECTED",
     },
   ];
-  const definition = definitions[(index - initialCards.length) % definitions.length];
-  const card = createCard(definition, index);
-  cards.push(card);
-  selectCard(card);
-  updateCardCount();
-  updateRecipientOptions();
-  showToast(`${card.name} added to your space.`);
+  const template = definitions[(nextCardIdNumber - 1) % definitions.length];
+  try {
+    const id = await allocateCardId(template.os.toLowerCase());
+    const card = createCard({ ...template, id }, cards.length);
+    cards.push(card);
+    selectCard(card);
+    updateCardCount();
+    updateRecipientOptions();
+    showToast(`${card.name} added to your space.`);
+  } catch (error) {
+    showToast(error instanceof Error ? `Could not add a card: ${error.message}` : "Could not reserve a safe card ID.");
+  }
 });
 
 shareForm.addEventListener("submit", (event) => {
@@ -1368,45 +1512,7 @@ document.querySelector("#cancel-share")?.addEventListener("click", () => {
   shareDialog.close();
 });
 
-document.querySelector("#pairdrop-key-button")?.addEventListener("click", () => {
-  if (!selectedCard) return;
-  void (async () => {
-    try {
-      const status = await requestGuestApi("/api/guest/pairdrop", {
-        action: "pair-initiate",
-        cardId: selectedCard?.id ?? "linux",
-      });
-      updateGuestCardStatus(status);
-      if (status.pairdropResult?.remoteTarget) {
-        remoteTargetInputElement.value = status.pairdropResult.remoteTarget;
-        showToast(`🔗 PairDrop 6-Digit Key generated: ${status.pairdropResult.pairKey}`);
-      }
-    } catch (error) {
-      reportGuestError(error);
-    }
-  })();
-});
-
-document.querySelector("#pairdrop-room-button")?.addEventListener("click", () => {
-  if (!selectedCard) return;
-  void (async () => {
-    try {
-      const status = await requestGuestApi("/api/guest/pairdrop", {
-        action: "public-room",
-        cardId: selectedCard?.id ?? "linux",
-      });
-      updateGuestCardStatus(status);
-      if (status.pairdropResult?.remoteTarget) {
-        remoteTargetInputElement.value = status.pairdropResult.remoteTarget;
-        showToast(`🌐 PairDrop 5-Letter Room active: ${status.pairdropResult.roomId}`);
-      }
-    } catch (error) {
-      reportGuestError(error);
-    }
-  })();
-});
-
-for (const modal of [shareDialog, helpDialog, pricingDialogElement].filter(Boolean) as HTMLDialogElement[]) {
+for (const modal of [shareDialog, helpDialog]) {
   modal.addEventListener("click", (event) => {
     if (event.target === modal) {
       modal.close();
@@ -1414,87 +1520,92 @@ for (const modal of [shareDialog, helpDialog, pricingDialogElement].filter(Boole
   });
 }
 
-function openPricingModal(): void {
-  if (pricingDialogElement && !pricingDialogElement.open) {
-    pricingDialogElement.showModal();
-  }
-}
+type LocalProfile = { name: string; initials: string };
+const PROFILE_STORAGE_KEY = "postcard.os.profile.v1";
+let localProfile: LocalProfile = readLocalProfile();
+let profilePopoverOpen = false;
+let profileFocusReturnPending = false;
+renderLocalProfile();
 
-function updatePriceDisplays(): void {
-  const isAnnual = intervalAnnualElement?.checked;
-  if (proPriceDisplayElement) {
-    proPriceDisplayElement.innerHTML = isAnnual
-      ? "$190<span class=\"price-period\"> / yr ($15.83/mo)</span>"
-      : "$19<span class=\"price-period\"> / mo</span>";
-  }
-  if (enterprisePriceDisplayElement) {
-    enterprisePriceDisplayElement.innerHTML = isAnnual
-      ? "$1,990<span class=\"price-period\"> / seat / yr</span>"
-      : "$199<span class=\"price-period\"> / seat / mo</span>";
-  }
-}
-
-intervalMonthlyElement?.addEventListener("change", updatePriceDisplays);
-intervalAnnualElement?.addEventListener("change", updatePriceDisplays);
-
-pricingButtonElement?.addEventListener("click", openPricingModal);
-selectedTierElement?.addEventListener("click", openPricingModal);
-if (selectedTierElement) {
-  selectedTierElement.title = "Click to view edition features and upgrade options";
-}
-
-cancelPricingElement?.addEventListener("click", () => {
-  pricingDialogElement?.close();
+profileButtonElement.addEventListener("click", () => {
+  setProfilePopoverOpen(!profilePopoverOpen);
 });
-
-pricingDialogElement?.addEventListener("keydown", (event) => {
-  if (event.key === "Escape") {
-    event.preventDefault();
-    pricingDialogElement.close();
+document.addEventListener("pointerdown", (event) => {
+  if (!profileControlElement.contains(event.target as Node)) {
+    closeProfilePopover();
   }
 });
-
-document.querySelectorAll<HTMLButtonElement>(".button-upgrade-pro, .button-upgrade-enterprise").forEach((btn) => {
-  btn.addEventListener("click", async () => {
-    const tier = btn.getAttribute("data-tier") || "pro";
-    const interval = intervalAnnualElement?.checked ? "year" : "month";
-    btn.disabled = true;
-    const origText = btn.textContent;
-    btn.textContent = "Connecting to Stripe...";
-    try {
-      const res = await fetch("/api/stripe/checkout-session", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tier, interval }),
-      });
-      const data = await res.json();
-      if (data.ok && (data.checkoutUrl || data.url)) {
-        const checkoutUrl = data.checkoutUrl || data.url;
-        if (data.mode === "live") {
-          window.location.href = checkoutUrl;
-        } else {
-          pricingDialogElement?.close();
-          showToast(`✦ Upgraded to ${tier.toUpperCase()} Edition (Demo Simulation)!`);
-          selectedTierElement.textContent = tier.toUpperCase();
-          selectedTierElement.className = `tier-badge tier-badge-${tier.toLowerCase()}`;
-        }
-      } else {
-        showToast(`❌ Checkout error: ${data.error || "Unable to start checkout"}`);
-      }
-    } catch (err: any) {
-      showToast(`❌ Connection failed: ${err.message}`);
-    } finally {
-      btn.disabled = false;
-      btn.textContent = origText;
-    }
-  });
+document.addEventListener("focusin", (event) => {
+  if (profilePopoverOpen && !profileControlElement.contains(event.target as Node)) {
+    closeProfilePopover();
+  }
 });
-
-const searchParams = new URLSearchParams(window.location.search);
-if (searchParams.get("upgrade_success") === "true") {
-  const upgradedTier = searchParams.get("tier") || "pro";
-  showToast(`🎉 Welcome to Post Card Spatial OS ${upgradedTier.toUpperCase()} Edition!`);
-  window.history.replaceState({}, document.title, window.location.pathname);
+window.addEventListener("hashchange", () => closeProfilePopover());
+profileEditOptionElement.addEventListener("click", () => {
+  closeProfilePopover();
+  profileNameInputElement.value = localProfile.name;
+  profileInitialsInputElement.value = localProfile.initials;
+  profileEditErrorElement.textContent = "";
+  profileFocusReturnPending = true;
+  profileEditDialogElement.showModal();
+  profileNameInputElement.focus();
+});
+profilePerformanceOptionElement.addEventListener("click", () => {
+  closeProfilePopover();
+  profileFocusReturnPending = true;
+  openPerformanceDialog();
+  if (!performanceDialogElement.open) restoreProfileFocus();
+});
+profileHelpOptionElement.addEventListener("click", () => {
+  closeProfilePopover();
+  profileFocusReturnPending = true;
+  helpDialog.showModal();
+});
+profileAboutOptionElement.addEventListener("click", () => {
+  closeProfilePopover();
+  profileFocusReturnPending = true;
+  profileAboutDialogElement.showModal();
+});
+profileEditFormElement.addEventListener("submit", (event) => {
+  event.preventDefault();
+  const name = profileNameInputElement.value.trim().replace(/\s+/g, " ");
+  const initials = profileInitialsInputElement.value.trim().toLocaleUpperCase();
+  if (!name) {
+    profileEditErrorElement.textContent = "Enter a display name to continue.";
+    profileNameInputElement.focus();
+    return;
+  }
+  if (name.length > 40) {
+    profileEditErrorElement.textContent = "Display names can be up to 40 characters.";
+    profileNameInputElement.focus();
+    return;
+  }
+  if (!/^\p{L}{1,2}$/u.test(initials)) {
+    profileEditErrorElement.textContent = "Initials must be one or two letters.";
+    profileInitialsInputElement.focus();
+    return;
+  }
+  localProfile = { name, initials };
+  renderLocalProfile();
+  try {
+    window.localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(localProfile));
+    showToast("Local profile saved on this device.");
+  } catch {
+    showToast("Profile updated for this session; browser storage is unavailable.");
+  }
+  profileEditDialogElement.close();
+});
+profileNameInputElement.addEventListener("input", () => {
+  profileEditErrorElement.textContent = "";
+});
+profileInitialsInputElement.addEventListener("input", () => {
+  profileEditErrorElement.textContent = "";
+});
+document.querySelector("#cancel-profile-edit")?.addEventListener("click", () => {
+  profileEditDialogElement.close();
+});
+for (const dialog of [profileEditDialogElement, profileAboutDialogElement, performanceDialogElement, helpDialog]) {
+  dialog.addEventListener("close", restoreProfileFocus);
 }
 
 document.querySelector("#help-button")?.addEventListener("click", () => {
@@ -1558,6 +1669,50 @@ function openShareDialog(): void {
   updateRecipientOptions();
   shareDialogElement.showModal();
   messageInputElement.focus();
+}
+
+function readLocalProfile(): LocalProfile {
+  try {
+    const stored = window.localStorage.getItem(PROFILE_STORAGE_KEY);
+    if (stored) {
+      const parsed = JSON.parse(stored) as Partial<LocalProfile>;
+      const name = typeof parsed.name === "string" ? parsed.name.trim().replace(/\s+/g, " ") : "";
+      const initials = typeof parsed.initials === "string" ? parsed.initials.trim().toLocaleUpperCase() : "";
+      return {
+        name: name.slice(0, 40) || "Local profile",
+        initials: /^\p{L}{1,2}$/u.test(initials) ? initials : "C",
+      };
+    }
+  } catch {
+    // Use the default local profile if storage is unavailable or malformed.
+  }
+  return { name: "Local profile", initials: "C" };
+}
+
+function renderLocalProfile(): void {
+  profileButtonElement.textContent = localProfile.initials;
+  profileButtonElement.title = `${localProfile.name} · Local profile options`;
+  profileMenuNameElement.textContent = localProfile.name;
+  profileMenuInitialsElement.textContent = localProfile.initials;
+}
+
+function setProfilePopoverOpen(open: boolean): void {
+  profilePopoverOpen = open;
+  profilePopoverElement.hidden = !open;
+  profileButtonElement.setAttribute("aria-expanded", String(open));
+  if (open) profileEditOptionElement.focus();
+}
+
+function closeProfilePopover(restoreFocus = false): void {
+  if (!profilePopoverOpen) return;
+  setProfilePopoverOpen(false);
+  if (restoreFocus) profileButtonElement.focus();
+}
+
+function restoreProfileFocus(): void {
+  if (!profileFocusReturnPending) return;
+  profileFocusReturnPending = false;
+  requestAnimationFrame(() => profileButtonElement.focus());
 }
 
 function openPerformanceDialog(): void {
@@ -1659,14 +1814,15 @@ function openOrStartSelectedGuest(card: SystemCard): void {
 }
 
 async function cloneSelectedCard(sourceCard: SystemCard): Promise<void> {
-  const newId = `${sourceCard.id}-clone-${cloneCounter}`;
-  cloneCounter += 1;
-  const baseTitle = sourceCard.name.split(" · ")[0] ?? sourceCard.os;
-  const newName = `${baseTitle} · Clone ${cloneCounter - 1}`;
-
+  let newId: string;
+  let newName: string;
+  let status: GuestServiceStatus;
   const os: GuestOS = cardToGuestOs(sourceCard);
   try {
-    const status = await requestGuestApi("/api/guest/clone-overlay", {
+    newId = await allocateCardId("clone");
+    const baseTitle = sourceCard.name.split(" · ")[0] ?? sourceCard.os;
+    newName = `${baseTitle} · Clone ${newId.slice(newId.lastIndexOf("-") + 1)}`;
+    status = await requestGuestApi("/api/guest/clone-overlay", {
       os,
       sourceCardId: sourceCard.id,
       targetCardId: newId,
@@ -1753,6 +1909,7 @@ function createCard(
     color: string;
     status: string;
     clonedFrom?: string;
+    removable?: boolean;
   },
   index: number,
 ): SystemCard {
@@ -1860,7 +2017,7 @@ function makeCardTexture(card: SystemCard, facet: CardFacet): THREE.CanvasTextur
   context.fillStyle = meta.accent;
   context.font = "700 25px Inter, Arial, sans-serif";
   context.fillText(meta.header, 72, 74);
-  context.fillStyle = "#FFB81C";
+  context.fillStyle = meta.accent;
   context.font = "700 21px Inter, Arial, sans-serif";
   context.textAlign = "right";
   context.fillText(meta.badge, 590, 74);
@@ -1986,18 +2143,18 @@ function drawEdgeFlipGuides(context: CanvasRenderingContext2D, activeFacet: Card
   context.textAlign = "center";
 
   // Top edge tab -> 05 ACTIONS
-  context.fillStyle = activeFacet === "top" ? "#8a909e" : "#8a909e99";
+  context.fillStyle = activeFacet === "top" ? "#70d5cf" : "#70d5cf99";
   context.fillText("▲ FLIP UP · 05 ACTIONS (W)", 320, 18);
 
   // Bottom edge tab -> 06 TELEMETRY
-  context.fillStyle = activeFacet === "bottom" ? "#FFB81C" : "#FFB81C99";
+  context.fillStyle = activeFacet === "bottom" ? "#bca8ff" : "#bca8ff99";
   context.fillText("▼ FLIP DOWN · 06 TELEMETRY (S)", 320, 952);
 
   // Left edge vertical tab -> 03 SECURITY
   context.save();
   context.translate(15, 480);
   context.rotate(-Math.PI / 2);
-  context.fillStyle = activeFacet === "left" ? "#8a909e" : "#8a909e99";
+  context.fillStyle = activeFacet === "left" ? "#8baef0" : "#8baef099";
   context.fillText("◀ FLIP LEFT · 03 SECURITY (A)", 0, 0);
   context.restore();
 
@@ -2005,7 +2162,7 @@ function drawEdgeFlipGuides(context: CanvasRenderingContext2D, activeFacet: Card
   context.save();
   context.translate(625, 480);
   context.rotate(Math.PI / 2);
-  context.fillStyle = activeFacet === "right" ? "#FFB81C" : "#FFB81C99";
+  context.fillStyle = activeFacet === "right" ? "#eea3a6" : "#eea3a699";
   context.fillText("▶ FLIP RIGHT · 04 PLANES (D)", 0, 0);
   context.restore();
 
@@ -2033,25 +2190,6 @@ function drawCardFront(context: CanvasRenderingContext2D, card: SystemCard): voi
   context.fillStyle = card.color;
   context.font = "700 21px Inter, Arial, sans-serif";
   context.fillText(card.os, 48, 133);
-
-  // Monetization Tier Badge
-  const tier = getCardTier(card);
-  const tierColor = tier === "ENTERPRISE" ? "#00E5FF" : tier === "PRO" ? "#FFB81C" : "#8a909e";
-  context.save();
-  context.font = "700 13px Inter, Arial, sans-serif";
-  const tierText = `TIER · ${tier}`;
-  const tierWidth = context.measureText(tierText).width + 16;
-  const tierX = 520 - tierWidth;
-  const tierY = 118;
-  context.fillStyle = "rgba(20, 22, 27, 0.75)";
-  context.strokeStyle = tierColor;
-  context.lineWidth = 1.5;
-  roundRect(context, tierX, tierY, tierWidth, 24, 6);
-  context.fill();
-  context.stroke();
-  context.fillStyle = tierColor;
-  context.fillText(tierText, tierX + 8, tierY + 16);
-  context.restore();
 
   context.fillStyle = "#f4f5f7";
   context.font = "700 52px Inter, Arial, sans-serif";
@@ -2117,7 +2255,7 @@ function drawMockDisplay(context: CanvasRenderingContext2D, card: SystemCard): v
     context.beginPath();
     context.ellipse(428, 526, 178, 126, -0.42, 0, Math.PI * 2);
     context.fill();
-    context.fillStyle = "#FFB81C35";
+    context.fillStyle = "#9c92e63c";
     context.beginPath();
     context.ellipse(180, 615, 218, 94, -0.28, 0, Math.PI * 2);
     context.fill();
@@ -2134,7 +2272,7 @@ function drawMockDisplay(context: CanvasRenderingContext2D, card: SystemCard): v
       context.fillStyle = "rgba(13, 17, 26, 0.86)";
       roundRect(context, x + 58, y + 58, width - 116, 216, 14);
       context.fill();
-      context.strokeStyle = "rgba(255, 184, 28, 0.42)";
+      context.strokeStyle = `${accent}70`;
       context.lineWidth = 1.5;
       roundRect(context, x + 58, y + 58, width - 116, 216, 14);
       context.stroke();
@@ -2152,7 +2290,7 @@ function drawMockDisplay(context: CanvasRenderingContext2D, card: SystemCard): v
       context.fillStyle = "#8a909e";
       context.font = "500 14px monospace";
       context.fillText("% uname -sr && sysctl machdep.cpu.brand_string", x + 78, y + 118);
-      context.fillStyle = "#FFB81C";
+      context.fillStyle = accent;
       context.fillText("Darwin 24.1.0 · QEMU Virtual AppleSMC (Eco 2 GiB)", x + 78, y + 146);
     }
   }
@@ -2271,10 +2409,6 @@ function drawCardSettings(context: CanvasRenderingContext2D, card: SystemCard): 
         ? `Cloned from '${card.clonedFrom}' · Resets: ${card.resetCount}`
         : `Primary card (${card.id}) · Resets: ${card.resetCount}`,
     ],
-    [
-      "MONETIZATION TIER",
-      `${getCardTier(card)} · ${getCardTier(card) === "ENTERPRISE" ? "Bare-Metal Microkernel & Vault VFIO Passthrough" : getCardTier(card) === "PRO" ? "4+ vCPU Gamer Suite & Time-Travel Savepoints" : "Open-Core Base Hypervisor"}`,
-    ],
   ];
 
   drawKeyValueRows(context, rows, 298, 102);
@@ -2342,10 +2476,6 @@ function drawCardSecurity(context: CanvasRenderingContext2D, card: SystemCard): 
     [
       "NETWORK TOPOLOGY",
       netLabel,
-    ],
-    [
-      "SECURITY ENTITLEMENT",
-      `${getCardTier(card)} · ${getCardTier(card) === "ENTERPRISE" ? "Air-Gapped Cyber Range VLAN & Hardware VFIO IOMMU" : getCardTier(card) === "PRO" ? "Hypervisor Memory Protection & Ephemeral Overlay Rollbacks" : "Standard Ring 3 Paging & Non-Root UID Sandboxing"}`,
     ],
   ];
 
@@ -2525,14 +2655,13 @@ function drawCardTelemetry(context: CanvasRenderingContext2D, card: SystemCard):
   const allocatedVcpus =
     guest?.vcpus ?? Math.min(CPU_PROFILE_VCPUS[cpuProfile], hostCap);
 
-  const host = typeof window !== "undefined" ? (window.location.hostname || "127.0.0.1") : "127.0.0.1";
-  const wsPort = guest?.websocketPort ? `ws://${host}:${guest.websocketPort}` : "Unbound (offline)";
+  const wsPort = guest?.websocketPort ? `ws://127.0.0.1:${guest.websocketPort}` : "Unbound (offline)";
   const slot = guest?.websocketPort ? guest.websocketPort - 5700 : null;
-  const qmpPort = slot !== null ? `tcp://${host}:${4444 + slot}` : "Unbound (offline)";
+  const qmpPort = slot !== null ? `tcp://127.0.0.1:${4444 + slot}` : "Unbound (offline)";
   const serialPort =
     slot !== null
-      ? `tcp://${host}:${4544 + slot} (ttyS0 / COM1)`
-      : `Standby · ${host}:4544+slot (ttyS0)`;
+      ? `tcp://127.0.0.1:${4544 + slot} (ttyS0 / COM1)`
+      : `Standby · 127.0.0.1:4544+slot (ttyS0)`;
 
   const rows: [string, string][] = [
     ["RUNTIME PHASE", guest ? `${guest.status.toUpperCase()} (${guest.bootMode ?? "disk"})` : card.status],
@@ -2658,7 +2787,7 @@ function wheelPosition(index: number): THREE.Vector3 {
 
 function cycleCarousel(dir: 1 | -1, withAnticipation = true): void {
   const slotStep = getSlotStep();
-  if (withAnticipation && !reduceMotion) {
+  if (withAnticipation) {
     // Subtle negative anticipation pull: Nudge in opposite direction before swooping into the turn!
     turntableAngle += dir * 0.045;
     if (selectedCard) {
@@ -2715,6 +2844,52 @@ function arrangeCards(): void {
   }
 }
 
+function updateRoomCardNav(): void {
+  roomCardNavElement.replaceChildren();
+  for (const [index, card] of cards.entries()) {
+    const button = document.createElement("button");
+    button.className = "room-card-link";
+    button.type = "button";
+    button.dataset.roomCard = "";
+    button.dataset.cardId = card.id;
+    button.setAttribute("aria-label", `Select ${card.name}`);
+    button.setAttribute("aria-pressed", String(card === selectedCard));
+    const number = document.createElement("span");
+    number.className = "room-card-number";
+    number.textContent = String(index + 1).padStart(2, "0");
+    const name = document.createElement("span");
+    name.className = "room-card-link-name";
+    name.textContent = card.name;
+    button.append(number, name);
+    roomCardNavElement.append(button);
+  }
+}
+
+function updateRoomSelection(): void {
+  if (!selectedCard) return;
+  roomSelectedNameElement.textContent = selectedCard.name;
+  const guestOs = cardToGuestOs(selectedCard);
+  const guest = guestServiceStatus?.guests.find(
+    (item) => item.os === guestOs && item.cardId === selectedCard?.id,
+  );
+  const state =
+    guest?.status === "running"
+      ? "LOCAL GUEST · RUNNING"
+      : guest?.status === "starting"
+        ? "LOCAL GUEST · STARTING"
+        : guest?.status === "stopping"
+          ? "LOCAL GUEST · STOPPING"
+          : guest?.status === "error"
+            ? "LOCAL GUEST · ERROR"
+            : guest?.status === "offline"
+              ? "LOCAL GUEST · OFFLINE"
+              : selectedCard.status.includes("OFFLINE")
+                ? "DEMO · DISCONNECTED"
+                : selectedCard.status;
+  roomSelectedStatusElement.textContent = state;
+  roomSelectedStatusElement.dataset.state = guest?.status ?? "demo";
+}
+
 function updateFacetBarUI(): void {
   const activeFacet = selectedCard?.facet ?? "front";
   const pills = facetBarElement.querySelectorAll<HTMLButtonElement>("[data-facet]");
@@ -2737,7 +2912,7 @@ function selectCard(card: SystemCard, withAnticipation = false): void {
   const slotAngle = targetIndex * slotStep;
   const currentTheta = normalizeAngle(slotAngle + turntableAngle);
 
-  if (withAnticipation && !reduceMotion && Math.abs(currentTheta) > 0.1) {
+  if (withAnticipation && Math.abs(currentTheta) > 0.1) {
     const dir = currentTheta > 0 ? 1 : -1;
     turntableAngle += dir * 0.045;
     if (selectedCard) {
@@ -2752,9 +2927,8 @@ function selectCard(card: SystemCard, withAnticipation = false): void {
   for (const item of cards) item.layoutOffset.set(0, 0, 0);
   updateGuestActionButton();
   updateFacetBarUI();
-  const tier = getCardTier(card);
-  selectedTierElement.textContent = tier;
-  selectedTierElement.className = `tier-badge tier-badge-${tier.toLowerCase()}`;
+  updateRoomCardNav();
+  updateRoomSelection();
   selectedNameElement.textContent = `${card.name} · ${FACET_META[card.facet].badge}`;
   sceneCardIndexElement.textContent = String(targetIndex + 1).padStart(2, "0");
   renderer.domElement.setAttribute(
@@ -2765,13 +2939,14 @@ function selectCard(card: SystemCard, withAnticipation = false): void {
     const edge = item.group.children[0];
     const material = edge instanceof THREE.Mesh ? edge.material : undefined;
     if (material instanceof THREE.MeshStandardMaterial) {
-      material.emissive.set(item === card ? "#FFB81C" : "#000000");
-      material.emissiveIntensity = item === card ? 0.45 : 0;
+      material.emissive.set(item === card ? "#70d5cf" : "#000000");
+      material.emissiveIntensity = item === card ? 0.5 : 0;
     }
   }
 }
 
 function updateGuestActionButton(status = guestServiceStatus): void {
+  updateRoomSelection();
   const card = selectedCard;
   const guestOs: GuestOS = card ? cardToGuestOs(card) : "linux";
   const isGuestCard = Boolean(card);
@@ -2781,6 +2956,14 @@ function updateGuestActionButton(status = guestServiceStatus): void {
   const guest = status?.guests.find((item) => item.os === guestOs && item.cardId === card?.id);
   const isRunningHere = guest?.status === "running";
   const isBusy = guest?.status === "starting" || guest?.status === "stopping";
+  const osTitle =
+    guestOs === "windows"
+      ? "Windows"
+      : guestOs === "android"
+        ? "Android"
+        : guestOs === "macos"
+          ? "macOS"
+          : "Linux";
   const label = guestButtonElement.querySelector<HTMLSpanElement>("span:last-child");
   const hasDisk = card
     ? guestOs === "windows"
@@ -2789,14 +2972,6 @@ function updateGuestActionButton(status = guestServiceStatus): void {
       : (status?.preparedCardIds.includes(card.id) ?? false)
     : false;
   if (label) {
-    const osTitle =
-      guestOs === "windows"
-        ? "Windows"
-        : guestOs === "android"
-          ? "Android"
-          : guestOs === "macos"
-            ? "macOS"
-            : "Linux";
     label.textContent = isRunningHere
       ? `Open ${osTitle}`
       : guest?.status === "starting"
@@ -2811,19 +2986,29 @@ function updateGuestActionButton(status = guestServiceStatus): void {
               ? `Resume ${osTitle}`
               : status?.baseReady
                 ? `Launch ${osTitle}`
-                : "Install Debian base";
+                : guestOs === "linux"
+                  ? "Install Debian base"
+                  : `Install ${osTitle}`;
   }
+  const actionDescription = isRunningHere
+    ? `Open live ${osTitle} guest display`
+    : guest?.status === "starting"
+      ? `Starting ${osTitle} guest`
+      : guest?.status === "stopping"
+        ? `Shutting down ${osTitle} guest`
+        : guestOs === "windows"
+          ? hasDisk
+            ? "Boot this Windows card from its persistent disk"
+            : "Launch the Windows 11 installer"
+          : status?.baseReady
+            ? `Launch this ${osTitle} card with its private disk overlay`
+            : guestOs === "linux"
+                ? "Launch the Debian golden image installer"
+                : `Install the ${osTitle} guest`;
+  guestButtonElement.title = actionDescription;
   guestButtonElement.setAttribute(
     "aria-label",
-    isRunningHere
-      ? `Open live ${guestOs} guest display`
-      : guestOs === "windows"
-        ? hasDisk
-          ? "Boot this Windows card from its persistent disk"
-          : "Launch the Windows 11 installer"
-        : status?.baseReady
-          ? "Launch this Linux card with its private disk overlay"
-          : "Launch the Debian golden image installer",
+    actionDescription,
   );
   guestButtonElement.disabled = !isGuestCard || isBusy;
 }
@@ -2838,6 +3023,8 @@ function isGuestServiceStatus(value: unknown): value is GuestServiceStatus {
     typeof value.baseReady === "boolean" &&
     typeof value.baseDiskExists === "boolean" &&
     typeof value.baseDiskPath === "string" &&
+    Array.isArray(value.deletedCardIds) &&
+    value.deletedCardIds.every((id) => typeof id === "string") &&
     Array.isArray(value.preparedCardIds) &&
     value.preparedCardIds.every((id) => typeof id === "string") &&
     Array.isArray(value.preparedWindowsCardIds) &&
@@ -2850,6 +3037,7 @@ function isGuestServiceStatus(value: unknown): value is GuestServiceStatus {
         typeof guest.cardId === "string" &&
         ["offline", "starting", "running", "stopping", "error"].includes(String(guest.status)) &&
         (guest.websocketPort === null || typeof guest.websocketPort === "number") &&
+        (guest.qmpPort === null || typeof guest.qmpPort === "number") &&
         typeof guest.diskPath === "string",
     )
   );
@@ -2857,7 +3045,7 @@ function isGuestServiceStatus(value: unknown): value is GuestServiceStatus {
 
 async function requestGuestApi(
   endpoint: string,
-  body?: Record<string, string>,
+  body?: Record<string, unknown>,
 ): Promise<GuestServiceStatus> {
   const response = await fetch(endpoint, {
     method: body ? "POST" : "GET",
@@ -2885,6 +3073,12 @@ async function requestGuestApi(
 
 function updateGuestCardStatus(status: GuestServiceStatus): void {
   guestServiceStatus = status;
+  cardIdRegistryReady = true;
+  for (const id of status.deletedCardIds) {
+    legacyDeletedCardIds.delete(id);
+    deletedCardIds.add(id);
+  }
+  persistCardState();
   if (Array.isArray(status.paperPlanes) && status.paperPlanes.length > 0) {
     for (const card of cards) {
       const incoming = status.paperPlanes
@@ -2963,6 +3157,8 @@ function updateGuestCardStatus(status: GuestServiceStatus): void {
   );
   const targetBusy = targetGuest?.status === "starting" || targetGuest?.status === "stopping";
   const targetRunning = targetGuest?.status === "running";
+  guestWakeScreenButtonElement.disabled =
+    !targetRunning || !targetGuest?.qmpPort;
   const targetHasDisk =
     guestTargetOs === "windows"
       ? (status.installedWindowsCardIds?.includes(guestTargetCardId ?? "") ?? false)
@@ -2987,6 +3183,26 @@ function updateGuestCardStatus(status: GuestServiceStatus): void {
   guestInjectPlaneButtonElement.disabled = !targetRunning || !targetHasPlanes;
   guestShutdownButtonElement.disabled = !targetRunning;
   guestForceStopButtonElement.disabled = !targetRunning;
+
+  if (!reconcilingDeletedCards) {
+    const confirmedDeletedCards = cards.filter((card) => deletedCardIds.has(card.id));
+    if (confirmedDeletedCards.length > 0) {
+      reconcilingDeletedCards = true;
+      try {
+        for (const card of confirmedDeletedCards) {
+          if (pendingTrash?.card === card) {
+            pendingTrash = undefined;
+            trashFlight = undefined;
+            trashDeleteInProgress = false;
+            if (trashDialogElement.open) trashDialogElement.close();
+          }
+          removeCardFromRoom(card, status);
+        }
+      } finally {
+        reconcilingDeletedCards = false;
+      }
+    }
+  }
 }
 
 function computeCardTextureKey(card: SystemCard): string {
@@ -3124,7 +3340,6 @@ function updateGuestDialogCopy(): void {
       : isMacOs
         ? "Boot macOS"
         : "Boot this card";
-  guestFinalizeBaseButtonElement.hidden = guestTargetOs !== "linux";
 }
 
 function connectGuestDisplay(websocketPort: number): void {
@@ -3132,9 +3347,7 @@ function connectGuestDisplay(websocketPort: number): void {
   guestDisplayElement.replaceChildren();
   setGuestState(`Connecting to the ${guestTargetOs} display…`);
   clearGuestError();
-  const host = window.location.hostname || "127.0.0.1";
-  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-  const rfb = new RFB(guestDisplayElement, `${protocol}//${host}:${websocketPort}`);
+  const rfb = new RFB(guestDisplayElement, `ws://127.0.0.1:${websocketPort}`);
   rfb.viewOnly = false;
   rfb.scaleViewport = true;
   rfb.resizeSession = false;
@@ -3297,6 +3510,25 @@ async function injectLatestPaperPlaneIntoVm(): Promise<void> {
   }
 }
 
+async function wakeGuestScreen(): Promise<void> {
+  if (!guestTargetCardId) return;
+  guestWakeScreenButtonElement.disabled = true;
+  setGuestState(`Sending a harmless Shift wake key to the ${guestTargetOs} guest…`);
+  clearGuestError();
+  try {
+    const status = await requestGuestApi("/api/guest/wake", {
+      os: guestTargetOs,
+      cardId: guestTargetCardId,
+    });
+    updateGuestCardStatus(status);
+    setGuestState(`Wake key sent to the ${guestTargetOs} guest.`);
+  } catch (error) {
+    reportGuestError(error);
+  } finally {
+    if (guestServiceStatus) updateGuestActionButton();
+  }
+}
+
 function toggleSecOpsLabMode(): void {
   secOpsMode = !secOpsMode;
   secopsToggleElement.classList.toggle("active", secOpsMode);
@@ -3310,8 +3542,8 @@ function toggleSecOpsLabMode(): void {
       : "NEON DISTRICT <span>/</span> NIGHT GRID";
   }
 
-  fillLight.color.set(secOpsMode ? "#FFB81C" : "#8a909e");
-  rimLight.color.set(secOpsMode ? "#8a909e" : "#FFB81C");
+  fillLight.color.set(secOpsMode ? "#e59ba3" : "#a89bff");
+  rimLight.color.set(secOpsMode ? "#a99afa" : "#54d6cf");
 
   if (secOpsMode) {
     const secOpsDefinitions = [
@@ -3320,7 +3552,7 @@ function toggleSecOpsLabMode(): void {
         name: "Kali · Red Team",
         os: "LINUX",
         detail: "Agentless QMP recon, exploit verification & hardening.",
-        color: "#FFB81C",
+        color: "#eaa27f",
         status: guestServiceStatus?.baseReady ? "GUEST · BASE READY" : "DEMO · DISCONNECTED",
       },
       {
@@ -3328,12 +3560,12 @@ function toggleSecOpsLabMode(): void {
         name: "G-III Copilot · Twin-Star",
         os: "LINUX",
         detail: "Day-one neural co-pilot synthesizing & flying Paper Airplanes.",
-        color: "#8a909e",
+        color: "#a99afa",
         status: guestServiceStatus?.baseReady ? "GUEST · BASE READY" : "DEMO · DISCONNECTED",
       },
     ];
     for (const def of secOpsDefinitions) {
-      if (!cards.some((c) => c.id === def.id)) {
+      if (!deletedCardIds.has(def.id) && !cards.some((c) => c.id === def.id)) {
         cards.push(createCard(def, cards.length));
       }
     }
@@ -3472,23 +3704,27 @@ async function cycleCardNetworkMode(card: SystemCard): Promise<void> {
 async function runSwarmFork(sourceCard: SystemCard): Promise<void> {
   const os: GuestOS = cardToGuestOs(sourceCard);
   try {
+    const targetCardIds = [
+      await allocateCardId("swarm"),
+      await allocateCardId("swarm"),
+    ];
     const status = await requestGuestApi("/api/guest/swarm-fork", {
       sourceCardId: sourceCard.id,
       os,
       count: "2",
+      targetCardIds,
     });
     const createdIds = status.swarmResult?.createdCardIds ?? [
-      `${sourceCard.id}-swarm-${cloneCounter}`,
-      `${sourceCard.id}-swarm-${cloneCounter + 1}`,
+      ...targetCardIds,
     ];
     for (const newId of createdIds) {
-      if (cards.some((c) => c.id === newId)) continue;
+      if (cards.some((c) => c.id === newId) || deletedCardIds.has(newId)) continue;
       const idx = cards.length;
       const baseTitle = sourceCard.name.split(" · ")[0] ?? sourceCard.os;
       const swarmCard = createCard(
         {
           id: newId,
-          name: `${baseTitle} · Swarm ${cloneCounter}`,
+          name: `${baseTitle} · Swarm ${newId.slice(newId.lastIndexOf("-") + 1)}`,
           os: sourceCard.os,
           detail: `Parallel Swarm clone of ${sourceCard.name}.`,
           color: sourceCard.color,
@@ -3497,7 +3733,6 @@ async function runSwarmFork(sourceCard: SystemCard): Promise<void> {
         idx,
       );
       swarmCard.clonedFrom = sourceCard.id;
-      cloneCounter += 1;
       cards.push(swarmCard);
     }
     arrangeCards();
@@ -3583,6 +3818,10 @@ function updateCardCount(): void {
   const total = String(cards.length).padStart(2, "0");
   cardCountElement.textContent = total;
   sceneCardTotalElement.textContent = total;
+  roomCardSummaryElement.textContent = cards.length === 1
+    ? "One system is gathered here."
+    : `Your ${cards.length} systems are gathered here.`;
+  updateRoomCardNav();
 }
 
 function updateRecipientOptions(): void {
@@ -3635,6 +3874,12 @@ function flipCardTo(card: SystemCard, targetFacet: CardFacet, preferredDir?: 1 |
 
   const meta = FACET_META[targetFacet];
   showToast(`${card.name} · ${meta.badge} ${meta.shortLabel}`);
+}
+
+function flipCardToSide(card: SystemCard, targetFacet: "left" | "right", direction: 1 | -1): void {
+  if (card.facet !== targetFacet) {
+    flipCardTo(card, targetFacet, direction);
+  }
 }
 
 function toggleCardZoom(force?: boolean): void {
@@ -3702,9 +3947,275 @@ function handleCardClick(card: SystemCard, uv?: THREE.Vector2): void {
   toggleCardZoom();
 }
 
+function setTrashTargetVisible(visible: boolean): void {
+  trashTargetElement.hidden = !visible;
+  trashTargetElement.setAttribute("aria-hidden", String(!visible));
+  trashTargetElement.classList.remove("is-targeted");
+}
+
+function pointerIsOverTrash(clientX: number, clientY: number): boolean {
+  if (trashTargetElement.hidden) return false;
+  const bounds = trashTargetElement.getBoundingClientRect();
+  return clientX >= bounds.left && clientX <= bounds.right &&
+    clientY >= bounds.top && clientY <= bounds.bottom;
+}
+
+function trashDestination(from: THREE.Vector3): THREE.Vector3 {
+  const canvasBounds = renderer.domElement.getBoundingClientRect();
+  const targetBounds = trashTargetElement.getBoundingClientRect();
+  const x = ((targetBounds.left + targetBounds.width / 2 - canvasBounds.left) / canvasBounds.width) * 2 - 1;
+  const y = -((targetBounds.top + targetBounds.height / 2 - canvasBounds.top) / canvasBounds.height) * 2 + 1;
+  const rayPoint = new THREE.Vector3(x, y, 0.5).unproject(camera);
+  const direction = rayPoint.sub(camera.position).normalize();
+  return camera.position.clone().add(direction.multiplyScalar(camera.position.distanceTo(from)));
+}
+
+function beginTrashFlight(completedDrag: NonNullable<typeof drag>): void {
+  const card = completedDrag.card;
+  if (!card || !completedDrag.originalPosition) return;
+  const restoreState: TrashRestoreState = {
+    card,
+    position: completedDrag.originalPosition.clone(),
+    rotation: completedDrag.originalRotation?.clone() ?? card.group.rotation.clone(),
+    scale: completedDrag.originalScale?.clone() ?? card.group.scale.clone(),
+    layoutOffset: completedDrag.originalLayoutOffset?.clone() ?? card.layoutOffset.clone(),
+    targetRotation: card.targetRotation,
+    tiltX: card.tiltX,
+    tiltZ: card.tiltZ,
+    selectedCard: completedDrag.originalSelectedCard ?? selectedCard,
+    turntableAngle: completedDrag.originalTurntableAngle ?? turntableAngle,
+    targetTurntableAngle: completedDrag.originalTargetTurntableAngle ?? targetTurntableAngle,
+    cardZoomed: completedDrag.originalCardZoomed ?? cardZoomed,
+  };
+  const from = card.group.position.clone();
+  const fromRotation = card.group.rotation.clone();
+  trashFlight = {
+    card,
+    from,
+    to: trashDestination(from),
+    fromScale: card.group.scale.clone(),
+    toScale: card.group.scale.clone().multiplyScalar(0.78),
+    fromRotation,
+    toRotation: new THREE.Euler(
+      fromRotation.x + 0.24,
+      fromRotation.y + Math.PI * 1.4,
+      fromRotation.z - 0.4,
+    ),
+    startedAt: performance.now(),
+    duration: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 180 : 760,
+    returning: false,
+    restoreState,
+  };
+}
+
+function openTrashConfirmation(state: TrashRestoreState): void {
+  pendingTrash = state;
+  trashCardNameElement.textContent = state.card.name;
+  trashCardIdElement.textContent = state.card.id;
+  trashErrorElement.textContent =
+    state.card.removable === false
+      ? "This is the room’s fallback card and cannot be removed."
+      : cards.length <= 1
+        ? "Keep at least one Post Card in the room. Add another card before removing this one."
+        : "";
+  trashConfirmButtonElement.disabled = state.card.removable === false || cards.length <= 1;
+  trashCancelButtonElement.disabled = false;
+  trashDeleteInProgress = false;
+  trashDialogElement.removeAttribute("aria-busy");
+  trashDialogElement.showModal();
+}
+
+function restoreTrashCardState(state: TrashRestoreState): void {
+  const { card } = state;
+  card.group.position.copy(state.position);
+  card.group.rotation.copy(state.rotation);
+  card.group.scale.copy(state.scale);
+  card.layoutOffset.copy(state.layoutOffset);
+  card.targetRotation = state.targetRotation;
+  card.tiltX = state.tiltX;
+  card.tiltZ = state.tiltZ;
+  turntableAngle = state.turntableAngle;
+  targetTurntableAngle = state.targetTurntableAngle;
+  cardZoomed = state.cardZoomed;
+  selectedCard = state.selectedCard && cards.includes(state.selectedCard)
+    ? state.selectedCard
+    : cards[0] ?? null;
+  if (!selectedCard) return;
+  selectedIndex = cards.indexOf(selectedCard);
+  updateGuestActionButton();
+  updateFacetBarUI();
+  updateRoomCardNav();
+  selectedNameElement.textContent = `${selectedCard.name} · ${FACET_META[selectedCard.facet].badge}`;
+  sceneCardIndexElement.textContent = String(selectedIndex + 1).padStart(2, "0");
+}
+
+function cancelTrashConfirmation(): void {
+  if (!pendingTrash || trashDeleteInProgress) return;
+  const restoreState = pendingTrash;
+  pendingTrash = undefined;
+  trashErrorElement.textContent = "";
+  if (trashDialogElement.open) trashDialogElement.close();
+  const card = restoreState.card;
+  trashFlight = {
+    card,
+    from: card.group.position.clone(),
+    to: restoreState.position.clone(),
+    fromScale: card.group.scale.clone(),
+    toScale: restoreState.scale.clone(),
+    fromRotation: card.group.rotation.clone(),
+    toRotation: restoreState.rotation.clone(),
+    startedAt: performance.now(),
+    duration: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 120 : 420,
+    returning: true,
+    restoreState,
+  };
+}
+
+function updateTrashFlight(now: number): void {
+  const flight = trashFlight;
+  if (!flight) return;
+  const progress = THREE.MathUtils.clamp((now - flight.startedAt) / flight.duration, 0, 1);
+  const eased = 1 - Math.pow(1 - progress, 3);
+  flight.card.group.position.lerpVectors(flight.from, flight.to, eased);
+  const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if (!reducedMotion) {
+    flight.card.group.position.y += Math.sin(progress * Math.PI) * (flight.returning ? 0.42 : 1.05);
+    flight.card.group.rotation.set(
+      THREE.MathUtils.lerp(flight.fromRotation.x, flight.toRotation.x, eased),
+      THREE.MathUtils.lerp(flight.fromRotation.y, flight.toRotation.y, eased),
+      THREE.MathUtils.lerp(flight.fromRotation.z, flight.toRotation.z, eased),
+    );
+  }
+  flight.card.group.scale.lerpVectors(flight.fromScale, flight.toScale, eased);
+  if (progress < 1) return;
+
+  trashFlight = undefined;
+  if (flight.returning) {
+    restoreTrashCardState(flight.restoreState);
+    return;
+  }
+  flight.card.group.position.copy(flight.to);
+  flight.card.group.rotation.copy(flight.toRotation);
+  flight.card.group.scale.copy(flight.toScale);
+  openTrashConfirmation(flight.restoreState);
+}
+
+function prepareDeletedIdState(
+  cardId: string,
+): { nextState: string; previousState: string | null } | undefined {
+  let previous: string | null = null;
+  try {
+    previous = window.localStorage.getItem(CARD_STATE_STORAGE_KEY);
+    const nextState = JSON.stringify({
+      deletedIds: [...new Set([...deletedCardIds, cardId])].sort(),
+      nextId: nextCardIdNumber,
+    });
+    window.localStorage.setItem(CARD_STATE_STORAGE_KEY, nextState);
+    return { nextState, previousState: previous };
+  } catch {
+    try {
+      if (previous === null) window.localStorage.removeItem(CARD_STATE_STORAGE_KEY);
+      else if (previous !== null) window.localStorage.setItem(CARD_STATE_STORAGE_KEY, previous);
+    } catch {
+      return undefined;
+    }
+    return undefined;
+  }
+}
+
+function removeCardFromRoom(card: SystemCard, status: GuestServiceStatus): void {
+  const removedIndex = cards.indexOf(card);
+  if (removedIndex < 0) throw new Error("The card is no longer in this room.");
+  const remainingPositions = new Map(
+    cards.filter((item) => item !== card).map((item) => [item, item.group.position.clone()]),
+  );
+  scene.remove(card.group);
+  cards.splice(removedIndex, 1);
+  if (cards.length === 0) {
+    cards.push(
+      createCard(
+        {
+          id: "workspace-fallback",
+          name: "Studio · Welcome Space",
+          os: "LINUX",
+          detail: "Your room is ready for a new Post Card.",
+          color: "#bca8ff",
+          status: "DEMO · DISCONNECTED",
+          removable: false,
+        },
+        0,
+      ),
+    );
+  }
+  arrangeCards();
+  for (const [index, item] of cards.entries()) {
+    const previousPosition = remainingPositions.get(item);
+    if (previousPosition) item.layoutOffset.copy(previousPosition).sub(wheelPosition(index));
+  }
+  updateGuestCardStatus(status);
+  if (selectedCard === card || !selectedCard || !cards.includes(selectedCard)) {
+    cardZoomed = false;
+    selectCard(cards[Math.min(removedIndex, cards.length - 1)]);
+  } else {
+    selectedIndex = cards.indexOf(selectedCard);
+    updateGuestActionButton();
+    updateRoomCardNav();
+    selectedNameElement.textContent = `${selectedCard.name} · ${FACET_META[selectedCard.facet].badge}`;
+    sceneCardIndexElement.textContent = String(selectedIndex + 1).padStart(2, "0");
+  }
+  updateCardCount();
+  updateRecipientOptions();
+}
+
+async function confirmTrashDeletion(): Promise<void> {
+  const state = pendingTrash;
+  if (!state || trashDeleteInProgress || state.card.removable === false || cards.length <= 1) return;
+  const storedState = prepareDeletedIdState(state.card.id);
+  if (!storedState) {
+    trashErrorElement.textContent = "This browser cannot save the room’s deleted-card list. The card was kept.";
+    return;
+  }
+
+  trashDeleteInProgress = true;
+  trashDialogElement.setAttribute("aria-busy", "true");
+  trashErrorElement.textContent = "Stopping this card if it is running, then removing its private files…";
+  trashConfirmButtonElement.disabled = true;
+  trashCancelButtonElement.disabled = true;
+  try {
+    const status = await requestGuestApi("/api/guest/delete", {
+      cardId: state.card.id,
+      os: cardToGuestOs(state.card),
+      confirm: true,
+    });
+    deletedCardIds.add(state.card.id);
+    pendingTrash = undefined;
+    trashDeleteInProgress = false;
+    if (trashDialogElement.open) trashDialogElement.close();
+    removeCardFromRoom(state.card, status);
+    trashErrorElement.textContent = "";
+    showToast(`${state.card.name} and its private guest state were removed.`);
+  } catch (error) {
+    try {
+      if (storedState.previousState === null) window.localStorage.removeItem(CARD_STATE_STORAGE_KEY);
+      else window.localStorage.setItem(CARD_STATE_STORAGE_KEY, storedState.previousState);
+    } catch {
+      deletedCardIds.add(state.card.id);
+    }
+    trashDeleteInProgress = false;
+    trashDialogElement.removeAttribute("aria-busy");
+    trashConfirmButtonElement.disabled = false;
+    trashCancelButtonElement.disabled = false;
+    trashErrorElement.textContent = error instanceof Error
+      ? `The card remains in the room. ${error.message}`
+      : "The card remains in the room. The local guest service returned an unknown error.";
+  }
+}
+
 function onPointerDown(event: PointerEvent): void {
+  if (pendingTrash || trashFlight || trashDialogElement.open) return;
   if (event.button !== 0 && event.button !== 2) return;
   updatePointer(event);
+  const startTime = performance.now();
   const hit = raycaster.intersectObjects(
     cards.flatMap((card) => card.group.children.slice(1)),
     false,
@@ -3727,23 +4238,45 @@ function onPointerDown(event: PointerEvent): void {
       startY: event.clientY,
       lastX: event.clientX,
       lastY: event.clientY,
+      lastMoveX: event.clientX,
+      lastMoveY: event.clientY,
+      lastMoveAt: startTime,
+      lastMoveSpeed: 0,
       moved: false,
       hitUv: hit?.uv ? hit.uv.clone() : undefined,
+      originalPosition: hitCard.group.position.clone(),
+      originalRotation: hitCard.group.rotation.clone(),
+      originalScale: hitCard.group.scale.clone(),
+      originalLayoutOffset: hitCard.layoutOffset.clone(),
+      originalSelectedCard: selectedCard,
+      originalTurntableAngle: turntableAngle,
+      originalTargetTurntableAngle: targetTurntableAngle,
+      originalCardZoomed: cardZoomed,
     };
+    setTrashTargetVisible(true);
   } else {
-    // If grabbing the top (uv.y >= 0.55) or bottom (uv.y <= 0.45) of the center card:
-    // initiate direct vertical card flip!
     const isCenter = hitCard && hitCard === selectedCard;
-    const isTopOrBottom = isCenter && hit?.uv && (hit.uv.y >= 0.55 || hit.uv.y <= 0.45);
+    const isTopOrBottom = isCenter && hit?.uv && (hit.uv.y >= 0.8 || hit.uv.y <= 0.2);
+    const isLeftOrRight =
+      isCenter &&
+      hit?.uv &&
+      (hit.uv.x <= 0.24 || hit.uv.x >= 0.76) &&
+      hit.uv.y > 0.2 &&
+      hit.uv.y < 0.8;
 
     drag = {
       card: hitCard,
       pointerId: event.pointerId,
-      mode: isTopOrBottom ? "flip" : "carousel",
+      mode: isTopOrBottom || isLeftOrRight ? "flip" : "carousel",
+      flipAxis: isLeftOrRight ? "horizontal" : isTopOrBottom ? "vertical" : undefined,
       startX: event.clientX,
       startY: event.clientY,
       lastX: event.clientX,
       lastY: event.clientY,
+      lastMoveX: event.clientX,
+      lastMoveY: event.clientY,
+      lastMoveAt: startTime,
+      lastMoveSpeed: 0,
       moved: false,
       hitUv: hit?.uv ? hit.uv.clone() : undefined,
     };
@@ -3769,6 +4302,14 @@ function onPointerMove(event: PointerEvent): void {
   updatePointer(event);
   const now = performance.now();
   const dt = Math.max(0.001, (now - lastPointerTime) / 1000);
+  const moveDt = Math.max(0.001, (now - drag.lastMoveAt) / 1000);
+  drag.lastMoveSpeed = Math.hypot(
+    event.clientX - drag.lastMoveX,
+    event.clientY - drag.lastMoveY,
+  ) / moveDt;
+  drag.lastMoveX = event.clientX;
+  drag.lastMoveY = event.clientY;
+  drag.lastMoveAt = now;
   const dx = event.clientX - drag.startX;
   const dy = event.clientY - drag.startY;
   if (Math.hypot(dx, dy) > 5) {
@@ -3777,6 +4318,8 @@ function onPointerMove(event: PointerEvent): void {
   if (!drag.moved) return;
 
   if (drag.mode === "move" && drag.card) {
+    const overTrash = pointerIsOverTrash(event.clientX, event.clientY);
+    trashTargetElement.classList.toggle("is-targeted", overTrash);
     if (!raycaster.ray.intersectPlane(dragPlane, dragPoint)) return;
     drag.card.group.position.copy(dragPoint.add(drag.offset ?? new THREE.Vector3()));
     drag.card.group.position.x = THREE.MathUtils.clamp(drag.card.group.position.x, -7.2, 7.2);
@@ -3785,17 +4328,22 @@ function onPointerMove(event: PointerEvent): void {
     resolveCardCollisions(drag.card);
     drag.card.group.rotation.y = drag.card.targetRotation;
   } else if (drag.mode === "flip" && drag.card) {
-    // 3D Vertical Peel: Grabbing top or bottom edge physically tilts card along X axis
-    // Dragging downward (dy > 0): tilts top toward viewer
-    // Dragging upward (dy < 0): tilts bottom toward viewer
-    const tilt = THREE.MathUtils.clamp((dy / 140) * (Math.PI * 0.75), -Math.PI * 0.75, Math.PI * 0.75);
-    drag.card.tiltX = tilt;
-    drag.card.group.rotation.x = tilt;
-    drag.card.layoutOffset.z = Math.abs(tilt) * 0.55;
+    if (drag.flipAxis === "horizontal") {
+      const tilt = THREE.MathUtils.clamp((-dx / 140) * (Math.PI * 0.45), -Math.PI * 0.45, Math.PI * 0.45);
+      drag.card.tiltZ = tilt;
+      drag.card.group.rotation.z = tilt;
+      drag.card.layoutOffset.z = Math.abs(tilt) * 0.55;
+    } else {
+      const tilt = THREE.MathUtils.clamp((dy / 140) * (Math.PI * 0.75), -Math.PI * 0.75, Math.PI * 0.75);
+      drag.card.tiltX = tilt;
+      drag.card.group.rotation.x = tilt;
+      drag.card.layoutOffset.z = Math.abs(tilt) * 0.55;
+    }
   } else if (drag.mode === "carousel") {
     // If pointer started on center card and pulls vertically, switch into flip mode!
     if (drag.card === selectedCard && Math.abs(dy) > Math.abs(dx) * 1.2 && Math.abs(dy) > 10) {
       drag.mode = "flip";
+      drag.flipAxis = "vertical";
       return;
     }
 
@@ -3821,6 +4369,26 @@ function onPointerUp(event: PointerEvent): void {
   drag = undefined;
   const dx = event.clientX - completedDrag.startX;
   const dy = event.clientY - completedDrag.startY;
+  if (completedDrag.mode === "move" && completedDrag.card && completedDrag.moved) {
+    const elapsed = (performance.now() - completedDrag.lastMoveAt) / 1000;
+    const releaseSpeed = elapsed > 0 && elapsed <= 0.12
+      ? Math.hypot(
+          event.clientX - completedDrag.lastMoveX,
+          event.clientY - completedDrag.lastMoveY,
+        ) / elapsed
+      : 0;
+    const flickSpeed = elapsed <= 0.12
+      ? Math.max(completedDrag.lastMoveSpeed, releaseSpeed)
+      : 0;
+    const landedInTarget = pointerIsOverTrash(event.clientX, event.clientY);
+    setTrashTargetVisible(false);
+    if (landedInTarget && Math.hypot(dx, dy) >= 70 && flickSpeed >= 850) {
+      beginTrashFlight(completedDrag);
+      return;
+    }
+  } else {
+    setTrashTargetVisible(false);
+  }
 
   if (completedDrag.moved) {
     if (completedDrag.mode === "move" && completedDrag.card) {
@@ -3831,7 +4399,15 @@ function onPointerUp(event: PointerEvent): void {
     } else if (completedDrag.mode === "flip" && completedDrag.card) {
       completedDrag.card.layoutOffset.set(0, 0, 0);
       const threshold = 26;
-      if (dy > threshold) {
+      if (completedDrag.flipAxis === "horizontal" && dx > threshold) {
+        completedDrag.card.tiltZ = 0;
+        flipCardToSide(completedDrag.card, "right", 1);
+      } else if (completedDrag.flipAxis === "horizontal" && dx < -threshold) {
+        completedDrag.card.tiltZ = 0;
+        flipCardToSide(completedDrag.card, "left", -1);
+      } else if (completedDrag.flipAxis === "horizontal") {
+        completedDrag.card.tiltZ = 0;
+      } else if (dy > threshold) {
         // Dragged downward: flip to top facet!
         flipCardTo(completedDrag.card, "top");
       } else if (dy < -threshold) {
@@ -3840,6 +4416,7 @@ function onPointerUp(event: PointerEvent): void {
       } else {
         // Released without threshold: spring back flat!
         completedDrag.card.tiltX = 0;
+        completedDrag.card.tiltZ = 0;
       }
     } else if (completedDrag.mode === "carousel") {
       const slotStep = getSlotStep();
@@ -3900,9 +4477,6 @@ function onWheel(event: WheelEvent): void {
 
 function onCanvasKeyDown(event: KeyboardEvent): void {
   if (event.altKey || event.ctrlKey || event.metaKey || cards.length === 0) return;
-  if (tourActive && event.key !== "Escape" && event.key.toLowerCase() !== "t") {
-    return;
-  }
 
   if (selectedCard && event.shiftKey) {
     if (event.key === "ArrowUp") {
@@ -3959,24 +4533,9 @@ function onCanvasKeyDown(event: KeyboardEvent): void {
       toggleCardZoom();
       return;
     }
-    if (lower === "t") {
+    if (event.key === "Escape" && cardZoomed) {
       event.preventDefault();
-      if (tourActive) {
-        stopGuidedTour();
-        if (isTourRecording) stopTourRecording();
-      } else {
-        startGuidedTour();
-      }
-      return;
-    }
-    if (event.key === "Escape" && (cardZoomed || tourActive)) {
-      event.preventDefault();
-      if (tourActive) {
-        stopGuidedTour();
-        if (isTourRecording) stopTourRecording();
-      } else {
-        toggleCardZoom(false);
-      }
+      toggleCardZoom(false);
       return;
     }
     if (event.key >= "1" && event.key <= "6") {
@@ -4045,7 +4604,7 @@ function sendPaperPlane(
   const mesh = new THREE.Group();
   const paper = new THREE.Mesh(airplaneGeometry, airplaneMaterial);
   mesh.add(paper);
-  mesh.add(new THREE.PointLight("#FFB81C", 1.6, 3));
+  mesh.add(new THREE.PointLight("#e8a191", 1.25, 3));
   scene.add(mesh);
 
   const start = from.group.position.clone();
@@ -4058,7 +4617,7 @@ function sendPaperPlane(
     from: start,
     to: end,
     startedAt: performance.now(),
-    duration: reduceMotion ? 1 : 1050,
+    duration: 1050,
     fromCard: from,
     target,
     remoteTarget: remoteTarget || undefined,
@@ -4117,7 +4676,11 @@ async function deliverPaperPlaneToBackend(
 
 function updateAirplane(now: number): void {
   if (!airplane) return;
-  const progress = THREE.MathUtils.clamp((now - airplane.startedAt) / airplane.duration, 0, 1);
+  const progress = THREE.MathUtils.clamp(
+    (now - airplane.startedAt) / airplane.duration,
+    0,
+    1,
+  );
   const eased = progress * progress * (3 - 2 * progress);
   const position = airplane.from.clone().lerp(airplane.to, eased);
   position.y += Math.sin(progress * Math.PI) * 1.15;
@@ -4189,237 +4752,6 @@ function applyStudioGraphicsProfile(profile: GraphicsProfile): void {
   );
 }
 
-function startGuidedTour(): void {
-  tourActive = true;
-  tourStartTime = performance.now();
-  tourStage = 0;
-  tourPaperPlaneFired = false;
-  tourPerformanceSwitched = false;
-  tourSecOpsSwitched = false;
-  tourButtonElement.classList.add("active");
-  tourButtonElement.textContent = "⏹️ STOP TOUR";
-  tourOverlayElement.hidden = false;
-  tourStatusLabelElement.textContent = isTourRecording ? "RECORDING 60FPS" : "AUTONOMOUS DEMO";
-  showToast("🎬 Launching Autonomous Guided Tour (62s)…");
-}
-
-function stopGuidedTour(): void {
-  tourActive = false;
-  tourCameraOverridePos = null;
-  tourCameraOverrideLook = null;
-  tourButtonElement.classList.remove("active");
-  tourButtonElement.textContent = "🎬 GUIDED TOUR";
-  tourOverlayElement.hidden = true;
-  if (cardZoomed) toggleCardZoom(false);
-  if (selectedCard && selectedCard.facet !== "front") flipCardTo(selectedCard, "front");
-  if (secOpsMode) toggleSecOpsLabMode();
-}
-
-let activeCaptureStream: MediaStream | null = null;
-
-function startTourRecording(): void {
-  const canvas = renderer.domElement as HTMLCanvasElement & {
-    captureStream?: (fps?: number) => MediaStream;
-  };
-  if (typeof MediaRecorder === "undefined" || !canvas.captureStream) {
-    showToast("Media recording is not supported in this browser environment.");
-    return;
-  }
-  
-  try {
-    activeCaptureStream = canvas.captureStream(60);
-  } catch {
-    showToast("Failed to initialize canvas capture stream.");
-    return;
-  }
-
-  recordedChunks = [];
-  const stream = activeCaptureStream;
-
-  try {
-    mediaRecorder = new MediaRecorder(stream, { mimeType: "video/webm;codecs=vp9" });
-  } catch {
-    try {
-      mediaRecorder = new MediaRecorder(stream, { mimeType: "video/webm" });
-    } catch {
-      mediaRecorder = new MediaRecorder(stream);
-    }
-  }
-
-  mediaRecorder.onerror = (event: Event) => {
-    console.error("MediaRecorder pipeline error:", event);
-    showToast("⚠️ Recording error occurred; stopping capture.");
-    stopTourRecording();
-  };
-
-  mediaRecorder.ondataavailable = (event: BlobEvent) => {
-    if (event.data && event.data.size > 0) {
-      recordedChunks.push(event.data);
-    }
-  };
-
-  mediaRecorder.onstop = () => {
-    if (activeCaptureStream) {
-      activeCaptureStream.getTracks().forEach((track) => track.stop());
-      activeCaptureStream = null;
-    }
-    if (recordedChunks.length > 0) {
-      const blob = new Blob(recordedChunks, { type: "video/webm" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `postcard-spatial-os-tour-${Date.now()}.webm`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-      showToast("🎥 Tour video recording saved & downloaded! (60 FPS WebM)");
-    }
-    isTourRecording = false;
-    recordTourButtonElement.classList.remove("recording");
-    recordTourButtonElement.textContent = "🎥 RECORD TOUR";
-  };
-
-  mediaRecorder.start(250);
-  isTourRecording = true;
-  recordTourButtonElement.classList.add("recording");
-  recordTourButtonElement.textContent = "⏹️ STOP RECORDING";
-}
-
-function stopTourRecording(): void {
-  if (mediaRecorder && mediaRecorder.state !== "inactive") {
-    mediaRecorder.stop();
-  }
-  if (activeCaptureStream) {
-    activeCaptureStream.getTracks().forEach((track) => track.stop());
-    activeCaptureStream = null;
-  }
-  isTourRecording = false;
-  recordTourButtonElement.classList.remove("recording");
-  recordTourButtonElement.textContent = "🎥 RECORD TOUR";
-}
-
-function updateTour(now: number, dt: number): void {
-  if (!tourActive) return;
-  const elapsed = (now - tourStartTime) / 1000;
-  const totalDuration = 62;
-
-  const progressPercent = Math.min(100, Math.max(0, (elapsed / totalDuration) * 100));
-  tourProgressFillElement.style.width = `${progressPercent.toFixed(1)}%`;
-
-  if (elapsed < 8) {
-    // Stage 1: Sanctuary & Dais Reveal
-    if (tourStage !== 1) {
-      tourStage = 1;
-      tourStepBadgeElement.textContent = "TOUR 01 / 07 · SANCTUARY & DAIS";
-      tourStepTitleElement.textContent = "The Spatial Sanctuary & Dais";
-      tourStepDescElement.textContent = "Twin Neural Monoliths, Cosmic Dais & Overhead Chandelier with ambient motes.";
-      showToast("✦ Tour 1/7: Sanctuary Architecture & Dais Reveal");
-    }
-    const t = elapsed / 8;
-    const camX = Math.sin(t * Math.PI * 0.5) * 5.0;
-    const camY = 6.8 - t * 3.6;
-    const camZ = 16.0 - t * 3.8;
-    tourCameraOverridePos = new THREE.Vector3(camX, camY, camZ);
-    tourCameraOverrideLook = new THREE.Vector3(0, 2.68, 0.25);
-  } else if (elapsed < 18) {
-    // Stage 2: 3D Spatial Carousel Orbit
-    if (tourStage !== 2) {
-      tourStage = 2;
-      tourCameraOverridePos = null;
-      tourCameraOverrideLook = null;
-      tourStepBadgeElement.textContent = "TOUR 02 / 07 · MULTI-OS MATRIX";
-      tourStepTitleElement.textContent = "3D Spatial Multi-OS Carousel";
-      tourStepDescElement.textContent = "Continuous turntable hosting Windows 11, Linux, Android, macOS, Kali & Post Card OS.";
-      showToast("✦ Tour 2/7: 3D Spatial Carousel Orbit");
-    }
-    targetTurntableAngle += dt * 0.85;
-  } else if (elapsed < 27) {
-    // Stage 3: Zoom-in Inspection & 6-Way Flips
-    if (tourStage !== 3) {
-      tourStage = 3;
-      const inspectCard = cards.find((c) => c.id === "linux") ?? cards[0];
-      selectCard(inspectCard);
-      toggleCardZoom(true);
-      tourStepBadgeElement.textContent = "TOUR 03 / 07 · 6-WAY FACETS";
-      tourStepTitleElement.textContent = "Hexagonal Facets & Telemetry Inspection";
-      tourStepDescElement.textContent = "Live Display (01), Hardware Settings (02), Security Isolation (03) & Telemetry (06).";
-      showToast("✦ Tour 3/7: Zoom-in Inspection & 6-Way Card Flips");
-    }
-    if (selectedCard) {
-      if (elapsed >= 18.5 && elapsed < 21.0 && selectedCard.facet !== "back") {
-        flipCardTo(selectedCard, "back");
-      } else if (elapsed >= 21.0 && elapsed < 23.5 && selectedCard.facet !== "left") {
-        flipCardTo(selectedCard, "left");
-      } else if (elapsed >= 23.5 && elapsed < 26.5 && selectedCard.facet !== "bottom") {
-        flipCardTo(selectedCard, "bottom");
-      }
-    }
-  } else if (elapsed < 36) {
-    // Stage 4: 3D Paper Airplane Courier & SHA-256 Hash Delivery
-    if (tourStage !== 4) {
-      tourStage = 4;
-      if (cardZoomed) toggleCardZoom(false);
-      if (selectedCard && selectedCard.facet !== "front") flipCardTo(selectedCard, "front");
-      tourStepBadgeElement.textContent = "TOUR 04 / 07 · 3D COURIER";
-      tourStepTitleElement.textContent = "3D Paper Airplane Courier & SHA-256 Provenance";
-      tourStepDescElement.textContent = "Cryptographic payload flight across isolated VMs with SHA-256 hash-chain receipt.";
-      showToast("✦ Tour 4/7: 3D Paper Airplane Courier Flight");
-    }
-    if (!tourPaperPlaneFired && elapsed >= 28.0) {
-      tourPaperPlaneFired = true;
-      const senderCard = cards.find((c) => c.id === "linux") ?? cards[0];
-      const targetCard = cards.find((c) => c.id === "postcard-os") ?? cards[1];
-      sendPaperPlane(senderCard, targetCard, "DEPLOY_KERNEL_IMAGE: SHA256_e85250d6a4c21980");
-    }
-  } else if (elapsed < 45) {
-    // Stage 5: Gamer Performance Suite
-    if (tourStage !== 5) {
-      tourStage = 5;
-      tourStepBadgeElement.textContent = "TOUR 05 / 07 · GAMER PERFORMANCE";
-      tourStepTitleElement.textContent = "Gamer Performance Suite & Ray-Casting";
-      tourStepDescElement.textContent = "High-Fidelity 3D shadows, 4 vCPU Hyper-Threading & dynamic GPU profiling.";
-      showToast("✦ Tour 5/7: Gamer Performance Suite Activated");
-    }
-    if (!tourPerformanceSwitched && elapsed >= 37.0) {
-      tourPerformanceSwitched = true;
-      applyStudioGraphicsProfile("quality");
-    }
-  } else if (elapsed < 53) {
-    // Stage 6: SecOps Cyber Range
-    if (tourStage !== 6) {
-      tourStage = 6;
-      tourStepBadgeElement.textContent = "TOUR 06 / 07 · SECOPS CYBER RANGE";
-      tourStepTitleElement.textContent = "SecOps Cyber Range & Penetration Lab";
-      tourStepDescElement.textContent = "Isolated VLAN lab, automated port enumeration, privilege posture & audit playbooks.";
-      showToast("✦ Tour 6/7: SecOps Cyber Range Activated");
-    }
-    if (!tourSecOpsSwitched && elapsed >= 46.0) {
-      tourSecOpsSwitched = true;
-      if (!secOpsMode) toggleSecOpsLabMode();
-      const kaliCard = cards.find((c) => c.id === "kali-red");
-      if (kaliCard) selectCard(kaliCard);
-    }
-  } else if (elapsed < totalDuration) {
-    // Stage 7: Post Card Spatial OS & Bare-Metal Vault
-    if (tourStage !== 7) {
-      tourStage = 7;
-      if (secOpsMode) toggleSecOpsLabMode();
-      const postcardCard = cards.find((c) => c.id === "postcard-os") ?? cards[0];
-      selectCard(postcardCard);
-      toggleCardZoom(true);
-      tourStepBadgeElement.textContent = "TOUR 07 / 07 · POST CARD SPATIAL OS";
-      tourStepTitleElement.textContent = "Bare-Metal Microkernel & Secure Vault";
-      tourStepDescElement.textContent = "Ring 0 Multiboot2 microkernel, Ring 3 isolation & VFIO Secure Vault hardware passthrough.";
-      showToast("✦ Tour 7/7: Post Card Spatial OS & Bare-Metal Vault");
-    }
-  } else {
-    stopGuidedTour();
-    if (isTourRecording) stopTourRecording();
-    showToast("🎬 Guided Tour complete! Enjoy exploring Post Card Spatial OS.");
-  }
-}
-
 let lastFrameTime = 0;
 
 function animate(now = 0): void {
@@ -4443,11 +4775,13 @@ function animate(now = 0): void {
 
     const slotAngle = index * slotStep;
     card.orbitAngle = normalizeAngle(slotAngle + turntableAngle);
+    const frozenForTrash = trashFlight?.card === card || pendingTrash?.card === card;
 
-    if (Math.abs(card.orbitAngle) < minAbsAngle) {
+    if (!frozenForTrash && Math.abs(card.orbitAngle) < minAbsAngle) {
       minAbsAngle = Math.abs(card.orbitAngle);
       closestCard = card;
     }
+    if (frozenForTrash) continue;
 
     const targetPosition = orbitPositionFromAngle(card.orbitAngle).add(card.layoutOffset);
 
@@ -4494,26 +4828,16 @@ function animate(now = 0): void {
       }
     } else {
       const targetRotationY = -0.55 * Math.sin(card.orbitAngle) + card.targetRotation;
-      if (reduceMotion) {
-        card.group.rotation.y = targetRotationY;
-        card.tiltX = 0;
-        card.tiltZ = 0;
-      } else {
-        card.group.rotation.y = THREE.MathUtils.damp(card.group.rotation.y, targetRotationY, 8.5, dt);
-        card.tiltX = THREE.MathUtils.damp(card.tiltX, 0, 7, dt);
-        card.tiltZ = THREE.MathUtils.damp(card.tiltZ, 0, 7, dt);
-        card.group.rotation.x = THREE.MathUtils.damp(card.group.rotation.x, card.tiltX, 11, dt);
-        card.group.rotation.z = THREE.MathUtils.damp(card.group.rotation.z, card.tiltZ, 11, dt);
-      }
+      card.group.rotation.y = THREE.MathUtils.damp(card.group.rotation.y, targetRotationY, 8.5, dt);
+      card.tiltX = THREE.MathUtils.damp(card.tiltX, 0, 7, dt);
+      card.tiltZ = THREE.MathUtils.damp(card.tiltZ, 0, 7, dt);
+      card.group.rotation.x = THREE.MathUtils.damp(card.group.rotation.x, card.tiltX, 11, dt);
+      card.group.rotation.z = THREE.MathUtils.damp(card.group.rotation.z, card.tiltZ, 11, dt);
     }
 
-    if (reduceMotion) {
-      card.group.position.copy(targetPosition);
-    } else {
-      card.group.position.x = THREE.MathUtils.damp(card.group.position.x, targetPosition.x, 9.0, dt);
-      card.group.position.y = THREE.MathUtils.damp(card.group.position.y, targetPosition.y, 9.0, dt);
-      card.group.position.z = THREE.MathUtils.damp(card.group.position.z, targetPosition.z, 9.0, dt);
-    }
+    card.group.position.x = THREE.MathUtils.damp(card.group.position.x, targetPosition.x, 9.0, dt);
+    card.group.position.y = THREE.MathUtils.damp(card.group.position.y, targetPosition.y, 9.0, dt);
+    card.group.position.z = THREE.MathUtils.damp(card.group.position.z, targetPosition.z, 9.0, dt);
     card.group.position.y = Math.max(card.group.position.y, 2.05);
   }
 
@@ -4523,17 +4847,16 @@ function animate(now = 0): void {
     selectedIndex = cards.indexOf(closestCard);
     updateGuestActionButton();
     updateFacetBarUI();
-    const tier = getCardTier(closestCard);
-    selectedTierElement.textContent = tier;
-    selectedTierElement.className = `tier-badge tier-badge-${tier.toLowerCase()}`;
+    updateRoomCardNav();
+    updateRoomSelection();
     selectedNameElement.textContent = `${closestCard.name} · ${FACET_META[closestCard.facet].badge}`;
     sceneCardIndexElement.textContent = String(selectedIndex + 1).padStart(2, "0");
     for (const item of cards) {
       const edge = item.group.children[0];
       const material = edge instanceof THREE.Mesh ? edge.material : undefined;
       if (material instanceof THREE.MeshStandardMaterial) {
-        material.emissive.set(item === closestCard ? "#FFB81C" : "#000000");
-        material.emissiveIntensity = item === closestCard ? 0.45 : 0;
+        material.emissive.set(item === closestCard ? "#70d5cf" : "#000000");
+        material.emissiveIntensity = item === closestCard ? 0.5 : 0;
       }
     }
   }
@@ -4542,42 +4865,32 @@ function animate(now = 0): void {
     resolveCardCollisions(drag.card);
   }
 
-  updateTour(now, dt);
-
   const desiredCamPos =
-    tourActive && tourCameraOverridePos
-      ? tourCameraOverridePos
-      : cardZoomed && selectedCard
-        ? new THREE.Vector3(
-            selectedCard.group.position.x,
-            selectedCard.group.position.y + 0.12,
-            selectedCard.group.position.z + 3.55,
-          )
-        : new THREE.Vector3(0, 3.18, 12.2);
+    cardZoomed && selectedCard
+      ? new THREE.Vector3(
+          selectedCard.group.position.x,
+          selectedCard.group.position.y + 0.12,
+          selectedCard.group.position.z + 3.55,
+        )
+      : new THREE.Vector3(0, 3.18, 12.2);
   const desiredLookAt =
-    tourActive && tourCameraOverrideLook
-      ? tourCameraOverrideLook
-      : cardZoomed && selectedCard
-        ? new THREE.Vector3(
-            selectedCard.group.position.x,
-            selectedCard.group.position.y + 0.12,
-            selectedCard.group.position.z,
-          )
-        : new THREE.Vector3(0, 2.68, 0.25);
+    cardZoomed && selectedCard
+      ? new THREE.Vector3(
+          selectedCard.group.position.x,
+          selectedCard.group.position.y + 0.12,
+          selectedCard.group.position.z,
+        )
+      : new THREE.Vector3(0, 2.68, 0.25);
 
-  if (reduceMotion) {
-    camera.position.copy(desiredCamPos);
-    cameraLookTarget.copy(desiredLookAt);
-  } else {
-    camera.position.x = THREE.MathUtils.damp(camera.position.x, desiredCamPos.x, 8.5, dt);
-    camera.position.y = THREE.MathUtils.damp(camera.position.y, desiredCamPos.y, 8.5, dt);
-    camera.position.z = THREE.MathUtils.damp(camera.position.z, desiredCamPos.z, 8.5, dt);
-    cameraLookTarget.x = THREE.MathUtils.damp(cameraLookTarget.x, desiredLookAt.x, 9.5, dt);
-    cameraLookTarget.y = THREE.MathUtils.damp(cameraLookTarget.y, desiredLookAt.y, 9.5, dt);
-    cameraLookTarget.z = THREE.MathUtils.damp(cameraLookTarget.z, desiredLookAt.z, 9.5, dt);
-  }
+  camera.position.x = THREE.MathUtils.damp(camera.position.x, desiredCamPos.x, 8.5, dt);
+  camera.position.y = THREE.MathUtils.damp(camera.position.y, desiredCamPos.y, 8.5, dt);
+  camera.position.z = THREE.MathUtils.damp(camera.position.z, desiredCamPos.z, 8.5, dt);
+  cameraLookTarget.x = THREE.MathUtils.damp(cameraLookTarget.x, desiredLookAt.x, 9.5, dt);
+  cameraLookTarget.y = THREE.MathUtils.damp(cameraLookTarget.y, desiredLookAt.y, 9.5, dt);
+  cameraLookTarget.z = THREE.MathUtils.damp(cameraLookTarget.z, desiredLookAt.z, 9.5, dt);
   camera.lookAt(cameraLookTarget);
 
+  updateTrashFlight(now);
   updateAirplane(now);
   overheadHaloGroup.rotation.y = now * 0.00012;
   studioMotes.rotation.y = -now * 0.00008;

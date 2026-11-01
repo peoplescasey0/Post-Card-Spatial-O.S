@@ -3,39 +3,183 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#07090E" />
+    <meta name="theme-color" content="#0b1020" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="apple-touch-icon" href="/company-logo.png" />
     <meta
       name="description"
       content="Post Card OS — an interactive spatial workspace prototype."
     />
-    <title>Post Card OS — Spatial Workspace</title>
+    <title>Post Card OS — Twilight Atelier</title>
   </head>
   <body>
     <div id="app">
+      <main class="home-view" id="home-view" hidden>
+        <header class="home-header">
+          <a class="home-brand" href="#" aria-label="Post Card OS home">
+            <img src="/company-logo.svg" width="34" height="34" alt="" />
+            <span>post card<span class="brand-light">.os</span></span>
+          </a>
+          <div class="home-session">
+            <span class="home-session-mark" aria-hidden="true"></span>
+            <span>LOCAL SESSION</span>
+            <span class="home-session-divider" aria-hidden="true"></span>
+            <span>PROTOTYPE 0.1</span>
+          </div>
+        </header>
+
+        <div class="home-content">
+          <section class="home-hero" aria-labelledby="home-title">
+            <div class="home-intro">
+              <p class="home-eyebrow"><span>01</span> / WORKSPACE HOME</p>
+              <h1 id="home-title">Your systems,<br /><span>in spatial view.</span></h1>
+              <p class="home-lede">
+                Five Post Cards. One focused place to move between your worlds.
+              </p>
+              <div class="home-primary-actions">
+                <button class="home-primary-button" type="button" data-open-studio>
+                  <span>Open Spatial Studio</span>
+                  <span class="home-button-arrow" aria-hidden="true">↗</span>
+                </button>
+                <span class="home-action-note">INTERACTIVE 3D WORKSPACE</span>
+              </div>
+            </div>
+
+            <aside class="home-hero-visual" aria-label="Spatial Studio preview">
+              <div class="home-visual-head">
+                <span>POST CARD / 3D</span>
+                <span class="home-visual-index">01—05</span>
+              </div>
+              <div class="home-card-stack" aria-hidden="true">
+                <div class="home-stack-card home-stack-card-back">
+                  <span>02 / WINDOWS</span><span class="stack-glyph">▦</span>
+                </div>
+                <div class="home-stack-card home-stack-card-mid">
+                  <span>04 / MACOS</span><span class="stack-glyph">⌘</span>
+                </div>
+                <div class="home-stack-card home-stack-card-front">
+                  <span class="home-stack-brand">POST CARD O.S.</span>
+                  <span class="home-stack-lambda">λ</span>
+                  <strong>DEV SPACE</strong>
+                  <span class="home-stack-line"></span>
+                  <span class="home-stack-foot">LINUX · DEMO SURFACE</span>
+                </div>
+              </div>
+              <div class="home-visual-foot">
+                <span>LOCAL / SPATIAL ENVIRONMENT</span>
+                <span class="home-visual-dot" aria-hidden="true"></span>
+              </div>
+            </aside>
+          </section>
+
+          <section class="home-systems" aria-labelledby="systems-title">
+            <div class="home-section-heading">
+              <div>
+                <p class="home-eyebrow"><span>02</span> / YOUR SYSTEMS</p>
+                <h2 id="systems-title">Choose a Post Card</h2>
+              </div>
+              <p class="home-section-note">SELECT A CARD TO OPEN IT IN THE STUDIO</p>
+            </div>
+
+            <div class="home-system-grid">
+              <button class="home-system-card" type="button" data-open-studio data-card-id="android" aria-label="Open Android · Pocket Lab in Spatial Studio">
+                <span class="home-system-top">
+                  <span class="home-system-mark home-mark-android" aria-hidden="true">A</span>
+                  <span class="home-system-code">PC / 01</span>
+                </span>
+                <span class="home-system-name">Android <span>· Pocket Lab</span></span>
+                <span class="home-system-detail">Your mobile world, brought into the room.</span>
+                <span class="home-system-bottom">
+                  <span class="home-system-state"><i aria-hidden="true"></i> DEMO · DISCONNECTED</span>
+                  <span class="home-system-open" aria-hidden="true">↗</span>
+                </span>
+              </button>
+
+              <button class="home-system-card" type="button" data-open-studio data-card-id="windows" aria-label="Open Windows · Studio in Spatial Studio">
+                <span class="home-system-top">
+                  <span class="home-system-mark home-mark-windows" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+                  <span class="home-system-code">PC / 02</span>
+                </span>
+                <span class="home-system-name">Windows <span>· Studio</span></span>
+                <span class="home-system-detail">A familiar world, with room to roam.</span>
+                <span class="home-system-bottom">
+                  <span class="home-system-state"><i aria-hidden="true"></i> DEMO · DISCONNECTED</span>
+                  <span class="home-system-open" aria-hidden="true">↗</span>
+                </span>
+              </button>
+
+              <button class="home-system-card home-system-card-featured" type="button" data-open-studio data-card-id="linux" aria-label="Open Linux · Dev Space in Spatial Studio">
+                <span class="home-system-top">
+                  <span class="home-system-mark home-mark-linux" aria-hidden="true">λ</span>
+                  <span class="home-system-code">PC / 03 · SELECTED IN STUDIO</span>
+                </span>
+                <span class="home-system-name">Linux <span>· Dev Space</span></span>
+                <span class="home-system-detail">Build, explore, make things happen.</span>
+                <span class="home-system-bottom">
+                  <span class="home-system-state"><i aria-hidden="true"></i> DEMO · DISCONNECTED</span>
+                  <span class="home-system-open" aria-hidden="true">↗</span>
+                </span>
+              </button>
+
+              <button class="home-system-card" type="button" data-open-studio data-card-id="macos" aria-label="Open macOS · Cupertino in Spatial Studio">
+                <span class="home-system-top">
+                  <span class="home-system-mark home-mark-macos" aria-hidden="true">⌘</span>
+                  <span class="home-system-code">PC / 04</span>
+                </span>
+                <span class="home-system-name">macOS <span>· Cupertino</span></span>
+                <span class="home-system-detail">Precision craft, OpenCore UEFI &amp; Darwin studio.</span>
+                <span class="home-system-bottom">
+                  <span class="home-system-state"><i aria-hidden="true"></i> DEMO · DISCONNECTED</span>
+                  <span class="home-system-open" aria-hidden="true">↗</span>
+                </span>
+              </button>
+
+              <button class="home-system-card" type="button" data-open-studio data-card-id="kali-red" aria-label="Open Kali · Cyber Range in Spatial Studio">
+                <span class="home-system-top">
+                  <span class="home-system-mark home-mark-kali" aria-hidden="true">K</span>
+                  <span class="home-system-code">PC / 05</span>
+                </span>
+                <span class="home-system-name">Kali <span>· Cyber Range</span></span>
+                <span class="home-system-detail">Offensive SecOps, AI recon &amp; isolated VLAN lab.</span>
+                <span class="home-system-bottom">
+                  <span class="home-system-state"><i aria-hidden="true"></i> DEMO · DISCONNECTED</span>
+                  <span class="home-system-open" aria-hidden="true">↗</span>
+                </span>
+              </button>
+            </div>
+          </section>
+
+          <section class="home-local-note" aria-labelledby="local-note-title">
+            <span class="home-note-icon" aria-hidden="true">i</span>
+            <div>
+              <h2 id="local-note-title">Local activity</h2>
+              <p>No activity feed or live host telemetry is shown on this prototype home. Open Spatial Studio to inspect the local guest controls.</p>
+            </div>
+            <span class="home-note-state">NOT REPORTED</span>
+          </section>
+          <footer class="home-footer">
+            <span>POST CARD O.S. <span>— LOCAL PROTOTYPE</span></span>
+            <span>BUILT FOR SPATIAL WORK</span>
+          </footer>
+        </div>
+      </main>
+
+      <div class="studio-view" id="studio-view">
       <header class="topbar">
-        <a class="brand" href="#" aria-label="Post Card OS home">
+        <a class="brand" href="#room" aria-label="Post Card OS spatial home">
           <img class="brand-logo-img" src="/company-logo.svg" width="32" height="32" alt="Post Card OS company logo" />
           <span>post card<span class="brand-light">.os</span></span>
         </a>
         <div class="topbar-center">
-          <span class="live-dot"></span>
-          <span>SPATIAL STUDIO</span>
+          <span class="live-dot" aria-hidden="true"></span>
+          <span>TWILIGHT ATELIER</span>
           <span class="topbar-divider"></span>
-          <span class="scene-count"><span id="card-count">05</span><span> SYSTEMS</span></span>
+          <span class="scene-count"><span id="card-count">05</span><span> POST CARDS</span></span>
         </div>
         <div class="topbar-actions">
-          <button class="mode-pill tour-pill" id="tour-button" type="button" aria-pressed="false" title="Launch Autonomous 3D Guided Tour (T)">🎬 GUIDED TOUR</button>
-          <button class="mode-pill record-pill" id="record-tour-button" type="button" aria-pressed="false" title="Record 60FPS Tour Video (WebM)">🎥 RECORD TOUR</button>
-          <button class="mode-pill pricing-pill" id="pricing-button" type="button" aria-label="View Pricing & Plans" title="View Monetization Tiers & Upgrade">💎 UPGRADE</button>
-          <button class="mode-pill" id="secops-toggle" type="button" aria-pressed="false" title="Toggle SecOps &amp; Pen-Test Cyber Range Mode">🛡️ SECOPS LAB</button>
-          <button class="mode-pill manual-pill" id="help-button" type="button" aria-label="Open User Manual" title="Open Post Card OS User Manual (?)">📖 USER MANUAL</button>
-          <div class="avatar" aria-label="Local session">C</div>
-        </div>
-      </header>
-
-      <nav class="command-bar" aria-label="Studio command bar">
+          <details class="studio-tools" id="studio-tools">
+            <summary class="studio-tools-trigger" aria-label="Open room tools">Room tools <span aria-hidden="true">⌄</span></summary>
+            <nav class="command-bar" aria-label="Studio command bar">
         <div class="command-group command-view">
           <details class="pulldown facet-pulldown" id="facet-pulldown">
             <summary class="pulldown-trigger">
@@ -60,15 +204,11 @@
           <div class="selection">
             <span class="selection-indicator"></span>
             <div>
-              <div class="selection-label">SELECTED CARD <span class="tier-badge tier-badge-enterprise" id="selected-tier">ENTERPRISE</span></div>
-              <div class="selection-name" id="selected-name" aria-live="polite">Post Card · Spatial OS</div>
+              <div class="selection-label">SELECTED CARD</div>
+              <div class="selection-name" id="selected-name" aria-live="polite">Linux · Dev Space</div>
             </div>
           </div>
           <div class="dock-actions">
-            <button class="dock-button guest-button" id="guest-button" title="Start the selected guest" aria-label="Launch the selected guest">
-              <span class="button-icon" aria-hidden="true">▣</span>
-              <span>Start Linux</span>
-            </button>
             <button class="dock-button" id="zoom-button" title="Zoom card (Z)" aria-label="Zoom into or out of selected card">
               <span class="button-icon" aria-hidden="true">🔍</span>
               <span id="zoom-button-label">Zoom card</span>
@@ -151,23 +291,86 @@
             </div>
           </section>
         </div>
-      </nav>
+            </nav>
+          </details>
+          <button class="mode-pill" id="secops-toggle" type="button" aria-pressed="false" title="Toggle SecOps &amp; Pen-Test Cyber Range Mode">🛡️ SECOPS LAB</button>
+          <button class="mode-pill manual-pill" id="help-button" type="button" aria-label="Open User Manual" title="Open Post Card OS User Manual (?)">📖 USER MANUAL</button>
+          <div class="profile-control" id="profile-control">
+            <button
+              class="avatar profile-avatar"
+              id="profile-button"
+              type="button"
+              aria-label="Open local profile options"
+              aria-haspopup="dialog"
+              aria-expanded="false"
+              aria-controls="profile-popover"
+            >C</button>
+            <section
+              class="profile-popover"
+              id="profile-popover"
+              role="dialog"
+              aria-labelledby="profile-popover-title"
+              hidden
+            >
+              <div class="profile-identity">
+                <span class="profile-menu-initials" id="profile-menu-initials" aria-hidden="true">C</span>
+                <span class="profile-identity-copy">
+                  <strong id="profile-menu-name">Local profile</strong>
+                  <span id="profile-popover-title">This device · local session</span>
+                </span>
+              </div>
+              <div class="profile-divider"></div>
+              <button class="profile-action" id="profile-edit-option" type="button">
+                <span class="profile-action-icon" aria-hidden="true">✎</span>
+                <span><strong>Edit local profile</strong><small>Name and initials on this device</small></span>
+              </button>
+              <button class="profile-action" id="profile-performance-option" type="button">
+                <span class="profile-action-icon" aria-hidden="true">◈</span>
+                <span><strong>Studio preferences</strong><small>Graphics and guest CPU settings</small></span>
+              </button>
+              <button class="profile-action" id="profile-help-option" type="button">
+                <span class="profile-action-icon" aria-hidden="true">⌘</span>
+                <span><strong>Keyboard shortcuts &amp; manual</strong><small>Open the operator handbook</small></span>
+              </button>
+              <button class="profile-action" id="profile-about-option" type="button">
+                <span class="profile-action-icon" aria-hidden="true">i</span>
+                <span><strong>About Post Card O.S.</strong><small>Local prototype information</small></span>
+              </button>
+            </section>
+          </div>
+        </div>
+      </header>
 
       <main class="workspace">
-        <section class="scene-shell" aria-label="Interactive 3D Post Card studio">
-          <div id="scene" class="scene"></div>
-          <div class="tour-overlay" id="tour-overlay" hidden>
-            <div class="tour-header">
-              <span class="tour-step-badge" id="tour-step-badge">TOUR · 1 / 7</span>
-              <span class="tour-live-dot" aria-hidden="true"></span>
-              <span class="tour-status-label" id="tour-status-label">AUTONOMOUS DEMO</span>
+        <section class="scene-shell" id="room" aria-label="Interactive 3D Post Card room">
+          <aside class="room-welcome" aria-label="Room orientation">
+            <p class="room-kicker">TWILIGHT ATELIER <span>·</span> LOCAL PROTOTYPE</p>
+            <h1>Welcome back.</h1>
+            <p class="room-intro" id="room-card-summary">Your five systems are gathered here.</p>
+            <div class="room-selection">
+              <span class="room-selection-mark" aria-hidden="true"></span>
+              <div>
+                <span class="room-selection-label">IN FOCUS</span>
+                <strong id="room-selected-name">Linux · Dev Space</strong>
+                <span class="room-state" id="room-selected-status">DEMO · DISCONNECTED</span>
+              </div>
             </div>
-            <div class="tour-step-title" id="tour-step-title">Sanctuary Architecture &amp; Dais Reveal</div>
-            <div class="tour-step-desc" id="tour-step-desc">Twin Neural Monoliths, Chandelier &amp; Spatial Studio</div>
-            <div class="tour-progress-bar"><div class="tour-progress-fill" id="tour-progress-fill" style="width: 0%"></div></div>
+            <button class="room-launch" id="guest-button" title="Start the selected guest" aria-label="Launch the selected guest">
+              <span aria-hidden="true">↗</span>
+              <span>Install Debian base</span>
+            </button>
+          </aside>
+          <nav class="room-card-nav" id="room-card-nav" aria-label="Post Cards in this room"></nav>
+          <div id="scene" class="scene"></div>
+          <div class="trash-target" id="trash-target" hidden aria-hidden="true" role="status" aria-live="polite">
+            <span class="trash-basket" aria-hidden="true"><span></span></span>
+            <span class="trash-target-copy">
+              <strong>THE PAPER BIN</strong>
+              <small>Shift/right-drag · quick flick</small>
+            </span>
           </div>
           <aside class="flip-compass" id="flip-compass" aria-label="6-Way Directional Flip &amp; Zoom Pad">
-            <details class="pulldown compass-pulldown" open>
+            <details class="pulldown compass-pulldown">
               <summary class="compass-title">6-WAY D-PAD &amp; ZOOM <span>▾</span></summary>
               <div class="compass-body">
                 <div class="compass-grid">
@@ -183,35 +386,49 @@
           </aside>
           <div class="scene-hint">
             <span class="hint-mouse" aria-hidden="true"></span>
-            <span>BROWSE WITH SCROLL OR ARROWS</span>
+            <span>SCROLL OR ARROWS TO BROWSE</span>
             <span class="hint-divider">·</span>
-            <span>GRAB &amp; DRAG CARD TO 6-WAY FLIP · SHIFT+DRAG TO MOVE</span>
+            <span>DRAG TO TURN · SHIFT + DRAG TO MOVE</span>
           </div>
           <div class="scene-index"><span class="index-line"></span><span><span id="scene-card-index">03</span> — <span id="scene-card-total">05</span></span></div>
         </section>
 
         <footer class="statusbar">
-          <div class="status-note"><span class="status-mark">i</span><span>Your systems, side by side — tuned for a lighter footprint.</span></div>
+          <div class="status-note"><span class="status-mark">i</span><span>Local preview · guest systems remain disconnected until launched.</span></div>
           <div class="status-right"><span class="status-live"></span><span>LOCAL SESSION</span><span class="status-divider"></span><span title="Day-One Twin-Star Co-Pilot">✦ G-III CORE</span><span class="status-divider"></span><span>BUILD 0.1</span></div>
         </footer>
       </main>
+        </div>
 
-      <div class="toast" id="toast" role="status" aria-live="polite"></div>
+        <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-      <dialog class="share-dialog" id="share-dialog">
+        <dialog class="trash-dialog" id="trash-dialog" aria-labelledby="trash-title" aria-describedby="trash-description">
+          <form>
+            <div class="dialog-kicker">TWILIGHT ATELIER · FINAL CHECK</div>
+            <h2 id="trash-title">Let this card go?</h2>
+            <p class="trash-card-identity"><strong id="trash-card-name"></strong><code id="trash-card-id"></code></p>
+            <p class="dialog-description" id="trash-description">
+              Permanent deletion removes this card’s VM disk, its per-card TPM and UEFI state, and associated checkpoints.
+              Shared Debian images and firmware templates are kept safe.
+            </p>
+            <p class="trash-error" id="trash-error" role="alert" aria-live="assertive"></p>
+            <div class="dialog-actions">
+              <button class="dialog-cancel" id="trash-cancel" type="button">Keep this card</button>
+              <button class="trash-confirm" id="trash-confirm" type="button">Delete permanently</button>
+            </div>
+          </form>
+        </dialog>
+
+        <dialog class="share-dialog" id="share-dialog">
         <form method="dialog" id="share-form">
           <div class="dialog-kicker"><span class="plane-mark">➤</span> PAPER AIRPLANE</div>
           <h2>Send a little something.</h2>
           <p class="dialog-description">Send between Post Cards, into live VMs via QMP, or across the network to any live computer.</p>
           <label for="recipient">SEND TO</label>
           <select id="recipient" name="recipient"></select>
-          <label for="remote-target">LIVE COMPUTER / PAIRDROP / LOCALSEND TARGET (OPTIONAL)</label>
-          <input id="remote-target" name="remoteTarget" type="text" maxlength="256" placeholder="e.g. pairdrop://482910, localsend://192.168.1.50:53317, or 192.168.1.50:5173" />
-          <div class="pulldown-grid" style="margin: 6px 0 8px">
-            <button class="omni-chip" id="pairdrop-key-button" type="button" title="Generate a 6-digit PairDrop pairing key for the selected card">🔗 PairDrop 6-Digit Key</button>
-            <button class="omni-chip" id="pairdrop-room-button" type="button" title="Create or join a 5-letter PairDrop public room">🌐 PairDrop 5-Letter Room</button>
-          </div>
-          <p class="dialog-subhint">Supports PairDrop (<code>pairdrop://&lt;key&gt;</code>), LocalSend v2 (<code>localsend://&lt;host&gt;:53317</code>), or <code>curl -s http://&lt;this-host&gt;:5173/api/guest/paper-plane/catch</code></p>
+          <label for="remote-target">LIVE COMPUTER / NETWORK TARGET (OPTIONAL)</label>
+          <input id="remote-target" name="remoteTarget" type="text" maxlength="256" placeholder="e.g. 192.168.1.50:5173, https://webhook..., or tcp://192.168.1.50:9999" />
+          <p class="dialog-subhint">Or catch from any live computer: <code>curl -s http://&lt;this-host&gt;:5173/api/guest/paper-plane/catch</code></p>
           <label for="message">YOUR MESSAGE</label>
           <textarea id="message" name="message" rows="3" maxlength="160" placeholder="A note, a link, a little context… (or attach a file below)"></textarea>
           <label for="file-drop-input">HEAVY PAPER AIRPLANE · VVFAT FILE DROP (OPTIONAL)</label>
@@ -329,6 +546,40 @@
         </form>
       </dialog>
 
+      <dialog class="share-dialog profile-dialog" id="profile-edit-dialog" aria-labelledby="profile-edit-title">
+        <form id="profile-edit-form" novalidate>
+          <div class="dialog-kicker">THIS DEVICE · LOCAL PROFILE</div>
+          <h2 id="profile-edit-title">Make this space yours.</h2>
+          <p class="dialog-description">Your label is saved in this browser on this device. It is not an account and is not synced.</p>
+          <label for="profile-name-input">DISPLAY NAME</label>
+          <input id="profile-name-input" name="displayName" type="text" maxlength="40" autocomplete="nickname" required />
+          <label for="profile-initials-input">AVATAR INITIALS</label>
+          <input id="profile-initials-input" name="initials" type="text" maxlength="8" autocomplete="off" required aria-describedby="profile-initials-hint" />
+          <p class="profile-field-hint" id="profile-initials-hint">Use one or two letters. They appear in the room header.</p>
+          <p class="profile-form-error" id="profile-edit-error" role="status" aria-live="polite"></p>
+          <div class="dialog-actions">
+            <button class="dialog-cancel" id="cancel-profile-edit" type="button">Cancel</button>
+            <button class="dialog-send" type="submit">Save local profile</button>
+          </div>
+        </form>
+      </dialog>
+
+      <dialog class="share-dialog profile-dialog profile-about-dialog" id="profile-about-dialog" aria-labelledby="profile-about-title">
+        <form method="dialog">
+          <div class="dialog-kicker">LOCAL SPATIAL WORKSPACE</div>
+          <h2 id="profile-about-title">Post Card O.S.</h2>
+          <p class="dialog-description">A desktop-first local prototype for arranging system cards and opening virtual workspaces.</p>
+          <dl class="profile-about-facts">
+            <div><dt>Version</dt><dd>0.1.0</dd></div>
+            <div><dt>Profile</dt><dd>This browser and device only</dd></div>
+            <div><dt>Account sync</dt><dd>Not available in this prototype</dd></div>
+          </dl>
+          <div class="dialog-actions">
+            <button class="dialog-send" value="close">Close</button>
+          </div>
+        </form>
+      </dialog>
+
       <dialog class="guest-dialog" id="guest-dialog" aria-labelledby="guest-title">
         <section class="guest-window">
           <header class="guest-window-header">
@@ -341,7 +592,10 @@
             </div>
             <button class="guest-close" id="guest-close" type="button">Close display</button>
           </header>
-          <p class="guest-state" id="guest-state" role="status" aria-live="polite">Guest is offline.</p>
+          <div class="guest-display-toolbar">
+            <p class="guest-state" id="guest-state" role="status" aria-live="polite">Guest is offline.</p>
+            <button class="guest-action guest-wake-action" id="guest-wake-screen" type="button" disabled>Wake screen</button>
+          </div>
           <div class="guest-display" id="guest-display" aria-label="Live guest display"></div>
           <div class="guest-error" id="guest-error" role="alert" hidden></div>
           <footer class="guest-window-footer">
@@ -359,7 +613,6 @@
                   <button class="guest-action" id="guest-savepoint" type="button">⏱️ Savepoint (RAM + Disk)</button>
                   <button class="guest-action" id="guest-rewind" type="button">⏪ Rewind VM</button>
                   <button class="guest-action" id="guest-restore-checkpoint" type="button" title="Roll the Windows disk back to its newest automatic checkpoint (VM must be stopped)">🛟 Restore last checkpoint</button>
-                  <button class="guest-action" id="guest-native-viewer" type="button" title="Open this guest's VNC display in external TurboVNC viewer">🖥️ Open in native viewer (TurboVNC)</button>
                 </div>
               </details>
               <button class="guest-action guest-action-stop" id="guest-shutdown" type="button">Request shutdown</button>
@@ -368,94 +621,6 @@
             <p>Install Debian once as the golden base, shut it down, then finish the base. Up to four Linux cards can run at once, each with its own persistent QCOW2 overlay. Closing this display does not shut down the guest.</p>
           </footer>
         </section>
-      </dialog>
-
-      <dialog class="share-dialog pricing-dialog" id="pricing-dialog" aria-labelledby="pricing-title">
-        <form method="dialog" id="pricing-form">
-          <div class="dialog-logo-badge">
-            <img src="/company-logo.svg" width="28" height="28" alt="Post Card OS logo" />
-            <div class="dialog-kicker">POST CARD SPATIAL OS · MONETIZATION CATALOG</div>
-          </div>
-          <h2 id="pricing-title">Select your Spatial OS Edition.</h2>
-          <p class="dialog-description">Choose the tier that fits your computing profile. Upgrade instantly with secure Stripe checkout.</p>
-
-          <!-- Billing Interval Toggle -->
-          <div class="pricing-cycle-toggle">
-            <label class="cycle-option">
-              <input type="radio" name="billingInterval" value="month" checked id="pricing-interval-monthly" />
-              <span>Monthly Billing</span>
-            </label>
-            <label class="cycle-option">
-              <input type="radio" name="billingInterval" value="year" id="pricing-interval-annual" />
-              <span>Annual Billing <span class="discount-badge">Save 17%</span></span>
-            </label>
-          </div>
-
-          <!-- Pricing Grid -->
-          <div class="pricing-grid">
-            <!-- Community -->
-            <div class="pricing-card pricing-card-community">
-              <div class="pricing-card-header">
-                <span class="tier-badge tier-badge-community">COMMUNITY</span>
-                <h3>Open-Core</h3>
-                <div class="price-amount">$0<span class="price-period"> / mo</span></div>
-                <p class="card-subtitle">Essential bare-metal microkernel & spatial hypervisor.</p>
-              </div>
-              <ul class="feature-list">
-                <li>✓ Bare-Metal Ring 0 Multiboot2 Microkernel</li>
-                <li>✓ Ring 3 Userland Sandboxing (<code>hello</code>, <code>poke</code>, <code>peek</code>)</li>
-                <li>✓ 2 vCPU Eco Execution Profile</li>
-                <li>✓ Standard 3D Spatial Carousel (up to 3 VMs)</li>
-                <li>✓ Local Paper Plane manual QMP injection</li>
-                <li>✓ Read-Only Hardware Telemetry</li>
-              </ul>
-              <button class="pricing-action-button button-current" type="button" disabled>Current Base Edition</button>
-            </div>
-
-            <!-- Pro Gamer -->
-            <div class="pricing-card pricing-card-pro featured">
-              <div class="featured-ribbon">POPULAR</div>
-              <div class="pricing-card-header">
-                <span class="tier-badge tier-badge-pro">PRO GAMER</span>
-                <h3>Gamer Suite</h3>
-                <div class="price-amount" id="pro-price-display">$19<span class="price-period"> / mo</span></div>
-                <p class="card-subtitle">For power users, high-performance VMs, and creators.</p>
-              </div>
-              <ul class="feature-list">
-                <li>✓ <strong>4 vCPU</strong> Gaming Performance Profile</li>
-                <li>✓ WebGL Directional Soft Shadow Maps & Dynamic Motes</li>
-                <li>✓ <strong>Time-Travel Savepoints</strong> (QCOW2 Snapshots & Rollback)</li>
-                <li>✓ <strong>Swarm x2 VM Fork</strong> (Rapid Branch Testing)</li>
-                <li>✓ PairDrop & LocalSend v2 3D Paper Plane Network Courier</li>
-                <li>✓ Priority Community Support</li>
-              </ul>
-              <button class="pricing-action-button button-upgrade-pro" data-tier="pro" type="button">Upgrade to Pro ↗</button>
-            </div>
-
-            <!-- Enterprise SecOps -->
-            <div class="pricing-card pricing-card-enterprise">
-              <div class="pricing-card-header">
-                <span class="tier-badge tier-badge-enterprise">ENTERPRISE</span>
-                <h3>SecOps & Vault</h3>
-                <div class="price-amount" id="enterprise-price-display">$199<span class="price-period"> / seat / mo</span></div>
-                <p class="card-subtitle">Zero-trust microkernel security & hardware passthrough.</p>
-              </div>
-              <ul class="feature-list">
-                <li>✓ <strong>BitVisor VT-d DMAR</strong> Virtualization & DMA Defense</li>
-                <li>✓ <strong>NVIDIA OpenShell VFIO</strong> Dedicated GPU Passthrough</li>
-                <li>✓ <strong>OpenSandbox</strong> Zero-Trust Micro-Sandboxes</li>
-                <li>✓ <strong>Kali Cyber Range</strong> Isolated VLAN Mesh</li>
-                <li>✓ SHA-256 Tamper-Evident Audit Logs & RFC 5424 Syslog</li>
-                <li>✓ Multi-Seat Licensing & Dedicated SLA</li>
-              </ul>
-              <button class="pricing-action-button button-upgrade-enterprise" data-tier="enterprise" type="button">Deploy Enterprise ↗</button>
-            </div>
-          </div>
-
-          <div class="dialog-actions">
-            <button class="dialog-cancel" id="cancel-pricing" type="button">Close</button>
-          </div>
-        </form>
       </dialog>
     </div>
     <script type="module" src="/src/main.ts"></script>
