@@ -1,0 +1,36 @@
+﻿# Build output
+target/
+dist/
+temp-build/
+*.exe
+*.pdb
+*.iso
+# Dependencies
+node_modules/
+# VM images and runtime data (large, local only)
+workspace-prototype/data/
+*.qcow2
+*.vmdk
+*.vdi
+# Editor / tool state
+.vs/
+.vscode/
+.snapshots/
+.ai-undo/
+supabase/.temp/
+# Secrets
+.env
+.env.*
+# Other projects living beside this one
+micro-host/
+fresh-postcard/
+# Kernel and host files live in the micro-host repo
+/user/
+/Cargo.toml
+/Cargo.lock
+/rust-toolchain.toml
+/.cargo/
+/ramdisk.img
+
+# Kernel build scripts live in the micro-host repo
+/scripts/*.sh

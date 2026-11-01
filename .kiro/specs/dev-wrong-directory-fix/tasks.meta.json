@@ -1,0 +1,124 @@
+{
+  "pbtResults": {
+    "1. Write bug condition exploration test": {
+      "status": "passed",
+      "failingExample": "Bug condition reproduced on UNFIXED code (exploration test FAILED as expected = success case). Root cause: Test-Path G:\\micro-host\\package.json returned False (no delegator at parent). Counterexamples for all four scripts invoked with cwd G:\\micro-host: [dev] exitCode=-4058; npm error code ENOENT; npm error path G:\\micro-host\\package.json; npm error enoent Could not read package.json: Error: ENOENT: no such file or directory, open 'G:\\micro-host\\package.json'. [build] same ENOENT. [preview] same ENOENT. [test] same ENOENT. Matches isBugCondition: command IN [dev,build,preview,test] AND cwd==G:\\micro-host AND NOT packageJsonExists(cwd) AND commandFailsWithENOENT. Repro script: g:\\micro-host\\micro-host\\.kiro\\specs\\dev-wrong-directory-fix\\bug-condition-exploration.test.ps1",
+      "lastRunTimestamp": 1793068235565
+    },
+    "2. Write preservation property tests (BEFORE implementing fix)": {
+      "status": "passed",
+      "lastRunTimestamp": 1793068607700
+    }
+  },
+  "executionHistory": {
+    "1. Write bug condition exploration test": [
+      {
+        "executionId": "e1ceac7d-bdf5-4811-b255-c1cc6526a76c",
+        "chatSessionId": "sess_d1e1c400-8173-4bc8-8398-1fdfe122ae5b",
+        "timestamp": 1793067959443
+      },
+      {
+        "executionId": "e1ceac7d-bdf5-4811-b255-c1cc6526a76c",
+        "chatSessionId": "sess_d1e1c400-8173-4bc8-8398-1fdfe122ae5b",
+        "timestamp": 1793067976033
+      },
+      {
+        "executionId": "e1ceac7d-bdf5-4811-b255-c1cc6526a76c",
+        "chatSessionId": "sess_d1e1c400-8173-4bc8-8398-1fdfe122ae5b",
+        "timestamp": 1793068255758
+      }
+    ],
+    "2. Write preservation property tests (BEFORE implementing fix)": [
+      {
+        "executionId": "e1ceac7d-bdf5-4811-b255-c1cc6526a76c",
+        "chatSessionId": "sess_d1e1c400-8173-4bc8-8398-1fdfe122ae5b",
+        "timestamp": 1793067959703
+      },
+      {
+        "executionId": "e1ceac7d-bdf5-4811-b255-c1cc6526a76c",
+        "chatSessionId": "sess_d1e1c400-8173-4bc8-8398-1fdfe122ae5b",
+        "timestamp": 1793068266385
+      },
+      {
+        "executionId": "e1ceac7d-bdf5-4811-b255-c1cc6526a76c",
+        "chatSessionId": "sess_d1e1c400-8173-4bc8-8398-1fdfe122ae5b",
+        "timestamp": 1793068677361
+      }
+    ],
+    "3.1 Implement the fix": [
+      {
+        "executionId": "e1ceac7d-bdf5-4811-b255-c1cc6526a76c",
+        "chatSessionId": "sess_d1e1c400-8173-4bc8-8398-1fdfe122ae5b",
+        "timestamp": 1793067960056
+      },
+      {
+        "executionId": "e1ceac7d-bdf5-4811-b255-c1cc6526a76c",
+        "chatSessionId": "sess_d1e1c400-8173-4bc8-8398-1fdfe122ae5b",
+        "timestamp": 1793068683897
+      },
+      {
+        "executionId": "1def6363-3128-431b-b227-80913087f112",
+        "chatSessionId": "sess_d1e1c400-8173-4bc8-8398-1fdfe122ae5b",
+        "timestamp": 1793069152031
+      }
+    ],
+    "3.2 Verify bug condition exploration test now passes": [
+      {
+        "executionId": "e1ceac7d-bdf5-4811-b255-c1cc6526a76c",
+        "chatSessionId": "sess_d1e1c400-8173-4bc8-8398-1fdfe122ae5b",
+        "timestamp": 1793067960322
+      },
+      {
+        "executionId": "1def6363-3128-431b-b227-80913087f112",
+        "chatSessionId": "sess_d1e1c400-8173-4bc8-8398-1fdfe122ae5b",
+        "timestamp": 1793069158299
+      },
+      {
+        "executionId": "21ed9250-9a6b-4790-8b0d-841fb3dd0003",
+        "chatSessionId": "sess_d1e1c400-8173-4bc8-8398-1fdfe122ae5b",
+        "timestamp": 1793070362989
+      }
+    ],
+    "3.3 Verify preservation tests still pass": [
+      {
+        "executionId": "e1ceac7d-bdf5-4811-b255-c1cc6526a76c",
+        "chatSessionId": "sess_d1e1c400-8173-4bc8-8398-1fdfe122ae5b",
+        "timestamp": 1793067960529
+      },
+      {
+        "executionId": "21ed9250-9a6b-4790-8b0d-841fb3dd0003",
+        "chatSessionId": "sess_d1e1c400-8173-4bc8-8398-1fdfe122ae5b",
+        "timestamp": 1793070374531
+      },
+      {
+        "executionId": "21ed9250-9a6b-4790-8b0d-841fb3dd0003",
+        "chatSessionId": "sess_d1e1c400-8173-4bc8-8398-1fdfe122ae5b",
+        "timestamp": 1793070521917
+      }
+    ],
+    "4. Checkpoint - Ensure all tests pass": [
+      {
+        "executionId": "e1ceac7d-bdf5-4811-b255-c1cc6526a76c",
+        "chatSessionId": "sess_d1e1c400-8173-4bc8-8398-1fdfe122ae5b",
+        "timestamp": 1793067960797
+      },
+      {
+        "executionId": "21ed9250-9a6b-4790-8b0d-841fb3dd0003",
+        "chatSessionId": "sess_d1e1c400-8173-4bc8-8398-1fdfe122ae5b",
+        "timestamp": 1793070528126
+      },
+      {
+        "executionId": "21ed9250-9a6b-4790-8b0d-841fb3dd0003",
+        "chatSessionId": "sess_d1e1c400-8173-4bc8-8398-1fdfe122ae5b",
+        "timestamp": 1793070587867
+      }
+    ],
+    "3. Fix for parent directory ENOENT (missing `package.json` at `G:\\micro-host`)": [
+      {
+        "executionId": "21ed9250-9a6b-4790-8b0d-841fb3dd0003",
+        "chatSessionId": "sess_d1e1c400-8173-4bc8-8398-1fdfe122ae5b",
+        "timestamp": 1793070522163
+      }
+    ]
+  }
+}

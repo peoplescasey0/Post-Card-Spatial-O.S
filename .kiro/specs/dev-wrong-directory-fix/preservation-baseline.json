@@ -1,0 +1,15 @@
+﻿{
+    "description":  "Pre-fix preservation baseline for dev-wrong-directory-fix. Recorded on UNFIXED code during Task 2 (observation-first methodology). Task 3.3 recomputes these checksums post-fix and compares them to confirm the existing package.json files are byte-for-byte unchanged (Requirement 3.3).",
+    "spec":  "dev-wrong-directory-fix",
+    "recordedBy":  "Task 2 - preservation property tests",
+    "files":  {
+                  "g:\\micro-host\\micro-host\\package.json":  {
+                                                                   "sha256":  "40F07C2B91A9568780FE3ACC1D8CF6653FCE7E59537CD48CA7AF51B7AE11A614",
+                                                                   "bytes":  402
+                                                               },
+                  "g:\\micro-host\\micro-host\\workspace-prototype\\package.json":  {
+                                                                                        "sha256":  "1180D3827C6D3C5CD9ED3ED1B758D3CAAF5A3756C8D89E860B4DB7768C5144B7",
+                                                                                        "bytes":  456
+                                                                                    }
+              }
+}

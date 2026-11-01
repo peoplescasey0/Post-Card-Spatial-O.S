@@ -1,0 +1,463 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#07090E" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/company-logo.png" />
+    <meta
+      name="description"
+      content="Post Card OS — an interactive spatial workspace prototype."
+    />
+    <title>Post Card OS — Spatial Workspace</title>
+  </head>
+  <body>
+    <div id="app">
+      <header class="topbar">
+        <a class="brand" href="#" aria-label="Post Card OS home">
+          <img class="brand-logo-img" src="/company-logo.svg" width="32" height="32" alt="Post Card OS company logo" />
+          <span>post card<span class="brand-light">.os</span></span>
+        </a>
+        <div class="topbar-center">
+          <span class="live-dot"></span>
+          <span>SPATIAL STUDIO</span>
+          <span class="topbar-divider"></span>
+          <span class="scene-count"><span id="card-count">05</span><span> SYSTEMS</span></span>
+        </div>
+        <div class="topbar-actions">
+          <button class="mode-pill tour-pill" id="tour-button" type="button" aria-pressed="false" title="Launch Autonomous 3D Guided Tour (T)">🎬 GUIDED TOUR</button>
+          <button class="mode-pill record-pill" id="record-tour-button" type="button" aria-pressed="false" title="Record 60FPS Tour Video (WebM)">🎥 RECORD TOUR</button>
+          <button class="mode-pill pricing-pill" id="pricing-button" type="button" aria-label="View Pricing & Plans" title="View Monetization Tiers & Upgrade">💎 UPGRADE</button>
+          <button class="mode-pill" id="secops-toggle" type="button" aria-pressed="false" title="Toggle SecOps &amp; Pen-Test Cyber Range Mode">🛡️ SECOPS LAB</button>
+          <button class="mode-pill manual-pill" id="help-button" type="button" aria-label="Open User Manual" title="Open Post Card OS User Manual (?)">📖 USER MANUAL</button>
+          <div class="avatar" aria-label="Local session">C</div>
+        </div>
+      </header>
+
+      <nav class="command-bar" aria-label="Studio command bar">
+        <div class="command-group command-view">
+          <details class="pulldown facet-pulldown" id="facet-pulldown">
+            <summary class="pulldown-trigger">
+              <span class="pulldown-kicker">6-WAY CARD VIEW</span>
+              <span class="pulldown-current" id="facet-pulldown-label">01 · DISPLAY</span>
+              <span class="pulldown-chevron" aria-hidden="true">▾</span>
+            </summary>
+            <div class="pulldown-panel">
+              <div class="pulldown-section-label">SELECT CARD FACET (1–6)</div>
+              <nav class="facet-bar" id="facet-bar" aria-label="6-way Post Card facet selector">
+                <button class="facet-pill active" data-facet="front" type="button" title="Front · Live Display (Key 1)"><span>01</span> DISPLAY</button>
+                <button class="facet-pill" data-facet="back" type="button" title="Back · Hardware &amp; Settings (Key 2)"><span>02</span> SETTINGS</button>
+                <button class="facet-pill" data-facet="left" type="button" title="Left · Security &amp; Isolation (Key 3 / A)"><span>03</span> SECURITY</button>
+                <button class="facet-pill" data-facet="right" type="button" title="Right · Paper Planes &amp; Sharing (Key 4 / D)"><span>04</span> PLANES</button>
+                <button class="facet-pill" data-facet="top" type="button" title="Top · Sandbox Quick Actions (Key 5 / W)"><span>05</span> ACTIONS</button>
+                <button class="facet-pill" data-facet="bottom" type="button" title="Bottom · Live Telemetry &amp; Ports (Key 6 / S)"><span>06</span> TELEMETRY</button>
+              </nav>
+            </div>
+          </details>
+        </div>
+        <section class="command-group command-card" aria-label="Selected Post Card actions">
+          <div class="selection">
+            <span class="selection-indicator"></span>
+            <div>
+              <div class="selection-label">SELECTED CARD <span class="tier-badge tier-badge-enterprise" id="selected-tier">ENTERPRISE</span></div>
+              <div class="selection-name" id="selected-name" aria-live="polite">Post Card · Spatial OS</div>
+            </div>
+          </div>
+          <div class="dock-actions">
+            <button class="dock-button guest-button" id="guest-button" title="Start the selected guest" aria-label="Launch the selected guest">
+              <span class="button-icon" aria-hidden="true">▣</span>
+              <span>Start Linux</span>
+            </button>
+            <button class="dock-button" id="zoom-button" title="Zoom card (Z)" aria-label="Zoom into or out of selected card">
+              <span class="button-icon" aria-hidden="true">🔍</span>
+              <span id="zoom-button-label">Zoom card</span>
+            </button>
+            <button class="dock-button" id="flip-button" title="6-way flip" aria-label="Cycle 6-way card facet">
+              <span class="button-icon flip-icon" aria-hidden="true">↻</span>
+              <span>6-Way Flip</span>
+            </button>
+            <button class="dock-button performance-button" id="performance-button" type="button" title="Performance" aria-label="Open CPU and GPU performance suite">
+              <span class="button-icon" aria-hidden="true">⚡</span>
+              <span>Performance</span>
+            </button>
+            <details class="pulldown dock-pulldown" id="dock-ops-pulldown">
+              <summary class="dock-button pulldown-dock-trigger" title="Card ops">
+                <span class="button-icon" aria-hidden="true">⚙</span>
+                <span>Card Ops ▾</span>
+              </summary>
+              <div class="pulldown-panel pulldown-panel-down">
+                <div class="pulldown-section-label">DISK &amp; OVERLAY</div>
+                <button class="dock-menu-item" id="clone-button" type="button" aria-label="Clone selected card">
+                  <span class="button-icon" aria-hidden="true">⧉</span>
+                  <span>Clone card &amp; QCOW2 overlay</span>
+                </button>
+                <button class="dock-menu-item" id="reset-button" type="button" aria-label="Reset selected card disk overlay">
+                  <span class="button-icon" aria-hidden="true">↺</span>
+                  <span>Reset disk overlay to clean base</span>
+                </button>
+              </div>
+            </details>
+            <button class="dock-button send-button" id="send-button" title="Send a paper plane" aria-label="Send a paper plane">
+              <span class="button-icon" aria-hidden="true">➤</span>
+              <span>Send a paper plane</span>
+            </button>
+            <span class="dock-divider"></span>
+            <button class="add-button" id="add-button" aria-label="Add a system card" title="Add a system card">+</button>
+          </div>
+        </section>
+        <div class="command-group command-ai">
+          <section class="omni-bar" id="omni-bar" aria-label="Native AI Copilot and SecOps Playbook Bar">
+            <div class="omni-top-row">
+              <form class="omni-form" id="omni-form">
+                <span class="omni-badge" title="G-III Twin-Star Co-Pilot Core">✦ G3 · AI OPS</span>
+                <input
+                  class="omni-input"
+                  id="omni-input"
+                  type="text"
+                  maxlength="160"
+                  placeholder="Ask Native AI or type a SecOps goal (Ctrl+K / /)…"
+                  aria-label="Native AI or SecOps command prompt"
+                />
+                <button class="omni-submit" id="omni-submit" type="submit">AI Fly ➤</button>
+              </form>
+              <details class="pulldown omni-pulldown" id="omni-pulldown">
+                <summary class="pulldown-trigger pulldown-trigger-compact">
+                  <span>PLAYBOOKS &amp; OPS</span>
+                  <span class="pulldown-chevron" aria-hidden="true">▾</span>
+                </summary>
+                <div class="pulldown-panel pulldown-panel-right" id="omni-chips">
+                  <div class="pulldown-section-label">SECOPS &amp; RECON PLAYBOOKS</div>
+                  <div class="pulldown-grid">
+                    <button class="omni-chip" data-omni-action="recon-ports" type="button" title="Enumerate listening TCP/UDP ports">⚡ Recon Ports</button>
+                    <button class="omni-chip" data-omni-action="priv-audit" type="button" title="Audit SUID binaries &amp; privilege posture">🛡️ Priv Audit</button>
+                    <button class="omni-chip" data-omni-action="active-conns" type="button" title="Inspect established outbound sockets">🌐 Live Sockets</button>
+                    <button class="omni-chip" data-omni-action="harden-fw" type="button" title="Audit firewall &amp; SSH hardening">🔥 Firewall</button>
+                    <button class="omni-chip" data-omni-action="sys-forensics" type="button" title="Inspect top processes &amp; cron persistence">🕵️ Forensics</button>
+                  </div>
+                  <div class="pulldown-section-label">HYPERVISOR &amp; HORIZON OPS</div>
+                  <div class="pulldown-grid">
+                    <button class="omni-chip omni-chip-horizon" data-omni-action="snapshot-save" type="button" title="Create a Time-Travel Savepoint (RAM + Disk)">⏱️ Savepoint</button>
+                    <button class="omni-chip omni-chip-horizon" data-omni-action="snapshot-rewind" type="button" title="Rewind card to last Time-Travel Savepoint">⏪ Rewind</button>
+                    <button class="omni-chip omni-chip-horizon" data-omni-action="swarm-fork" type="button" title="Fork selected card into 2 parallel Swarm clones">🐝 Swarm ×2</button>
+                    <button class="omni-chip omni-chip-horizon" data-omni-action="cycle-network" type="button" title="Cycle card network topology: NAT / Cyber-Range VLAN / Airgap">🔌 Net Mode</button>
+                    <button class="omni-chip omni-chip-horizon" data-omni-action="cycle-memory" type="button" title="Cycle card RAM profile: Eco (1G/2G) / Balanced / Performance + VirtIO Balloon">🍃 Eco RAM</button>
+                    <button class="omni-chip omni-chip-horizon" data-omni-action="file-drop" type="button" title="Drop a real file into the card's QEMU VVFAT drive">📦 Drop File</button>
+                    <button class="omni-chip omni-chip-horizon" data-omni-action="serial-exec" type="button" title="Execute &amp; read output back over the two-way ttyS0 serial pipe">📡 Serial Pipe</button>
+                  </div>
+                  <input id="quick-file-input" type="file" hidden />
+                </div>
+              </details>
+            </div>
+          </section>
+        </div>
+      </nav>
+
+      <main class="workspace">
+        <section class="scene-shell" aria-label="Interactive 3D Post Card studio">
+          <div id="scene" class="scene"></div>
+          <div class="tour-overlay" id="tour-overlay" hidden>
+            <div class="tour-header">
+              <span class="tour-step-badge" id="tour-step-badge">TOUR · 1 / 7</span>
+              <span class="tour-live-dot" aria-hidden="true"></span>
+              <span class="tour-status-label" id="tour-status-label">AUTONOMOUS DEMO</span>
+            </div>
+            <div class="tour-step-title" id="tour-step-title">Sanctuary Architecture &amp; Dais Reveal</div>
+            <div class="tour-step-desc" id="tour-step-desc">Twin Neural Monoliths, Chandelier &amp; Spatial Studio</div>
+            <div class="tour-progress-bar"><div class="tour-progress-fill" id="tour-progress-fill" style="width: 0%"></div></div>
+          </div>
+          <aside class="flip-compass" id="flip-compass" aria-label="6-Way Directional Flip &amp; Zoom Pad">
+            <details class="pulldown compass-pulldown" open>
+              <summary class="compass-title">6-WAY D-PAD &amp; ZOOM <span>▾</span></summary>
+              <div class="compass-body">
+                <div class="compass-grid">
+                  <button class="compass-btn compass-up" data-compass-facet="top" type="button" title="Flip Up · 05 Quick Actions (W / Shift+Up)">▲<span>05 ACTIONS</span></button>
+                  <button class="compass-btn compass-left" data-compass-facet="left" type="button" title="Flip Left · 03 Security (A / Shift+Left)">◀<span>03 SEC</span></button>
+                  <button class="compass-btn compass-center" id="compass-cycle" type="button" title="Flip Front / Back (F / Space)">↻<span>01/02</span></button>
+                  <button class="compass-btn compass-right" data-compass-facet="right" type="button" title="Flip Right · 04 Paper Planes (D / Shift+Right)">▶<span>04 PLANES</span></button>
+                  <button class="compass-btn compass-down" data-compass-facet="bottom" type="button" title="Flip Down · 06 Telemetry (S / Shift+Down)">▼<span>06 PORTS</span></button>
+                </div>
+                <button class="compass-zoom-btn" id="compass-zoom" type="button" title="Zoom into or out of the selected card (Z or Click Card)">🔍 Zoom Into Card (Z)</button>
+              </div>
+            </details>
+          </aside>
+          <div class="scene-hint">
+            <span class="hint-mouse" aria-hidden="true"></span>
+            <span>BROWSE WITH SCROLL OR ARROWS</span>
+            <span class="hint-divider">·</span>
+            <span>GRAB &amp; DRAG CARD TO 6-WAY FLIP · SHIFT+DRAG TO MOVE</span>
+          </div>
+          <div class="scene-index"><span class="index-line"></span><span><span id="scene-card-index">03</span> — <span id="scene-card-total">05</span></span></div>
+        </section>
+
+        <footer class="statusbar">
+          <div class="status-note"><span class="status-mark">i</span><span>Your systems, side by side — tuned for a lighter footprint.</span></div>
+          <div class="status-right"><span class="status-live"></span><span>LOCAL SESSION</span><span class="status-divider"></span><span title="Day-One Twin-Star Co-Pilot">✦ G-III CORE</span><span class="status-divider"></span><span>BUILD 0.1</span></div>
+        </footer>
+      </main>
+
+      <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+      <dialog class="share-dialog" id="share-dialog">
+        <form method="dialog" id="share-form">
+          <div class="dialog-kicker"><span class="plane-mark">➤</span> PAPER AIRPLANE</div>
+          <h2>Send a little something.</h2>
+          <p class="dialog-description">Send between Post Cards, into live VMs via QMP, or across the network to any live computer.</p>
+          <label for="recipient">SEND TO</label>
+          <select id="recipient" name="recipient"></select>
+          <label for="remote-target">LIVE COMPUTER / PAIRDROP / LOCALSEND TARGET (OPTIONAL)</label>
+          <input id="remote-target" name="remoteTarget" type="text" maxlength="256" placeholder="e.g. pairdrop://482910, localsend://192.168.1.50:53317, or 192.168.1.50:5173" />
+          <div class="pulldown-grid" style="margin: 6px 0 8px">
+            <button class="omni-chip" id="pairdrop-key-button" type="button" title="Generate a 6-digit PairDrop pairing key for the selected card">🔗 PairDrop 6-Digit Key</button>
+            <button class="omni-chip" id="pairdrop-room-button" type="button" title="Create or join a 5-letter PairDrop public room">🌐 PairDrop 5-Letter Room</button>
+          </div>
+          <p class="dialog-subhint">Supports PairDrop (<code>pairdrop://&lt;key&gt;</code>), LocalSend v2 (<code>localsend://&lt;host&gt;:53317</code>), or <code>curl -s http://&lt;this-host&gt;:5173/api/guest/paper-plane/catch</code></p>
+          <label for="message">YOUR MESSAGE</label>
+          <textarea id="message" name="message" rows="3" maxlength="160" placeholder="A note, a link, a little context… (or attach a file below)"></textarea>
+          <label for="file-drop-input">HEAVY PAPER AIRPLANE · VVFAT FILE DROP (OPTIONAL)</label>
+          <input id="file-drop-input" name="fileAttachment" type="file" />
+          <div class="dialog-actions">
+            <button class="dialog-cancel" id="cancel-share" type="button" formnovalidate>Not now</button>
+            <button class="dialog-send" id="confirm-send" value="default">Fold &amp; send <span>↗</span></button>
+          </div>
+        </form>
+      </dialog>
+
+      <dialog class="share-dialog performance-dialog" id="performance-dialog" aria-labelledby="performance-title">
+        <form id="performance-form">
+          <div class="dialog-kicker">GAMER PERFORMANCE SUITE</div>
+          <h2 id="performance-title">Tune this card.</h2>
+          <p class="dialog-description" id="performance-gpu-info"></p>
+          <label for="cpu-profile">VIRTUAL CPU ALLOCATION</label>
+          <select id="cpu-profile" name="cpuProfile">
+            <option value="eco">Eco · 1 vCPU</option>
+            <option value="balanced">Balanced · up to 2 vCPU</option>
+            <option value="gaming">Gaming · up to 4 vCPU</option>
+          </select>
+          <p class="performance-notice" id="performance-notice"></p>
+          <label for="graphics-profile">STUDIO GPU / RENDER QUALITY</label>
+          <select id="graphics-profile" name="graphicsProfile">
+            <option value="performance">Performance · lower resolution, no shadows</option>
+            <option value="balanced">Balanced · standard detail</option>
+            <option value="quality">High fidelity · full resolution and shadows</option>
+          </select>
+          <p class="performance-notice">Applies immediately to this 3D studio view only; it does not change the guest's virtual graphics adapter.</p>
+          <div class="performance-warning">
+            This changes the VM's virtual CPU allocation for its next launch. More vCPUs do not
+            guarantee higher game FPS, and this does not overclock your computer or expose the host
+            GPU. The current QEMU/VNC setup has no GPU passthrough or hardware overclock controls.
+          </div>
+          <div class="dialog-actions">
+            <button class="dialog-cancel" id="cancel-performance" type="button">Cancel</button>
+            <button class="dialog-send" type="submit">Save CPU profile <span>↗</span></button>
+          </div>
+        </form>
+      </dialog>
+
+      <dialog class="help-dialog manual-dialog" id="help-dialog">
+        <form method="dialog">
+          <div class="dialog-logo-badge">
+            <img src="/company-logo.svg" width="28" height="28" alt="Post Card OS logo" />
+            <div class="dialog-kicker">POST CARD SPATIAL OS · OPERATOR HANDBOOK (V0.1)</div>
+          </div>
+          <h2>User Manual &amp; Field Guide</h2>
+          <p class="dialog-description">Reference guide for 3D card navigation, multi-OS hypervisor controls, Eco RAM thinning, and custom operator notes.</p>
+          <div class="manual-chapters">
+            <details class="manual-chapter" open>
+              <summary class="manual-chapter-summary">
+                <span class="manual-chapter-num">CH 01</span>
+                <span class="manual-chapter-title">3D Deck, Zoom &amp; 6-Way Card Flip</span>
+                <span class="pulldown-chevron">▾</span>
+              </summary>
+              <div class="manual-chapter-body">
+                <div class="help-row"><span class="help-key">GRAB &amp; DRAG CARD</span><span>Click and drag left/right/up/down on any card to physically flip across all 6 faces.</span></div>
+                <div class="help-row"><span class="help-key">CLICK / Z KEY</span><span>Zoom directly into the selected card (2× Retina OLED view). Press <code>Z</code> or <code>Esc</code> to zoom out.</span></div>
+                <div class="help-row"><span class="help-key">SHIFT + DRAG</span><span>Reposition a card in 3D space above the studio floor.</span></div>
+              </div>
+            </details>
+            <details class="manual-chapter">
+              <summary class="manual-chapter-summary">
+                <span class="manual-chapter-num">CH 02</span>
+                <span class="manual-chapter-title">Multi-OS Hypervisor &amp; Eco RAM Thinning</span>
+                <span class="pulldown-chevron">▾</span>
+              </summary>
+              <div class="manual-chapter-body">
+                <div class="help-row"><span class="help-key">MULTI-INSTANCE</span><span>Run up to 6 concurrent Windows 11, Linux, and Android cards. Secondary Windows cards auto-clone from your base disk with isolated TPM 2.0 state.</span></div>
+                <div class="help-row"><span class="help-key">🍃 ECO RAM MODE</span><span>Streamlined default allocation: <strong>2 GiB</strong> for Windows, <strong>1 GiB</strong> for Linux &amp; Android (cycle via <em>Playbooks &amp; Ops ▾ → 🍃 Eco RAM</em>).</span></div>
+                <div class="help-row"><span class="help-key">VIRTIO BALLOON</span><span>VMs include <code>virtio-balloon</code> for guest memory reclamation when supported by the guest. Host page merging is disabled for compatibility.</span></div>
+              </div>
+            </details>
+            <details class="manual-chapter">
+              <summary class="manual-chapter-summary">
+                <span class="manual-chapter-num">CH 03</span>
+                <span class="manual-chapter-title">Paper Airplanes, Heavy File Drops &amp; Swarm Ops</span>
+                <span class="pulldown-chevron">▾</span>
+              </summary>
+              <div class="manual-chapter-body">
+                <div class="help-row"><span class="help-key">📦 HEAVY PLANES</span><span>Attach real files (up to 512 KB) to mount inside the target VM's QEMU Virtual FAT (VVFAT) drive, or press <strong>Not now / Esc</strong> to cancel.</span></div>
+                <div class="help-row"><span class="help-key">⏱️ SAVE / ⏪ REWIND</span><span>Capture live RAM + disk checkpoints before risky commands and rewind in one click.</span></div>
+                <div class="help-row"><span class="help-key">🐝 SWARM &amp; PIPE</span><span>Fork 2× copy-on-write clone cards or execute commands over <code>ttyS0</code> / <code>COM1</code> with SHA-256 flight-recorder hashes.</span></div>
+              </div>
+            </details>
+            <details class="manual-chapter" open>
+              <summary class="manual-chapter-summary">
+                <span class="manual-chapter-num">CH 04</span>
+                <span class="manual-chapter-title">Custom Manual Placeholder &amp; Operator Notes</span>
+                <span class="pulldown-chevron">▾</span>
+              </summary>
+              <div class="manual-chapter-body">
+                <label for="manual-custom-notes">CUSTOM MANUAL SECTIONS / OPERATOR NOTES (AUTO-SAVED)</label>
+                <textarea id="manual-custom-notes" rows="4" placeholder="Write your own custom manual chapters, onboarding notes, or SOPs here…"></textarea>
+                <p class="dialog-subhint">Saved automatically in local storage so you can expand your official User Manual anytime.</p>
+              </div>
+            </details>
+          </div>
+          <div class="manual-quick-ref-label">QUICK KEYBOARD &amp; GESTURE REFERENCE</div>
+
+          <div class="help-row"><span class="help-key">SCROLL / ↑ ↓</span><span>Browse the studio and focus a card.</span></div>
+          <div class="help-row"><span class="help-key">DRAG</span><span>Move a Post Card around your space.</span></div>
+          <div class="help-row"><span class="help-key">ENTER / DOUBLE-CLICK</span><span>Flip the selected card to its settings side.</span></div>
+          <div class="help-row"><span class="help-key">HOME / END</span><span>Jump to the first or last card.</span></div>
+          <div class="help-row"><span class="help-key">CLICK</span><span>Select a card, then use the dock actions.</span></div>
+          <div class="help-row"><span class="help-key">WASD / 1–6 / EDGES</span><span>6-way directional flip across Display, Settings, Security, Planes, Actions, and Telemetry.</span></div>
+          <div class="help-row"><span class="help-key">PERFORMANCE</span><span>Choose a virtual CPU profile for the next guest launch or adjust 3D studio render quality. Host CPU/GPU overclocking and guest GPU passthrough are not supported.</span></div>
+          <div class="help-row"><span class="help-key">CLONE / RESET</span><span>Fork a card's QCOW2 overlay into a new card or reset it back to the clean golden image.</span></div>
+          <div class="help-row"><span class="help-key">PAPER PLANE</span><span>Send a note across cards — spools to disk &amp; types into running VMs via QMP.</span></div>
+          <p class="help-footnote">Windows, Linux, macOS, and Android cards can boot as live QEMU guests with VirtIO Balloon devices. Press <code>?</code> anytime to open this manual. <br /><em>✦ Forged from Day One with G-III Twin-Star Co-Pilot.</em></p>
+          <div class="dialog-actions"><button class="dialog-send" value="close">Close Manual</button></div>
+
+        </form>
+      </dialog>
+
+      <dialog class="guest-dialog" id="guest-dialog" aria-labelledby="guest-title">
+        <section class="guest-window">
+          <header class="guest-window-header">
+            <div class="guest-window-title-wrap">
+              <img class="dialog-logo-icon" src="/company-logo.svg" width="32" height="32" alt="Company Logo" />
+              <div>
+                <div class="dialog-kicker">LINUX GUEST · QEMU</div>
+                <h2 id="guest-title">Linux · Dev Space</h2>
+              </div>
+            </div>
+            <button class="guest-close" id="guest-close" type="button">Close display</button>
+          </header>
+          <p class="guest-state" id="guest-state" role="status" aria-live="polite">Guest is offline.</p>
+          <div class="guest-display" id="guest-display" aria-label="Live guest display"></div>
+          <div class="guest-error" id="guest-error" role="alert" hidden></div>
+          <footer class="guest-window-footer">
+            <div class="guest-actions">
+              <button class="guest-action guest-action-primary" id="guest-install" type="button">Install Debian base</button>
+              <button class="guest-action" id="guest-finalize-base" type="button">Finish base installation</button>
+              <button class="guest-action" id="guest-boot-disk" type="button">Boot this card</button>
+              <details class="pulldown guest-pulldown" id="guest-ops-pulldown">
+                <summary class="guest-action pulldown-guest-trigger">VM Tools &amp; Snapshots ▾</summary>
+                <div class="pulldown-panel pulldown-panel-up">
+                  <div class="pulldown-section-label">DISK, PLANES &amp; TIME-TRAVEL</div>
+                  <button class="guest-action" id="guest-clone-card" type="button">⧉ Clone card overlay</button>
+                  <button class="guest-action" id="guest-reset-overlay" type="button">↺ Reset disk overlay</button>
+                  <button class="guest-action" id="guest-inject-plane" type="button">➤ Type paper plane into VM</button>
+                  <button class="guest-action" id="guest-savepoint" type="button">⏱️ Savepoint (RAM + Disk)</button>
+                  <button class="guest-action" id="guest-rewind" type="button">⏪ Rewind VM</button>
+                  <button class="guest-action" id="guest-restore-checkpoint" type="button" title="Roll the Windows disk back to its newest automatic checkpoint (VM must be stopped)">🛟 Restore last checkpoint</button>
+                  <button class="guest-action" id="guest-native-viewer" type="button" title="Open this guest's VNC display in external TurboVNC viewer">🖥️ Open in native viewer (TurboVNC)</button>
+                </div>
+              </details>
+              <button class="guest-action guest-action-stop" id="guest-shutdown" type="button">Request shutdown</button>
+              <button class="guest-action guest-action-force-stop" id="guest-force-stop" type="button">Force stop · discard unsaved work</button>
+            </div>
+            <p>Install Debian once as the golden base, shut it down, then finish the base. Up to four Linux cards can run at once, each with its own persistent QCOW2 overlay. Closing this display does not shut down the guest.</p>
+          </footer>
+        </section>
+      </dialog>
+
+      <dialog class="share-dialog pricing-dialog" id="pricing-dialog" aria-labelledby="pricing-title">
+        <form method="dialog" id="pricing-form">
+          <div class="dialog-logo-badge">
+            <img src="/company-logo.svg" width="28" height="28" alt="Post Card OS logo" />
+            <div class="dialog-kicker">POST CARD SPATIAL OS · MONETIZATION CATALOG</div>
+          </div>
+          <h2 id="pricing-title">Select your Spatial OS Edition.</h2>
+          <p class="dialog-description">Choose the tier that fits your computing profile. Upgrade instantly with secure Stripe checkout.</p>
+
+          <!-- Billing Interval Toggle -->
+          <div class="pricing-cycle-toggle">
+            <label class="cycle-option">
+              <input type="radio" name="billingInterval" value="month" checked id="pricing-interval-monthly" />
+              <span>Monthly Billing</span>
+            </label>
+            <label class="cycle-option">
+              <input type="radio" name="billingInterval" value="year" id="pricing-interval-annual" />
+              <span>Annual Billing <span class="discount-badge">Save 17%</span></span>
+            </label>
+          </div>
+
+          <!-- Pricing Grid -->
+          <div class="pricing-grid">
+            <!-- Community -->
+            <div class="pricing-card pricing-card-community">
+              <div class="pricing-card-header">
+                <span class="tier-badge tier-badge-community">COMMUNITY</span>
+                <h3>Open-Core</h3>
+                <div class="price-amount">$0<span class="price-period"> / mo</span></div>
+                <p class="card-subtitle">Essential bare-metal microkernel & spatial hypervisor.</p>
+              </div>
+              <ul class="feature-list">
+                <li>✓ Bare-Metal Ring 0 Multiboot2 Microkernel</li>
+                <li>✓ Ring 3 Userland Sandboxing (<code>hello</code>, <code>poke</code>, <code>peek</code>)</li>
+                <li>✓ 2 vCPU Eco Execution Profile</li>
+                <li>✓ Standard 3D Spatial Carousel (up to 3 VMs)</li>
+                <li>✓ Local Paper Plane manual QMP injection</li>
+                <li>✓ Read-Only Hardware Telemetry</li>
+              </ul>
+              <button class="pricing-action-button button-current" type="button" disabled>Current Base Edition</button>
+            </div>
+
+            <!-- Pro Gamer -->
+            <div class="pricing-card pricing-card-pro featured">
+              <div class="featured-ribbon">POPULAR</div>
+              <div class="pricing-card-header">
+                <span class="tier-badge tier-badge-pro">PRO GAMER</span>
+                <h3>Gamer Suite</h3>
+                <div class="price-amount" id="pro-price-display">$19<span class="price-period"> / mo</span></div>
+                <p class="card-subtitle">For power users, high-performance VMs, and creators.</p>
+              </div>
+              <ul class="feature-list">
+                <li>✓ <strong>4 vCPU</strong> Gaming Performance Profile</li>
+                <li>✓ WebGL Directional Soft Shadow Maps & Dynamic Motes</li>
+                <li>✓ <strong>Time-Travel Savepoints</strong> (QCOW2 Snapshots & Rollback)</li>
+                <li>✓ <strong>Swarm x2 VM Fork</strong> (Rapid Branch Testing)</li>
+                <li>✓ PairDrop & LocalSend v2 3D Paper Plane Network Courier</li>
+                <li>✓ Priority Community Support</li>
+              </ul>
+              <button class="pricing-action-button button-upgrade-pro" data-tier="pro" type="button">Upgrade to Pro ↗</button>
+            </div>
+
+            <!-- Enterprise SecOps -->
+            <div class="pricing-card pricing-card-enterprise">
+              <div class="pricing-card-header">
+                <span class="tier-badge tier-badge-enterprise">ENTERPRISE</span>
+                <h3>SecOps & Vault</h3>
+                <div class="price-amount" id="enterprise-price-display">$199<span class="price-period"> / seat / mo</span></div>
+                <p class="card-subtitle">Zero-trust microkernel security & hardware passthrough.</p>
+              </div>
+              <ul class="feature-list">
+                <li>✓ <strong>BitVisor VT-d DMAR</strong> Virtualization & DMA Defense</li>
+                <li>✓ <strong>NVIDIA OpenShell VFIO</strong> Dedicated GPU Passthrough</li>
+                <li>✓ <strong>OpenSandbox</strong> Zero-Trust Micro-Sandboxes</li>
+                <li>✓ <strong>Kali Cyber Range</strong> Isolated VLAN Mesh</li>
+                <li>✓ SHA-256 Tamper-Evident Audit Logs & RFC 5424 Syslog</li>
+                <li>✓ Multi-Seat Licensing & Dedicated SLA</li>
+              </ul>
+              <button class="pricing-action-button button-upgrade-enterprise" data-tier="enterprise" type="button">Deploy Enterprise ↗</button>
+            </div>
+          </div>
+
+          <div class="dialog-actions">
+            <button class="dialog-cancel" id="cancel-pricing" type="button">Close</button>
+          </div>
+        </form>
+      </dialog>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

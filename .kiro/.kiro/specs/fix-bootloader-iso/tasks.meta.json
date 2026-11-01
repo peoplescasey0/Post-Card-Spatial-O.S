@@ -1,0 +1,114 @@
+{
+  "pbtResults": {},
+  "executionHistory": {
+    "1. Write bug condition exploration test": [
+      {
+        "executionId": "58efa632-67b8-4f24-8474-c2dda376037e",
+        "chatSessionId": "sess_c6022f8b-04b8-4013-8dd8-d9687031152f",
+        "timestamp": 1792355751059
+      },
+      {
+        "executionId": "58efa632-67b8-4f24-8474-c2dda376037e",
+        "chatSessionId": "sess_c6022f8b-04b8-4013-8dd8-d9687031152f",
+        "timestamp": 1792355779056
+      },
+      {
+        "executionId": "58efa632-67b8-4f24-8474-c2dda376037e",
+        "chatSessionId": "sess_c6022f8b-04b8-4013-8dd8-d9687031152f",
+        "timestamp": 1792356388165
+      }
+    ],
+    "2. Write preservation property tests (BEFORE implementing fix)": [
+      {
+        "executionId": "58efa632-67b8-4f24-8474-c2dda376037e",
+        "chatSessionId": "sess_c6022f8b-04b8-4013-8dd8-d9687031152f",
+        "timestamp": 1792355751332
+      },
+      {
+        "executionId": "58efa632-67b8-4f24-8474-c2dda376037e",
+        "chatSessionId": "sess_c6022f8b-04b8-4013-8dd8-d9687031152f",
+        "timestamp": 1792356405304
+      },
+      {
+        "executionId": "58efa632-67b8-4f24-8474-c2dda376037e",
+        "chatSessionId": "sess_c6022f8b-04b8-4013-8dd8-d9687031152f",
+        "timestamp": 1792356595905
+      }
+    ],
+    "3.1 Implement the fix": [
+      {
+        "executionId": "58efa632-67b8-4f24-8474-c2dda376037e",
+        "chatSessionId": "sess_c6022f8b-04b8-4013-8dd8-d9687031152f",
+        "timestamp": 1792355751561
+      },
+      {
+        "executionId": "58efa632-67b8-4f24-8474-c2dda376037e",
+        "chatSessionId": "sess_c6022f8b-04b8-4013-8dd8-d9687031152f",
+        "timestamp": 1792356601926
+      },
+      {
+        "executionId": "58efa632-67b8-4f24-8474-c2dda376037e",
+        "chatSessionId": "sess_c6022f8b-04b8-4013-8dd8-d9687031152f",
+        "timestamp": 1792357457881
+      }
+    ],
+    "3.2 Verify bug condition exploration test now passes": [
+      {
+        "executionId": "58efa632-67b8-4f24-8474-c2dda376037e",
+        "chatSessionId": "sess_c6022f8b-04b8-4013-8dd8-d9687031152f",
+        "timestamp": 1792355751778
+      },
+      {
+        "executionId": "58efa632-67b8-4f24-8474-c2dda376037e",
+        "chatSessionId": "sess_c6022f8b-04b8-4013-8dd8-d9687031152f",
+        "timestamp": 1792357478993
+      },
+      {
+        "executionId": "58efa632-67b8-4f24-8474-c2dda376037e",
+        "chatSessionId": "sess_c6022f8b-04b8-4013-8dd8-d9687031152f",
+        "timestamp": 1792357534700
+      }
+    ],
+    "3.3 Verify preservation tests still pass": [
+      {
+        "executionId": "58efa632-67b8-4f24-8474-c2dda376037e",
+        "chatSessionId": "sess_c6022f8b-04b8-4013-8dd8-d9687031152f",
+        "timestamp": 1792355751956
+      },
+      {
+        "executionId": "58efa632-67b8-4f24-8474-c2dda376037e",
+        "chatSessionId": "sess_c6022f8b-04b8-4013-8dd8-d9687031152f",
+        "timestamp": 1792357551490
+      },
+      {
+        "executionId": "58efa632-67b8-4f24-8474-c2dda376037e",
+        "chatSessionId": "sess_c6022f8b-04b8-4013-8dd8-d9687031152f",
+        "timestamp": 1792357627321
+      }
+    ],
+    "4. Checkpoint - Ensure all tests pass": [
+      {
+        "executionId": "58efa632-67b8-4f24-8474-c2dda376037e",
+        "chatSessionId": "sess_c6022f8b-04b8-4013-8dd8-d9687031152f",
+        "timestamp": 1792355752148
+      },
+      {
+        "executionId": "58efa632-67b8-4f24-8474-c2dda376037e",
+        "chatSessionId": "sess_c6022f8b-04b8-4013-8dd8-d9687031152f",
+        "timestamp": 1792357636563
+      },
+      {
+        "executionId": "58efa632-67b8-4f24-8474-c2dda376037e",
+        "chatSessionId": "sess_c6022f8b-04b8-4013-8dd8-d9687031152f",
+        "timestamp": 1792357708636
+      }
+    ],
+    "3. Fix for bootloader ISO compilation failure": [
+      {
+        "executionId": "58efa632-67b8-4f24-8474-c2dda376037e",
+        "chatSessionId": "sess_c6022f8b-04b8-4013-8dd8-d9687031152f",
+        "timestamp": 1792357627548
+      }
+    ]
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "name": "micro-host-parent-delegator",
+  "private": true,
+  "description": "Parent delegator for Post Card Spatial OS (UNC & WSL safe)",
+  "scripts": {
+    "dev": "node --input-type=module -e \"import p from 'node:path';import u from 'node:url';const d=p.dirname(process.env.npm_package_json||process.env.INIT_CWD);process.argv=['node','run-vite.mjs','dev'];await import(u.pathToFileURL(p.join(d,'micro-host/workspace-prototype/run-vite.mjs')).href)\"",
+    "build": "node --input-type=module -e \"import p from 'node:path';import u from 'node:url';const d=p.dirname(process.env.npm_package_json||process.env.INIT_CWD);process.argv=['node','run-vite.mjs','build'];await import(u.pathToFileURL(p.join(d,'micro-host/workspace-prototype/run-vite.mjs')).href)\"",
+    "preview": "node --input-type=module -e \"import p from 'node:path';import u from 'node:url';const d=p.dirname(process.env.npm_package_json||process.env.INIT_CWD);process.argv=['node','run-vite.mjs','preview'];await import(u.pathToFileURL(p.join(d,'micro-host/workspace-prototype/run-vite.mjs')).href)\"",
+    "test": "node --input-type=module -e \"import p from 'node:path';import u from 'node:url';const d=p.dirname(process.env.npm_package_json||process.env.INIT_CWD);process.argv=['node','run-vite.mjs','test'];await import(u.pathToFileURL(p.join(d,'micro-host/workspace-prototype/run-vite.mjs')).href)\""
+  }
+}

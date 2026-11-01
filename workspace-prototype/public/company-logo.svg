@@ -1,0 +1,116 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    <!-- Background / Plate drop shadows -->
+    <filter id="plate-shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="18" stdDeviation="24" flood-color="#000000" flood-opacity="0.75" />
+      <feDropShadow dx="0" dy="4" stdDeviation="8" flood-color="#000000" flood-opacity="0.45" />
+    </filter>
+
+    <filter id="core-shadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="14" stdDeviation="16" flood-color="#000000" flood-opacity="0.8" />
+    </filter>
+
+    <!-- Intense Amber Neon Filament Glow -->
+    <filter id="amber-laser-glow" x="-50%" y="-200%" width="200%" height="500%">
+      <feGaussianBlur stdDeviation="3" result="blur1" />
+      <feGaussianBlur stdDeviation="8" result="blur2" />
+      <feGaussianBlur stdDeviation="18" result="blur3" />
+      <feMerge>
+        <feMergeNode in="blur3" />
+        <feMergeNode in="blur2" />
+        <feMergeNode in="blur1" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
+
+    <!-- Gradients -->
+    <linearGradient id="plate-grad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#22252C" />
+      <stop offset="45%" stop-color="#181B21" />
+      <stop offset="100%" stop-color="#101216" />
+    </linearGradient>
+
+    <linearGradient id="plate-stroke" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#3A3F4B" stop-opacity="0.9" />
+      <stop offset="100%" stop-color="#1B1E24" stop-opacity="0.4" />
+    </linearGradient>
+
+    <linearGradient id="core-grad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#16181F" />
+      <stop offset="50%" stop-color="#121318" />
+      <stop offset="100%" stop-color="#0B0C0E" />
+    </linearGradient>
+
+    <linearGradient id="beam-grad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#F59E0B" />
+      <stop offset="70%" stop-color="#FBBF24" />
+      <stop offset="100%" stop-color="#FDE68A" />
+    </linearGradient>
+
+    <linearGradient id="head-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FFFBEB" />
+      <stop offset="35%" stop-color="#FDE047" />
+      <stop offset="100%" stop-color="#F59E0B" />
+    </linearGradient>
+  </defs>
+
+  <!-- Outer Elevated Plate -->
+  <rect
+    x="80"
+    y="80"
+    width="352"
+    height="352"
+    rx="52"
+    fill="url(#plate-grad)"
+    stroke="url(#plate-stroke)"
+    stroke-width="1.5"
+    filter="url(#plate-shadow)"
+  />
+
+  <!-- Inner Raised Core Tile -->
+  <rect
+    x="146"
+    y="146"
+    width="220"
+    height="220"
+    rx="22"
+    fill="url(#core-grad)"
+    stroke="#2A2E37"
+    stroke-width="1"
+    filter="url(#core-shadow)"
+  />
+
+  <!-- Subtle Inner Bevel Highlight -->
+  <rect
+    x="147"
+    y="147"
+    width="218"
+    height="218"
+    rx="21"
+    fill="none"
+    stroke="rgba(255, 255, 255, 0.05)"
+    stroke-width="1"
+  />
+
+  <!-- Amber Laser Filament Beam & Termination Head -->
+  <g filter="url(#amber-laser-glow)">
+    <!-- Horizontal Beam -->
+    <path
+      d="M 146 256 L 314 256"
+      stroke="url(#beam-grad)"
+      stroke-width="9"
+      stroke-linecap="square"
+    />
+    <!-- Glowing Square Head -->
+    <rect
+      x="312"
+      y="242"
+      width="28"
+      height="28"
+      rx="3.5"
+      fill="url(#head-grad)"
+      stroke="#F59E0B"
+      stroke-width="1.5"
+    />
+  </g>
+</svg>
