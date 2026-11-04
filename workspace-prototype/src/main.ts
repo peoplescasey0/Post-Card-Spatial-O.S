@@ -5770,12 +5770,6 @@ function finishCardBinFlight(flight: TrashFlight): void {
     updateOnCardActions();
     selectedNameElement.textContent = `${selectedCard.name} · ${FACET_META[selectedCard.facet].badge}`;
     sceneCardIndexElement.textContent = String(selectedIndex + 1).padStart(2, "0");
-    const cardTier = getCardTier(selectedCard);
-    const selectedTierEl = document.getElementById("selected-tier");
-    if (selectedTierEl) {
-      selectedTierEl.textContent = cardTier;
-      selectedTierEl.className = `tier-badge tier-badge-${cardTier.toLowerCase()}`;
-    }
   }
   updateCardCount();
   updateRecipientOptions();
@@ -6048,12 +6042,6 @@ function removeCardFromRoom(card: SystemCard, status: GuestServiceStatus): void 
     updateRoomCardNav();
     selectedNameElement.textContent = `${selectedCard.name} · ${FACET_META[selectedCard.facet].badge}`;
     sceneCardIndexElement.textContent = String(selectedIndex + 1).padStart(2, "0");
-    const cardTier = getCardTier(selectedCard);
-    const selectedTierEl = document.getElementById("selected-tier");
-    if (selectedTierEl) {
-      selectedTierEl.textContent = cardTier;
-      selectedTierEl.className = `tier-badge tier-badge-${cardTier.toLowerCase()}`;
-    }
   }
   updateCardCount();
   updateRecipientOptions();
@@ -7039,9 +7027,10 @@ function initCommercialEditions(): void {
   profileEditionsOpt?.addEventListener("click", openEditions);
   selectedTierElement?.addEventListener("click", openEditions);
 
-  const savedTier = (localStorage.getItem("postcard_commercial_tier") as MonetizationTier) || "COMMUNITY";
-  const applyTier = (tier: MonetizationTier) => {
-    localStorage.setItem("postcard_commercial_tier", tier);
+  // The tier is never trusted from browser storage (it is user-editable). It always
+  // comes from the licensing service, using the license key saved on this machine.
+  const LICENSE_KEY_STORAGE = "postcard_license_key";
+  const applyTier = (tier: MonetizationTier, announce = false) => {
     if (selectedTierElement) {
       selectedTierElement.textContent = tier;
       selectedTierElement.className = `tier-badge tier-badge-${tier.toLowerCase()}`;
@@ -7050,12 +7039,69 @@ function initCommercialEditions(): void {
     document.querySelectorAll(".edition-card").forEach((card) => {
       card.classList.remove("active-edition");
     });
-    const activeCard = document.getElementById(`edition-card-${tier.toLowerCase()}`);
+    const cardKey = tier === "PRO" ? "pro" : tier === "ENTERPRISE" ? "enterprise" : "";
+    const activeCard = cardKey ? document.getElementById(`edition-card-${cardKey}`) : null;
     if (activeCard) activeCard.classList.add("active-edition");
-    showToast(`Commercial Tier switched to ${tier}!`);
+    if (announce) showToast(`Post Card ${tier} is active. Thank you!`);
   };
 
-  applyTier(savedTier);
+  const postLicense = async (payload: Record<string, string>) => {
+    const response = await fetch("/api/stripe/license", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    return { status: response.status, data: await response.json().catch(() => ({})) };
+  };
+
+  const tierFromLicense = (data: { tier?: string; active?: boolean }): MonetizationTier =>
+    data.active && (data.tier === "pro" || data.tier === "enterprise")
+      ? (data.tier.toUpperCase() as MonetizationTier)
+      : "COMMUNITY";
+
+  const verifyStoredLicense = async () => {
+    const key = localStorage.getItem(LICENSE_KEY_STORAGE);
+    if (!key) return;
+    try {
+      const { status, data } = await postLicense({ licenseKey: key });
+      if (status === 404) localStorage.removeItem(LICENSE_KEY_STORAGE);
+      else if (status === 200 && data.ok) applyTier(tierFromLicense(data));
+    } catch {
+      // Offline: stay on Community until the licensing service is reachable.
+    }
+  };
+
+  const claimCheckout = async (sessionId: string) => {
+    showToast("Confirming your purchase…");
+    for (let attempt = 0; attempt < 12; attempt += 1) {
+      try {
+        const { status, data } = await postLicense({ sessionId });
+        if (status === 200 && data.ok && typeof data.licenseKey === "string") {
+          localStorage.setItem(LICENSE_KEY_STORAGE, data.licenseKey);
+          applyTier(tierFromLicense(data), true);
+          return;
+        }
+        if (status !== 202) break;
+      } catch {
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 2500));
+    }
+    showToast("We could not confirm your purchase yet. It will appear shortly; reopen the app to retry.");
+  };
+
+  applyTier("COMMUNITY");
+  void verifyStoredLicense();
+
+  const returned = new URLSearchParams(window.location.search);
+  const returnedSession = returned.get("session_id");
+  if (returned.get("checkout") === "success" && returnedSession) {
+    window.history.replaceState({}, "", window.location.pathname);
+    void claimCheckout(returnedSession);
+  } else if (returned.get("checkout") === "cancelled") {
+    window.history.replaceState({}, "", window.location.pathname);
+    showToast("Checkout cancelled. You have not been charged.");
+  }
 
   document.querySelectorAll<HTMLButtonElement>(".billing-opt").forEach((opt) => {
     opt.addEventListener("click", () => {
@@ -7261,12 +7307,6 @@ function animate(now = 0): void {
     updateRoomSelection();
     selectedNameElement.textContent = `${closestCard.name} · ${FACET_META[closestCard.facet].badge}`;
     sceneCardIndexElement.textContent = String(selectedIndex + 1).padStart(2, "0");
-    const cardTier = getCardTier(selectedCard);
-    const selectedTierEl = document.getElementById("selected-tier");
-    if (selectedTierEl) {
-      selectedTierEl.textContent = cardTier;
-      selectedTierEl.className = `tier-badge tier-badge-${cardTier.toLowerCase()}`;
-    }
     for (const item of cards) {
       const edge = item.group.children[0];
       const material = edge instanceof THREE.Mesh ? edge.material : undefined;

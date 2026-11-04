@@ -6,6 +6,9 @@ import { createGuestApi } from "../guest-api.mjs";
 let server;
 let baseUrl;
 
+// Never call the hosted licensing service from tests.
+process.env.POSTCARD_LICENSE_API = "";
+
 before(async () => {
   server = createServer(createGuestApi());
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));

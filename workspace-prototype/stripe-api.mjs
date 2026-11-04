@@ -77,7 +77,7 @@ function priceFor(tier, interval) {
 }
 
 function publicConfig() {
-  const live = Boolean(secretKey());
+  const live = Boolean(secretKey()) || Boolean(licenseApiBase());
   const prices = {};
   for (const tier of PAID_TIERS) {
     prices[tier] = { month: Boolean(priceFor(tier, "month")), year: Boolean(priceFor(tier, "year")) };
@@ -128,6 +128,51 @@ async function createLiveSession({ tier, interval, quantity, origin }) {
   return { sessionId: data.id, url: data.url };
 }
 
+// Hosted licensing backend (Supabase Edge Functions). Customers' copies of the app
+// talk to this instead of Stripe, so no Stripe secret ever ships to a customer.
+// Set POSTCARD_LICENSE_API="" to disable (offline / tests).
+const DEFAULT_LICENSE_API = "https://sjhirouqolzoourlvdmw.supabase.co/functions/v1";
+
+function licenseApiBase() {
+  const configured = process.env.POSTCARD_LICENSE_API;
+  const base = configured === undefined ? DEFAULT_LICENSE_API : configured;
+  return /^https:\/\/[A-Za-z0-9.-]+(\/[A-Za-z0-9._\/-]*)?$/.test(base) ? base.replace(/\/+$/, "") : "";
+}
+
+async function callLicenseApi(name, payload) {
+  const base = licenseApiBase();
+  if (!base) throw new StripeApiError(503, "The licensing service is not configured.");
+  let result;
+  try {
+    result = await fetch(`${base}/${name}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(15_000),
+    });
+  } catch {
+    throw new StripeApiError(502, "Could not reach the licensing service. Check your internet connection.");
+  }
+  const data = await result.json().catch(() => ({}));
+  return { status: result.status, data };
+}
+
+async function handleLicense(request, response) {
+  if (!isLoopback(request.socket.remoteAddress)) {
+    throw new StripeApiError(403, "License checks can only be made from this computer.");
+  }
+  if (!request.headers["content-type"]?.includes("application/json")) {
+    throw new StripeApiError(415, "Expected an application/json request.");
+  }
+  const body = parseJson(await readRawBody(request));
+  const payload = {};
+  if (typeof body?.sessionId === "string") payload.sessionId = body.sessionId.slice(0, 256);
+  else if (typeof body?.licenseKey === "string") payload.licenseKey = body.licenseKey.slice(0, 128);
+  else throw new StripeApiError(400, "Provide sessionId or licenseKey.");
+  const { status, data } = await callLicenseApi("license-check", payload);
+  sendJson(response, status, data);
+}
+
 async function handleCheckout(request, response) {
   if (!isLoopback(request.socket.remoteAddress)) {
     throw new StripeApiError(403, "Checkout can only be started from this computer.");
@@ -139,6 +184,20 @@ async function handleCheckout(request, response) {
   const tier = typeof body?.tier === "string" ? body.tier.toLowerCase() : "";
   const interval = body?.interval === "year" ? "year" : "month";
   const quantity = Number.isInteger(body?.quantity) ? Math.min(100, Math.max(1, body.quantity)) : 1;
+
+  if (licenseApiBase() && PAID_TIERS.includes(tier)) {
+    const { status, data } = await callLicenseApi("stripe-checkout", {
+      tier,
+      interval,
+      quantity,
+      returnUrl: requestOrigin(request),
+    });
+    if (status !== 200 || !data?.ok) {
+      throw new StripeApiError(502, data?.error ?? "Checkout is unavailable right now.");
+    }
+    sendJson(response, 200, data);
+    return;
+  }
 
   if (secretKey() && PAID_TIERS.includes(tier)) {
     const live = await createLiveSession({ tier, interval, quantity, origin: requestOrigin(request) });
@@ -228,6 +287,8 @@ export async function handleStripeRequest(request, response) {
       sendJson(response, 200, publicConfig());
     } else if (request.method === "POST" && url.pathname === "/api/stripe/checkout-session") {
       await handleCheckout(request, response);
+    } else if (request.method === "POST" && url.pathname === "/api/stripe/license") {
+      await handleLicense(request, response);
     } else if (request.method === "POST" && url.pathname === "/api/stripe/webhook") {
       await handleWebhook(request, response);
     } else {
