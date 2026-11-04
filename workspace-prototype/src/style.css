@@ -5699,3 +5699,47 @@ body.crt-scanlines::before {
   background: rgba(0, 229, 255, 0.2);
   color: #00e5ff;
 }
+
+/* ---- Top bar: keep the plan badge and action pills from colliding ---- */
+.topbar-actions {
+  flex-wrap: nowrap;
+  align-items: center;
+}
+
+.topbar-actions .tier-badge {
+  flex: none;
+  white-space: nowrap;
+}
+
+/* The centered theme/count cluster collides with the action pills at any width
+   (the pills now span past the middle of the bar), and the same info appears in
+   the room panel, so it is not shown. The card count element stays in the DOM. */
+.topbar-center {
+  display: none !important;
+}
+
+@media (max-width: 1280px) {
+  .topbar-actions {
+    gap: 6px;
+  }
+
+  .topbar-actions .mode-pill {
+    padding-left: 10px;
+    padding-right: 10px;
+  }
+}
+
+/* ---- Editions dialog: scroll instead of clipping ---- */
+.editions-dialog {
+  overflow-y: auto !important;
+  overscroll-behavior: contain;
+}
+
+.editions-dialog .editions-footer {
+  position: sticky;
+  bottom: 0;
+  background: rgba(8, 13, 28, 0.92);
+  backdrop-filter: blur(12px);
+  padding-bottom: 8px;
+  z-index: 2;
+}
