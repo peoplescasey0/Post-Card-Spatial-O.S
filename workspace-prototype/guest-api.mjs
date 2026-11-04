@@ -1,5 +1,4 @@
-import { spawn } from "node:child_process";
-import { execFile } from "node:child_process";
+import { execFile, execFileSync, execSync, spawn } from "node:child_process";
 import { createConnection, isIP } from "node:net";
 import { availableParallelism } from "node:os";
 import { createHash, randomUUID } from "node:crypto";
@@ -8,6 +7,7 @@ import { copyFile, lstat, mkdir, readdir, readFile, realpath, rename, rm, stat, 
 import { constants as fsConstants, existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { handleStripeRequest } from "./stripe-api.mjs";
 
 const execFileAsync = promisify(execFile);
 const appDirectory = path.dirname(fileURLToPath(import.meta.url));
@@ -238,7 +238,58 @@ function buildNetworkArgs(networkMode = "nat", deviceModel = "virtio-net-pci") {
   ];
 }
 
-function qemuArguments({ bootMode, cardId, diskPath, isoPath, ports, networkMode = "nat", dropDir, memoryMb = 1024, vcpus = 2 }) {
+function qemuArguments({ bootMode, cardId, diskPath, isoPath, ports, networkMode = "nat", dropDir, memoryMb = 1024, vcpus = 2, isMacOs = false, openCorePath = "", macOvmfCode = "", macOvmfVars = "", kernelPath = "", initrdPath = "" }) {
+  if (isMacOs) {
+    const args = [
+      "-name", `Post Card ${cardId} macOS guest`,
+      "-machine", "q35",
+      "-accel", process.platform === "win32" ? "whpx,kernel-irqchip=off" : "tcg",
+      "-cpu", "Penryn,vendor=GenuineIntel,+invtsc,vmware-cpuid-freq=on,+ssse3,+sse4.2,+popcnt,+avx,+aes,+xsave,+xsaveopt",
+      "-smp", String(vcpus),
+      "-m", String(memoryMb),
+      // The Apple SMC key is not bundled. Supply your own via POSTCARD_MAC_OSK.
+      "-device", process.env.POSTCARD_MAC_OSK ? `isa-applesmc,osk=${process.env.POSTCARD_MAC_OSK}` : "isa-applesmc",
+      "-smbios", "type=2",
+      "-device", "ich9-ahci,id=sata",
+      "-device", "ich9-intel-hda",
+      "-device", "hda-duplex",
+      ...(macOvmfCode && existsSync(macOvmfCode)
+        ? [
+            "-drive", `if=pflash,format=raw,readonly=on,file=${macOvmfCode}`,
+            "-drive", `if=pflash,format=raw,file=${macOvmfVars}`,
+          ]
+        : []),
+      ...(openCorePath && existsSync(openCorePath)
+        ? [
+            "-drive", `id=OpenCoreBoot,if=none,snapshot=on,format=qcow2,file=${openCorePath}`,
+            "-device", "ide-hd,bus=sata.2,drive=OpenCoreBoot",
+          ]
+        : []),
+      ...(isoPath && existsSync(isoPath)
+        ? [
+            "-drive", `id=InstallMedia,if=none,format=${/\.(img|raw)$/i.test(isoPath) ? "raw" : "qcow2"},file=${isoPath}`,
+            "-device", "ide-hd,bus=sata.3,drive=InstallMedia",
+          ]
+        : []),
+      "-drive", `file=${diskPath},if=none,id=macdisk,format=${/\.(img|raw)$/i.test(diskPath) ? "raw" : "qcow2"}`,
+      "-device", "ide-hd,bus=sata.4,drive=macdisk",
+      "-device", "vmware-svga",
+      "-device", "qemu-xhci",
+      "-device", "usb-kbd",
+      "-device", "usb-tablet",
+      ...buildNetworkArgs(networkMode, "e1000"),
+      ...(ports.serialPort
+        ? [
+            "-chardev", `socket,id=charserial0,host=127.0.0.1,port=${ports.serialPort},server=on,wait=off`,
+            "-serial", "chardev:charserial0",
+          ]
+        : []),
+      "-display", "none",
+      "-vnc", `127.0.0.1:${ports.vncPort - DEFAULT_VNC_PORT},websocket=${ports.websocketPort}`,
+      "-qmp", `tcp:127.0.0.1:${ports.qmpPort},server=on,wait=off`,
+    ];
+    return args;
+  }
   const args = [
     "-name", `Post Card ${cardId} Linux guest`,
     "-machine", "q35",
@@ -261,9 +312,9 @@ function qemuArguments({ bootMode, cardId, diskPath, isoPath, ports, networkMode
     ...buildNetworkArgs(networkMode, "e1000"),
     ...(ports.serialPort
       ? [
-          "-chardev", `socket,id=charserial0,host=127.0.0.1,port=${ports.serialPort},server=on,wait=off`,
-          "-serial", "chardev:charserial0",
-        ]
+        "-chardev", `socket,id=charserial0,host=127.0.0.1,port=${ports.serialPort},server=on,wait=off`,
+        "-serial", "chardev:charserial0",
+      ]
       : []),
 
 
@@ -272,7 +323,12 @@ function qemuArguments({ bootMode, cardId, diskPath, isoPath, ports, networkMode
     "-qmp", `tcp:127.0.0.1:${ports.qmpPort},server=on,wait=off`,
   ];
 
-  if (bootMode === "installer") {
+  if (kernelPath && existsSync(kernelPath)) {
+    args.push("-kernel", kernelPath);
+    if (initrdPath && existsSync(initrdPath)) {
+      args.push("-initrd", initrdPath);
+    }
+  } else if (bootMode === "installer") {
     args.push("-cdrom", isoPath, "-boot", "order=d");
   } else {
     args.push("-boot", "order=c");
@@ -281,10 +337,20 @@ function qemuArguments({ bootMode, cardId, diskPath, isoPath, ports, networkMode
   return args;
 }
 
-function windowsPathToWsl(windowsPath) {
+export function windowsPathToWsl(windowsPath, distribution) {
   if (typeof windowsPath !== "string") return "";
   const cleaned = windowsPath.replaceAll("\\", "/");
   if (cleaned.startsWith("/mnt/")) return cleaned;
+  const uncMatch = /^\/\/(?:wsl\.localhost|wsl\$)\/([^/]+)(\/.*)?$/i.exec(cleaned);
+  if (uncMatch) {
+    const [, uncDistribution, uncPath = ""] = uncMatch;
+    if (distribution && uncDistribution.toLowerCase() !== distribution.toLowerCase()) {
+      throw new Error(
+        `Windows ISO UNC path belongs to WSL distribution "${uncDistribution}", but POSTCARD_WSL_DISTRO is "${distribution}".`,
+      );
+    }
+    return `/${uncPath.replace(/^\/+/, "")}`;
+  }
   const match = /^([a-zA-Z]):\/(.*)$/.exec(cleaned);
   if (match) {
     return `/mnt/${match[1].toLowerCase()}/${match[2]}`;
@@ -324,9 +390,9 @@ function windowsQemuArguments({ bootMode, cardId, diskPath, isoPath, firmwarePat
     ...buildNetworkArgs(networkMode, "e1000"),
     ...(ports.serialPort
       ? [
-          "-chardev", `socket,id=charserial0,host=127.0.0.1,port=${ports.serialPort},server=on,wait=off`,
-          "-serial", "chardev:charserial0",
-        ]
+        "-chardev", `socket,id=charserial0,host=127.0.0.1,port=${ports.serialPort},server=on,wait=off`,
+        "-serial", "chardev:charserial0",
+      ]
       : []),
 
     "-chardev", `socket,id=chrtpm,path=${tpmSocketPath}`,
@@ -611,24 +677,30 @@ export function createGuestApi(options = {}) {
   const networkModesPath = path.join(dataDirectory, "network-modes.json");
   const memoryProfilesPath = path.join(dataDirectory, "memory-profiles.json");
   const cpuProfilesPath = path.join(dataDirectory, "cpu-profiles.json");
+  const customIsosPath = path.join(dataDirectory, "custom-isos.json");
   const androidIsoPath = process.env.POSTCARD_ANDROID_ISO
     ? path.resolve(process.env.POSTCARD_ANDROID_ISO)
     : path.join(projectDirectory, "archive", "guest-vm-setup", "android-x86_64.iso");
   const isoPath = process.env.POSTCARD_DEBIAN_ISO
     ? path.resolve(process.env.POSTCARD_DEBIAN_ISO)
     : path.join(projectDirectory, "archive", "guest-vm-setup", "debian-13.7.0-amd64-netinst.iso");
-  const defaultWinIso = process.platform === "win32"
-    ? "G:\\Win11_25H2_English_x64_v2.iso"
-    : "/mnt/g/Win11_25H2_English_x64_v2.iso";
+  const postcardKernelPath = process.env.POSTCARD_KERNEL
+    ? path.resolve(process.env.POSTCARD_KERNEL)
+    : path.join(dataDirectory, "master-images", "postcard-minimal-kernel");
+  const postcardRamdiskPath = process.env.POSTCARD_RAMDISK
+    ? path.resolve(process.env.POSTCARD_RAMDISK)
+    : path.join(dataDirectory, "master-images", "ramdisk.img");
+  // Windows install media is never bundled. Users supply their own licensed ISO
+  // via POSTCARD_WINDOWS_ISO or the card's "Load custom OS ISO" action.
+  const kvmHostRaw = process.env.POSTCARD_KVM_HOST ?? "";
+  const kvmHost = /^([A-Za-z0-9._-]+@)?[A-Za-z0-9._-]+$/.test(kvmHostRaw) ? kvmHostRaw : "";
+  const kvmWorkDirRaw = process.env.POSTCARD_KVM_WORKDIR ?? "~/postcard-kvm";
+  const kvmWorkDir = /^[A-Za-z0-9._~\/-]+$/.test(kvmWorkDirRaw) ? kvmWorkDirRaw : "~/postcard-kvm";
   const windowsIsoPath = process.env.POSTCARD_WINDOWS_ISO
-    ? path.resolve(process.env.POSTCARD_WINDOWS_ISO)
-    : (existsSync(defaultWinIso)
-        ? defaultWinIso
-        : existsSync("/mnt/g/Win11_25H2_English_x64_v2.iso")
-          ? "/mnt/g/Win11_25H2_English_x64_v2.iso"
-          : existsSync("G:\\Win11_25H2_English_x64_v2.iso")
-            ? "G:\\Win11_25H2_English_x64_v2.iso"
-            : defaultWinIso);
+    ? (process.env.POSTCARD_WINDOWS_ISO.startsWith("\\\\")
+      ? process.env.POSTCARD_WINDOWS_ISO
+      : path.resolve(process.env.POSTCARD_WINDOWS_ISO))
+    : "";
   const windowsDiskDirectory = path.join(dataDirectory, "windows", "disks");
   const windowsFirmwareDirectory = path.join(dataDirectory, "windows", "firmware");
   const windowsTpmDirectory = path.join(dataDirectory, "windows", "tpm");
@@ -773,11 +845,11 @@ export function createGuestApi(options = {}) {
       os: LINUX_OS,
       ports: previousRuntime.child?.exitCode === null
         ? {
-            slot: 0,
-            websocketPort: DEFAULT_WEBSOCKET_PORT,
-            qmpPort: DEFAULT_QMP_PORT,
-            vncPort: DEFAULT_VNC_PORT,
-          }
+          slot: 0,
+          websocketPort: DEFAULT_WEBSOCKET_PORT,
+          qmpPort: DEFAULT_QMP_PORT,
+          vncPort: DEFAULT_VNC_PORT,
+        }
         : undefined,
     });
   }
@@ -918,7 +990,7 @@ export function createGuestApi(options = {}) {
           if (s.size > 500 * 1024 * 1024) {
             ids.push(entry.name.slice(0, -".qcow2".length));
           }
-        } catch {}
+        } catch { }
       }
     }
     return ids;
@@ -949,8 +1021,9 @@ export function createGuestApi(options = {}) {
     }
   }
 
-  async function prepareWindowsFiles(cardId, bootMode) {
-    const isoWslPath = windowsPathToWsl(windowsIsoPath);
+  async function prepareWindowsFiles(cardId, bootMode, customIsoOverride) {
+    const activeWinIso = customIsoOverride || windowsIsoPath;
+    const isoWslPath = windowsPathToWsl(activeWinIso, wslDistribution);
     const diskPath = path.join(windowsDiskDirectory, `${cardId}.qcow2`);
     const varsPath = path.join(windowsFirmwareDirectory, `${cardId}-VARS.fd`);
     const tpmStatePath = path.join(windowsTpmDirectory, cardId);
@@ -978,12 +1051,17 @@ export function createGuestApi(options = {}) {
       }
     }
     if (bootMode === "disk" && !diskExists) {
-      throw new GuestApiError(409, "Install Windows 11 before booting this card from disk.");
+      throw new GuestApiError(409, "Install Windows (from your own ISO) before booting this card from disk.");
     }
     try {
-      if (!(await stat(windowsIsoPath)).isFile()) throw new Error("not a file");
+      if (!(await stat(activeWinIso)).isFile()) throw new Error("not a file");
     } catch {
-      throw new GuestApiError(503, `Windows 11 ISO was not found at ${windowsIsoPath}. Set POSTCARD_WINDOWS_ISO to its path.`);
+      throw new GuestApiError(
+        503,
+        activeWinIso
+          ? `Windows ISO was not found at ${activeWinIso}. Set POSTCARD_WINDOWS_ISO or attach a custom ISO path.`
+          : "No Windows ISO configured. Windows is not bundled: provide your own licensed ISO via POSTCARD_WINDOWS_ISO or the card's Load custom OS ISO action.",
+      );
     }
     await mkdir(windowsDiskDirectory, { recursive: true });
     await mkdir(windowsFirmwareDirectory, { recursive: true });
@@ -1069,6 +1147,7 @@ export function createGuestApi(options = {}) {
       networkModes: await readNetworkModes(),
       memoryProfiles: await readMemoryProfiles(),
       cpuProfiles: await readCpuProfiles(),
+      customIsos: await readCustomIsos(),
       cpuCapacity: availableParallelism(),
       maxConcurrentGuests: MAX_CONCURRENT_GUESTS,
       guests: [...guests.values()].map((guest) => {
@@ -1200,13 +1279,16 @@ export function createGuestApi(options = {}) {
     if (
       active.length >= MAX_CONCURRENT_GUESTS ||
       active.reduce((total, g) => total + (g.memoryMb ?? resolveCardMemoryMb(g.os, memProfiles[g.cardId] ?? "eco")), 0) +
-        memoryMb > MAX_GUEST_MEMORY_MB
+      memoryMb > MAX_GUEST_MEMORY_MB
     ) {
       throw new GuestApiError(409, `Guest launch would exceed the ${MAX_CONCURRENT_GUESTS}-guest / ${MAX_GUEST_MEMORY_MB / 1024} GiB memory limit.`);
     }
+    const customIsos = await readCustomIsos();
+    const cardCustomIso = customIsos[cardId];
     if (
-      active.some((guest) => guest.os === LINUX_OS && guest.bootMode === "installer") ||
-      (os === LINUX_OS && bootMode === "installer" && active.length > 0)
+      !cardCustomIso &&
+      (active.some((guest) => guest.os === LINUX_OS && guest.bootMode === "installer") ||
+        (os === LINUX_OS && bootMode === "installer" && active.length > 0))
     ) {
       throw new GuestApiError(409, "Shut down all Linux guests before installing or changing the shared Debian base image.");
     }
@@ -1228,7 +1310,7 @@ export function createGuestApi(options = {}) {
       let diskPath;
       let args;
       if (os === WINDOWS_OS) {
-        const files = await prepareWindowsFiles(cardId, bootMode);
+        const files = await prepareWindowsFiles(cardId, bootMode, cardCustomIso);
         diskPath = files.diskPath;
         const ports = await reservePorts(guest);
         const tpmArgs = [
@@ -1286,6 +1368,66 @@ export function createGuestApi(options = {}) {
           ports,
         });
         guest.ports = ports;
+      } else if (cardCustomIso) {
+        if (!(await executableExists(qemuPath))) {
+          throw new GuestApiError(503, `QEMU was not found at ${qemuPath}. Set POSTCARD_QEMU to its path.`);
+        }
+        const isQcow2Image = /\.qcow2$/i.test(cardCustomIso);
+        const isRawDiskImage = /\.(img|raw)$/i.test(cardCustomIso);
+        if (bootMode === "installer" || isQcow2Image || isRawDiskImage) {
+          try {
+            if (!(await stat(cardCustomIso)).isFile()) throw new Error("not a file");
+          } catch {
+            throw new GuestApiError(503, `Custom ISO was not found at ${cardCustomIso}. Verify the path and try again.`);
+          }
+        }
+        diskPath = path.join(overlayDirectory, `${cardId}.qcow2`);
+        if (isQcow2Image) {
+          const resolvedBase = path.resolve(cardCustomIso);
+          try {
+            await createOverlayIfNeeded(resolvedBase, diskPath, qemuImgPath);
+          } catch {
+            await rm(diskPath, { force: true }).catch(() => { });
+            await createOverlayIfNeeded(resolvedBase, diskPath, qemuImgPath);
+          }
+        } else {
+          await createEmptyDiskIfNeeded(diskPath, qemuImgPath);
+        }
+        const ports = await reservePorts(guest);
+        const cardDropDir = path.join(paperPlanesDropDir, cardId);
+        await mkdir(cardDropDir, { recursive: true });
+        const networkMode = (await readNetworkModes())[cardId] ?? "nat";
+        const effectiveBootMode = isQcow2Image || isRawDiskImage ? "disk" : bootMode;
+        guest.bootMode = effectiveBootMode;
+        const isMac = os === MACOS_OS || cardId === "macos";
+        const openCoreMaster = path.join(dataDirectory, "master-images", "OpenCore.qcow2");
+        const macOvmfCodeMaster = path.join(dataDirectory, "master-images", "OVMF_CODE_mac.fd");
+        const macOvmfVarsMaster = path.join(dataDirectory, "master-images", "OVMF_VARS_mac.fd");
+        let macOvmfVars = macOvmfVarsMaster;
+        if (isMac && existsSync(macOvmfVarsMaster)) {
+          const cardVars = path.join(overlayDirectory, `${cardId}-mac-VARS.fd`);
+          if (!existsSync(cardVars)) {
+            await copyFile(macOvmfVarsMaster, cardVars);
+          }
+          if (existsSync(cardVars)) {
+            macOvmfVars = cardVars;
+          }
+        }
+        args = qemuArguments({
+          bootMode: effectiveBootMode,
+          cardId,
+          diskPath: isMac ? path.join(overlayDirectory, `${cardId}.qcow2`) : (isRawDiskImage ? cardCustomIso : diskPath),
+          isoPath: cardCustomIso,
+          ports,
+          networkMode,
+          dropDir: cardDropDir,
+          memoryMb,
+          vcpus,
+          isMacOs: isMac,
+          openCorePath: openCoreMaster,
+          macOvmfCode: macOvmfCodeMaster,
+          macOvmfVars,
+        });
       } else {
         if (!(await executableExists(qemuPath))) {
           throw new GuestApiError(503, `QEMU was not found at ${qemuPath}. Set POSTCARD_QEMU to its path.`);
@@ -1319,16 +1461,42 @@ export function createGuestApi(options = {}) {
         await mkdir(cardDropDir, { recursive: true });
         const networkMode = (await readNetworkModes())[cardId] ?? "nat";
         const targetIso = os === ANDROID_OS && existsSync(androidIsoPath) ? androidIsoPath : isoPath;
-        args = qemuArguments({ bootMode, cardId, diskPath, isoPath: targetIso, ports, networkMode, dropDir: cardDropDir, memoryMb, vcpus });
+        const isKernelGuest = cardId === "postcard-os" || os === "kernel";
+        const kernelPath = isKernelGuest && existsSync(postcardKernelPath) ? postcardKernelPath : "";
+        const initrdPath = isKernelGuest && existsSync(postcardRamdiskPath) ? postcardRamdiskPath : "";
+        args = qemuArguments({ bootMode, cardId, diskPath, isoPath: targetIso, ports, networkMode, dropDir: cardDropDir, memoryMb, vcpus, kernelPath, initrdPath });
       }
 
-      const isLinux = process.platform === "linux";
-      const qemuBin = isLinux || os !== WINDOWS_OS ? (os === WINDOWS_OS ? wslQemuPath : qemuPath) : wslPath;
-      const qemuCmdArgs = isLinux || os !== WINDOWS_OS ? args : ["-d", wslDistribution, "--exec", wslQemuPath, ...args];
-      const child = spawn(qemuBin, qemuCmdArgs, {
-        windowsHide: true,
-        stdio: ["ignore", "ignore", "pipe"],
-      });
+      let child;
+      // Remote KVM host is opt-in (POSTCARD_KVM_HOST=user@host); nothing is hardcoded.
+      const useWorkstationMac = (os === MACOS_OS || cardId === "macos") && Boolean(kvmHost) && process.env.POSTCARD_MAC_LOCAL !== "true";
+      if (useWorkstationMac) {
+        try {
+          execFileSync("ssh", ["-o", "BatchMode=yes", "-o", "ConnectTimeout=3", kvmHost,
+            `podman rm -f macos-kvm 2>/dev/null; podman run --rm -d --name macos-kvm --device /dev/kvm -v ${kvmWorkDir}:/work:z -p 5702:5702 -p 4446:4446 localhost/postcard-kvm /work/run-macos.sh`,
+          ], { stdio: "ignore" });
+        } catch {
+          // If container already running or ssh transient, continue to tunnel
+        }
+        child = spawn("ssh", [
+          "-o", "BatchMode=yes",
+          "-N",
+          "-L", `${ports.websocketPort}:127.0.0.1:5702`,
+          "-L", `${ports.qmpPort}:127.0.0.1:4446`,
+          kvmHost,
+        ], {
+          windowsHide: true,
+          stdio: ["ignore", "ignore", "pipe"],
+        });
+      } else {
+        const isLinux = process.platform === "linux";
+        const qemuBin = isLinux || os !== WINDOWS_OS ? (os === WINDOWS_OS ? wslQemuPath : qemuPath) : wslPath;
+        const qemuCmdArgs = isLinux || os !== WINDOWS_OS ? args : ["-d", wslDistribution, "--exec", wslQemuPath, ...args];
+        child = spawn(qemuBin, qemuCmdArgs, {
+          windowsHide: true,
+          stdio: ["ignore", "ignore", "pipe"],
+        });
+      }
       guest.child = child;
       child.stderr.setEncoding("utf8");
       child.stderr.on("data", (chunk) => {
@@ -1405,7 +1573,7 @@ export function createGuestApi(options = {}) {
               while (Date.now() < tapUntil && alive()) {
                 await qmp([
                   { execute: "send-key", arguments: { keys: [{ type: "qcode", data: "spc" }], "hold-time": 150 } },
-                ]).catch(() => {});
+                ]).catch(() => { });
                 await wait(400);
               }
               let missed = false;
@@ -1416,8 +1584,8 @@ export function createGuestApi(options = {}) {
               }
               if (!missed) break; // prompt caught: Windows is loading
             }
-          } catch {}
-          await rm(shotPath, { force: true }).catch(() => {});
+          } catch { }
+          await rm(shotPath, { force: true }).catch(() => { });
         })();
       }
       return status();
@@ -1427,10 +1595,10 @@ export function createGuestApi(options = {}) {
       if (os === WINDOWS_OS && process.platform === "win32") {
         try {
           await runWsl("pkill", ["-f", `qemu-system-x86_64.*${cardId}`], "Stopping QEMU in WSL");
-        } catch {}
+        } catch { }
         try {
           await runWsl("pkill", ["-f", `swtpm.*${cardId}`], "Stopping swtpm in WSL");
-        } catch {}
+        } catch { }
       }
       guest.phase = "error";
       guest.ports = undefined;
@@ -1473,7 +1641,7 @@ export function createGuestApi(options = {}) {
           guest.crashMessage =
             `The Windows VM crashed (${state}). Your disk is safe` +
             (last ? `; the newest automatic checkpoint is ${last}. Use "Restore last checkpoint" to roll back to it.` : ".");
-          await requestQmpCommands(port, [{ execute: "quit" }]).catch(() => {});
+          await requestQmpCommands(port, [{ execute: "quit" }]).catch(() => { });
           return;
         }
         if (state === "running" && Date.now() - lastCheckpoint >= AUTO_CHECKPOINT_INTERVAL_MS) {
@@ -1487,7 +1655,7 @@ export function createGuestApi(options = {}) {
             const old = guest.autoCheckpoints.shift();
             await requestQmpCommands(port, [
               { execute: "blockdev-snapshot-delete-internal-sync", arguments: { device: WINDOWS_DISK_DEVICE, name: old } },
-            ]).catch(() => {});
+            ]).catch(() => { });
           }
         }
       } catch {
@@ -1531,9 +1699,22 @@ export function createGuestApi(options = {}) {
 
   async function stop(cardId, os = LINUX_OS, force = false) {
     const guest = guests.get(guestKey(os, cardId));
-    if (!guest || !guest.child || guest.child.exitCode !== null) return status();
+    if (!guest || !guest.child || guest.child.exitCode !== null) {
+      if (guest) {
+        guest.phase = "offline";
+        guest.error = undefined;
+        guest.ports = undefined;
+        guest.child = undefined;
+      }
+      return status();
+    }
     const child = guest.child;
     guest.phase = "stopping";
+    if ((os === MACOS_OS || cardId === "macos") && kvmHost) {
+      try {
+        execFileSync("ssh", ["-o", "BatchMode=yes", "-o", "ConnectTimeout=2", kvmHost, "podman stop -t 2 macos-kvm 2>/dev/null"], { stdio: "ignore" });
+      } catch {}
+    }
     try {
       await requestQmpCommand(guest.ports.qmpPort, force ? "quit" : "system_powerdown");
       await waitForExit(child, force ? 5_000 : 20_000, os === WINDOWS_OS ? "Windows" : "Linux");
@@ -1577,14 +1758,14 @@ export function createGuestApi(options = {}) {
 
     const cardFiles = os === WINDOWS_OS
       ? [
-          { parent: windowsDiskDirectory, name: `${cardId}.qcow2`, type: "file", disk: true },
-          { parent: windowsFirmwareDirectory, name: `${cardId}-VARS.fd`, type: "file" },
-          { parent: windowsTpmDirectory, name: cardId, type: "directory" },
-        ]
+        { parent: windowsDiskDirectory, name: `${cardId}.qcow2`, type: "file", disk: true },
+        { parent: windowsFirmwareDirectory, name: `${cardId}-VARS.fd`, type: "file" },
+        { parent: windowsTpmDirectory, name: cardId, type: "directory" },
+      ]
       : [
-          { parent: overlayDirectory, name: `${cardId}.qcow2`, type: "file", disk: true },
-          { parent: overlayDirectory, name: `${cardId}.qcow2.checkpoint`, type: "file" },
-        ];
+        { parent: overlayDirectory, name: `${cardId}.qcow2`, type: "file", disk: true },
+        { parent: overlayDirectory, name: `${cardId}.qcow2.checkpoint`, type: "file" },
+      ];
     cardFiles.push({
       parent: paperPlanesDropDir,
       name: cardId,
@@ -1621,6 +1802,7 @@ export function createGuestApi(options = {}) {
       "network-modes.json",
       "memory-profiles.json",
       "cpu-profiles.json",
+      "custom-isos.json",
     ]) {
       const metadata = await readDeleteMetadata(fileName, "object");
       if (metadata.exists && Object.prototype.hasOwnProperty.call(metadata.value, cardId)) {
@@ -1872,8 +2054,8 @@ export function createGuestApi(options = {}) {
     if (fromCardId === toCardId && !remoteTarget) {
       throw new GuestApiError(400, "fromCardId and toCardId must be different.");
     }
-    if (os !== LINUX_OS && os !== WINDOWS_OS && os !== "android" && os !== "remote") {
-      throw new GuestApiError(400, "os must be 'linux', 'windows', 'android', or 'remote'.");
+    if (os !== LINUX_OS && os !== WINDOWS_OS && os !== ANDROID_OS && os !== MACOS_OS && os !== "remote") {
+      throw new GuestApiError(400, "os must be 'linux', 'windows', 'android', 'macos', or 'remote'.");
     }
     if (typeof message !== "string" || message.trim().length === 0 || message.length > 160) {
       throw new GuestApiError(400, "message must be a non-empty string up to 160 characters.");
@@ -1897,7 +2079,7 @@ export function createGuestApi(options = {}) {
     }
 
     let deliveredToVm = false;
-    if (injectToVm && (os === LINUX_OS || os === WINDOWS_OS)) {
+    if (injectToVm && (os === LINUX_OS || os === WINDOWS_OS || os === ANDROID_OS || os === MACOS_OS)) {
       const targetGuest = guests.get(guestKey(os, toCardId));
       if (targetGuest) normalizeGuestState(targetGuest);
       if (targetGuest && targetGuest.phase === "running" && targetGuest.ports?.qmpPort) {
@@ -2311,6 +2493,38 @@ export function createGuestApi(options = {}) {
     return status();
   }
 
+  async function readCustomIsos() {
+    try {
+      const raw = await readFile(customIsosPath, "utf8");
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+
+  async function setCustomIso({ cardId, isoPath: nextIsoPath = "" }) {
+    if (typeof cardId !== "string" || !/^[a-z0-9][a-z0-9_-]{0,63}$/.test(cardId)) {
+      throw new GuestApiError(400, "cardId must be a lowercase card identifier.");
+    }
+    if (typeof nextIsoPath !== "string" || nextIsoPath.length > 480) {
+      throw new GuestApiError(400, "isoPath must be a string up to 480 characters.");
+    }
+    const trimmed = nextIsoPath.trim().replace(/^["']|["']$/g, "");
+    if (trimmed && !/\.(iso|img|qcow2|raw|dmg)$/i.test(trimmed)) {
+      throw new GuestApiError(400, "Custom OS image path must end in .iso, .img, .qcow2, .raw, or .dmg.");
+    }
+    const isos = await readCustomIsos();
+    if (!trimmed) {
+      delete isos[cardId];
+    } else {
+      isos[cardId] = trimmed;
+    }
+    await mkdir(dataDirectory, { recursive: true });
+    await writeFile(customIsosPath, JSON.stringify(isos, null, 2), "utf8");
+    return status();
+  }
+
   async function swarmFork({
     sourceCardId = "linux",
     os = LINUX_OS,
@@ -2329,8 +2543,8 @@ export function createGuestApi(options = {}) {
     for (let i = 0; i < forkCount; i += 1) {
       const candidateId =
         Array.isArray(targetCardIds) &&
-        typeof targetCardIds[i] === "string" &&
-        /^[a-z0-9][a-z0-9_-]{0,63}$/.test(targetCardIds[i])
+          typeof targetCardIds[i] === "string" &&
+          /^[a-z0-9][a-z0-9_-]{0,63}$/.test(targetCardIds[i])
           ? targetCardIds[i]
           : `${sourceCardId}-swarm-${Date.now().toString(36)}-${i + 1}`;
       await cloneOverlay(sourceCardId, candidateId, os);
@@ -2464,6 +2678,7 @@ export function createGuestApi(options = {}) {
   }
 
   return async (request, response, next) => {
+    if (await handleStripeRequest(request, response)) return;
     const url = new URL(request.url ?? "/", "http://localhost");
     if (!url.pathname.startsWith("/api/guest/")) {
       next();
@@ -2507,7 +2722,9 @@ export function createGuestApi(options = {}) {
           throw new GuestApiError(400, "cardId must be a lowercase card identifier.");
         }
         const os = body.os ?? LINUX_OS;
-        if (os !== LINUX_OS && os !== WINDOWS_OS) throw new GuestApiError(400, "os must be 'linux' or 'windows'.");
+        if (os !== LINUX_OS && os !== WINDOWS_OS && os !== ANDROID_OS && os !== MACOS_OS) {
+          throw new GuestApiError(400, "os must be 'linux', 'windows', 'android', or 'macos'.");
+        }
         sendJson(response, 200, await stop(body.cardId, os));
         return;
       }
@@ -2531,7 +2748,9 @@ export function createGuestApi(options = {}) {
           throw new GuestApiError(400, "cardId must be a lowercase card identifier.");
         }
         const os = body.os ?? LINUX_OS;
-        if (os !== LINUX_OS && os !== WINDOWS_OS) throw new GuestApiError(400, "os must be 'linux' or 'windows'.");
+        if (os !== LINUX_OS && os !== WINDOWS_OS && os !== ANDROID_OS && os !== MACOS_OS) {
+          throw new GuestApiError(400, "os must be 'linux', 'windows', 'android', or 'macos'.");
+        }
         sendJson(response, 200, await stop(body.cardId, os, true));
         return;
       }
@@ -2579,7 +2798,9 @@ export function createGuestApi(options = {}) {
           fromId = ("remote-" + fromId).slice(0, 63);
         }
         const os =
-          body?.os === WINDOWS_OS || body?.os === "android" ? body.os : LINUX_OS;
+          body?.os === WINDOWS_OS || body?.os === ANDROID_OS || body?.os === MACOS_OS
+            ? body.os
+            : LINUX_OS;
         sendJson(
           response,
           200,
@@ -2589,6 +2810,18 @@ export function createGuestApi(options = {}) {
             os,
             message: body?.message,
             injectToVm: body?.injectToVm !== false,
+          }),
+        );
+        return;
+      }
+      if (request.method === "POST" && url.pathname === "/api/guest/custom-iso") {
+        const body = await readJson(request);
+        sendJson(
+          response,
+          200,
+          await setCustomIso({
+            cardId: body?.cardId,
+            isoPath: body?.isoPath,
           }),
         );
         return;

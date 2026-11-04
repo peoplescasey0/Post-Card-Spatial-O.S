@@ -37,3 +37,6 @@ fresh-postcard/
 
 !.env.example
 !workspace-prototype/.env.example
+
+# Local-only guest media (bring your own OS images)
+archive/

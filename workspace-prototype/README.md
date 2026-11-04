@@ -21,7 +21,17 @@ Open the local URL printed by Vite. To create a production bundle, run
 - Scroll over the studio or focus the canvas and use the arrow keys to browse
   cards; **Home** and **End** jump to the first and last card.
 - Double-click a card, press **Enter** while the canvas is focused, or use
-  **Flip card** to see its settings side.
+  the active card's **Settings** action to see its settings side. The selected
+  card's compact action strip follows it through the 3D carousel; use it to
+  install, launch, resume, or open a guest, request shutdown while it is running,
+  or move the card to the paper bin.
+- Moving a card to the paper bin folds it into a paper airplane and removes it
+  from the active room without touching its guest disk, checkpoints, TPM/UEFI
+  state, or private data. Open **The Paper Bin** in the room corner to restore a
+  card; binned cards remain there across reloads.
+- A quick Shift/right-drag flick into the bin is still the separate
+  **permanent-delete** action. It requires the existing confirmation and removes
+  that card’s private guest state. Use **Move to bin** for reversible hiding.
 - Use **Send a paper plane** to send a local demo note to another card; flip the
   recipient card to read it.
 - Use **+** to add another system card.
@@ -74,9 +84,9 @@ may ignore ACPI shutdown requests; in that case the display offers a clearly
 labeled force-stop action that can discard unsaved changes. Running multiple
 guests increases host CPU and memory use.
 
-## Connect the Windows 11 guest
+## Connect a Windows guest (bring your own ISO)
 
-Windows 11 runs through the TPM-enabled QEMU build in WSL 2, not the native
+Windows install media is **not included**: you must supply your own licensed ISO. The guest runs through the TPM-enabled QEMU build in WSL 2, not the native
 Windows QEMU installation. Install Ubuntu (or another configured WSL
 distribution) and its QEMU, software TPM, and OVMF packages:
 
@@ -85,11 +95,14 @@ sudo apt update
 sudo apt install qemu-system-x86 swtpm ovmf
 ```
 
-Keep the Windows 11 ISO at `G:\Win11_25H2_English_x64_v2.iso`, or set
-`POSTCARD_WINDOWS_ISO` to another local Windows drive path. Start the workspace
-with `npm run dev`, select **Windows · Studio**, then choose **Install Windows
-11**. The service creates a persistent per-card 64 GiB QCOW2 disk, per-card
-UEFI variables, and private TPM 2.0 state under `workspace-prototype\data\windows`.
+Set `POSTCARD_WINDOWS_ISO` to the ISO's Windows path. A local `.env` file is
+supported; WSL UNC paths such as
+`\\wsl.localhost\Ubuntu\home\user\Windows.iso` are converted to Linux paths
+inside the configured `POSTCARD_WSL_DISTRO` (default `Ubuntu`), because QEMU
+runs inside WSL. Start the workspace with `npm run dev`, select **Windows ·
+Studio**, then choose **Install Windows (your ISO)**. The service creates a persistent
+per-card 64 GiB QCOW2 disk, per-card UEFI variables, and private TPM 2.0 state
+under `workspace-prototype\data\windows`.
 After installation, use **Boot Windows** or **Resume Windows** to start it from
 the card disk. The TPM state is part of the guest identity and must not be
 deleted if you want to preserve the installation's TPM-bound data.
@@ -109,7 +122,16 @@ ports bind to loopback only. Do not expose them to a network.
 The workspace is a quiet, night-time spatial studio: layered architectural
 surfaces, a softly lit circular dais, and tactile paper cards with metallic
 edges. Cards sit on a curved arc; scrolling or keyboard navigation changes the
-focused card. Keyboard controls are available when the canvas is focused, and
-card movement and delivery animations respect the system reduced-motion
-preference. Rendering resolution is capped to keep the scene responsive,
-especially on smaller screens.
+focused card. Each card's guest display preview occupies about one quarter of
+its face. Only the selected card shows its live guest framebuffer; inactive
+cards align edge-on to the camera and replace cached framebuffer or console
+output with a private-display indicator. Mouse, generated navigation, and
+keyboard selection all update this state. With reduced motion enabled, card
+selection and zoom settle immediately, keyboard navigation still works as
+direct card selection, carousel dragging is disabled, settings flips snap to
+their destination, and ambient scene loops pause. Card movement and delivery
+animations also respect the system reduced-motion preference. Moving a card to
+the bin honors reduced motion and provides the same immediate state change and
+status announcement without animation.
+Rendering resolution is capped to keep the scene responsive, especially on
+smaller screens.

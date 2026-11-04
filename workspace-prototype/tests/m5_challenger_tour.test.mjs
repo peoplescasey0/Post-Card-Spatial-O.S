@@ -35,8 +35,8 @@ test("Milestone 5 DOM Stress Test: index.html HUD buttons, overlay, and badges",
   assert.match(html, /id="tour-progress-fill"/, "#tour-overlay must contain #tour-progress-fill");
 
   // 4. Selected tier badge
-  assert.match(html, /<span[^>]+id="selected-tier"[^>]*>ENTERPRISE<\/span>/, "#selected-tier must default to ENTERPRISE");
-  assert.match(html, /class="tier-badge\s+tier-badge-enterprise"/, "#selected-tier must have tier-badge classes");
+  assert.match(html, /<span[^>]+id="selected-tier"[^>]*>COMMUNITY<\/span>/, "#selected-tier must default to COMMUNITY");
+  assert.match(html, /class="tier-badge\s+tier-badge-community"/, "#selected-tier must have tier-badge classes");
 });
 
 test("Milestone 5 CSS & Z-Index Layering: style.css HUD & Tour overlay", () => {

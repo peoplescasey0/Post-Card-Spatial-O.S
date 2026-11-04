@@ -33,7 +33,7 @@ function loadEnvFile(filePath) {
 }
 
 const env = loadEnvFile(envPath);
-const apiKey = env.STRIPE_SECRET_KEY || env.STRIPE_API_KEY || process.env.STRIPE_SECRET_KEY || process.env.STRIPE_API_KEY;
+const apiKey = process.env.STRIPE_SECRET_KEY || process.env.STRIPE_API_KEY || env.STRIPE_SECRET_KEY || env.STRIPE_API_KEY;
 
 if (!apiKey || apiKey.includes("your_restricted_key_here")) {
   console.error("❌ Error: Valid Stripe API key not found in workspace-prototype/.env");

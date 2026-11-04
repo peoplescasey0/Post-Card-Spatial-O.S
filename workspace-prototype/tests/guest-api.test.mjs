@@ -105,7 +105,7 @@ test("Windows guest cannot boot from an uninitialized disk", async () => {
     body: JSON.stringify({ os: "windows", bootMode: "disk", cardId: "uninstalled" }),
   });
   assert.equal(response.status, 409);
-  assert.match((await response.json()).error, /Install Windows 11/);
+  assert.match((await response.json()).error, /Install Windows/);
 });
 
 test("guest start rejects path traversal in card IDs", async () => {
