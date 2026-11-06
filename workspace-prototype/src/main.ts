@@ -7224,8 +7224,15 @@ function initCommercialEditions(): void {
 
   document.querySelectorAll<HTMLButtonElement>("[data-select-tier]").forEach((btn) => {
     btn.addEventListener("click", () => {
-      const tier = btn.dataset.selectTier as MonetizationTier;
-      if (tier === "PRO" || tier === "ENTERPRISE") void startStripeCheckout(tier);
+      const tier = btn.dataset.selectTier as MonetizationTier | "AI_BUTLER";
+      if (tier === "PRO" || tier === "ENTERPRISE") {
+        void startStripeCheckout(tier);
+      } else if (tier === "AI_BUTLER") {
+        btn.textContent = "AI BUTLER ACTIVE ✓";
+        btn.classList.add("active");
+        showToast("✦ AI Butler & Automation Co-Pilot Activated with 100% Local Privacy!");
+        if (butlerBubble?.hidden) butlerSay(butlerGreeting(butlerContext()), 10000);
+      }
     });
   });
 
