@@ -974,6 +974,50 @@
           </div>
         </form>
       </dialog>
+
+      <!-- Architectural Blueprints HUD for 'The One' AI Butler -->
+      <dialog class="share-dialog blueprint-dialog" id="blueprint-dialog" aria-labelledby="blueprint-title">
+        <form method="dialog" class="blueprint-form">
+          <div class="dialog-kicker">✦ THE ONE AI CO-PILOT · ARCHITECTURAL BLUEPRINTS</div>
+          <div class="blueprint-header-row">
+            <div>
+              <h2 id="blueprint-title">System Blueprints &amp; Mermaid Specifications.</h2>
+              <p class="dialog-description">Verified architecture diagrams, data pipelines, state machines, and system mindmaps directly indexed into the AI Butler.</p>
+            </div>
+            <button class="blueprint-close-btn" id="close-blueprint" type="button" aria-label="Close blueprints">✕</button>
+          </div>
+
+          <div class="blueprint-nav" id="blueprint-nav">
+            <button type="button" class="blueprint-tab active" data-bp="system-mindmap">🧠 System Mindmap</button>
+            <button type="button" class="blueprint-tab" data-bp="erd-data-model">🗄️ Supabase ERD Model</button>
+            <button type="button" class="blueprint-tab" data-bp="ci-cd-pipeline">🚀 CI/CD Pipeline</button>
+            <button type="button" class="blueprint-tab" data-bp="lidar-decimation-filter">📡 LiDAR UART State Machine</button>
+            <button type="button" class="blueprint-tab" data-bp="product-flowchart">📊 Product Flow</button>
+          </div>
+
+          <div class="blueprint-body">
+            <div class="blueprint-meta" id="blueprint-meta">
+              <span class="blueprint-kicker-tag" id="bp-meta-kicker">SPATIAL ARCHITECTURE</span>
+              <h3 id="bp-meta-title">Spatial OS Full System Mindmap</h3>
+              <p id="bp-meta-desc">High-level map connecting the Bare-Metal Rust micro-host kernel, QEMU hypervisor, 3D WebGL card turntable, audio rack, and the AI Butler.</p>
+              <ul class="blueprint-highlights" id="bp-meta-highlights">
+                <li>Bare-metal minimal Rust micro-host</li>
+                <li>3D Spatial carousel with 6-way card flipping</li>
+                <li>DirectLink 10.0.0.2 low-latency tunnel</li>
+                <li>AI Butler co-pilot and automated state recovery</li>
+              </ul>
+            </div>
+            <div class="blueprint-viewer-frame">
+              <img id="blueprint-active-img" src="/blueprints/system-mindmap-overview-mermaid-community.svg" alt="System Blueprint" />
+            </div>
+          </div>
+
+          <div class="blueprint-footer">
+            <button type="button" class="dialog-cancel" id="btn-open-blueprint-source">Open Raw Spec ↗</button>
+            <button type="button" class="dialog-send" id="btn-blueprint-done">Acknowledge &amp; Return <span>✓</span></button>
+          </div>
+        </form>
+      </dialog>
     </div>
     <aside class="butler" id="butler" aria-label="AI butler">
       <div class="butler-bubble" id="butler-bubble" role="status" aria-live="polite" hidden>

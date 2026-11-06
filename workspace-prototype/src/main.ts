@@ -21,9 +21,11 @@ import {
   butlerCheckIn,
   butlerGreeting,
   butlerInterpretPrompt,
+  generateDeckOpml,
   type ButlerChoiceId,
   type ButlerContext,
 } from "./butler";
+import { BLUEPRINTS } from "./blueprints";
 
 /**
  * Windows "Animation effects: off" makes browsers report prefers-reduced-motion,
@@ -1689,6 +1691,7 @@ function butlerContext(): ButlerContext {
     serviceUnavailable,
     displayOpen: guestDialogElement.open,
     needsInstall: card ? cardButtonStates(card).guest.label === "Install" : false,
+    cardsList: cards.map((c) => c.name),
   };
 }
 
@@ -1710,18 +1713,99 @@ function butlerSay(note: { message: string; choices: ButlerChoiceId[] }, autoHid
   if (autoHideMs > 0) butlerHideTimer = window.setTimeout(() => { butlerBubble.hidden = true; }, autoHideMs);
 }
 
+// ---- Architectural Blueprints Modal Controller ----
+const blueprintDialog = document.querySelector<HTMLDialogElement>("#blueprint-dialog");
+const blueprintNav = document.querySelector<HTMLElement>("#blueprint-nav");
+const blueprintCloseBtn = document.querySelector<HTMLButtonElement>("#close-blueprint");
+const blueprintDoneBtn = document.querySelector<HTMLButtonElement>("#btn-blueprint-done");
+const blueprintSourceBtn = document.querySelector<HTMLButtonElement>("#btn-open-blueprint-source");
+const bpActiveImg = document.querySelector<HTMLImageElement>("#blueprint-active-img");
+const bpMetaKicker = document.querySelector<HTMLElement>("#bp-meta-kicker");
+const bpMetaTitle = document.querySelector<HTMLElement>("#bp-meta-title");
+const bpMetaDesc = document.querySelector<HTMLElement>("#bp-meta-desc");
+const bpMetaHighlights = document.querySelector<HTMLUListElement>("#bp-meta-highlights");
+let currentBlueprintId = "system-mindmap";
+
+function openBlueprintHUD(blueprintId?: string): void {
+  if (!blueprintDialog) return;
+  const targetId = blueprintId || currentBlueprintId;
+  selectBlueprintTab(targetId);
+  if (!blueprintDialog.open) {
+    blueprintDialog.showModal();
+  }
+}
+
+function selectBlueprintTab(id: string): void {
+  const item = BLUEPRINTS.find((b) => b.id === id) || BLUEPRINTS[0];
+  currentBlueprintId = item.id;
+
+  if (blueprintNav) {
+    const tabs = blueprintNav.querySelectorAll<HTMLButtonElement>(".blueprint-tab");
+    tabs.forEach((tab) => {
+      tab.classList.toggle("active", tab.dataset.bp === item.id);
+    });
+  }
+
+  if (bpActiveImg) bpActiveImg.src = item.svgPath;
+  if (bpMetaKicker) bpMetaKicker.textContent = item.kicker;
+  if (bpMetaTitle) bpMetaTitle.textContent = item.title;
+  if (bpMetaDesc) bpMetaDesc.textContent = item.description;
+
+  if (bpMetaHighlights) {
+    bpMetaHighlights.replaceChildren();
+    for (const hl of item.highlights) {
+      const li = document.createElement("li");
+      li.textContent = hl;
+      bpMetaHighlights.appendChild(li);
+    }
+  }
+}
+
+blueprintNav?.addEventListener("click", (e) => {
+  const target = (e.target as HTMLElement)?.closest<HTMLButtonElement>(".blueprint-tab");
+  if (target?.dataset.bp) {
+    selectBlueprintTab(target.dataset.bp);
+  }
+});
+
+blueprintCloseBtn?.addEventListener("click", () => blueprintDialog?.close());
+blueprintDoneBtn?.addEventListener("click", () => blueprintDialog?.close());
+blueprintSourceBtn?.addEventListener("click", () => {
+  const item = BLUEPRINTS.find((b) => b.id === currentBlueprintId);
+  if (item) window.open(item.svgPath, "_blank");
+});
+
+function downloadTextFile(filename: string, content: string, mimeType = "application/xml"): void {
+  const blob = new Blob([content], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 function butlerChoose(id: ButlerChoiceId): void {
   const context = butlerContext();
   const card = selectedCard;
   if (id === "display" && card) runCardExtra("display", card);
   if (id === "settings" && card) flipCardTo(card, "back");
   if (id === "tour") toggleCardZoom(false);
+  if (id === "blueprints") {
+    openBlueprintHUD();
+  }
+  if (id === "opml") {
+    const xml = generateDeckOpml(context.cardsList);
+    downloadTextFile("postcard-deck-outline.opml", xml);
+  }
   if (id === "snooze") butlerQuietUntil = performance.now() + SNOOZE_SECONDS * 1000;
   if (id === "dismiss") {
     if (butlerBubble) butlerBubble.hidden = true;
     return;
   }
-  butlerSay({ message: butlerAnswer(id, context), choices: id === "stuck" ? ["tour", "dismiss"] : ["dismiss"] }, 20000);
+  butlerSay({ message: butlerAnswer(id, context), choices: id === "stuck" ? ["blueprints", "tour", "dismiss"] : ["dismiss"] }, 20000);
 }
 
 function openButlerOnHover(): void {
@@ -2018,6 +2102,13 @@ omniFormElement.addEventListener("submit", (event) => {
   omniInputElement.value = "";
   const context = butlerContext();
   const interpreted = butlerInterpretPrompt(prompt, context);
+  if (interpreted.actionPayload) {
+    if (interpreted.actionPayload.type === "open-blueprint") {
+      openBlueprintHUD(interpreted.actionPayload.blueprintId);
+    } else if (interpreted.actionPayload.type === "download-opml" && interpreted.actionPayload.data) {
+      downloadTextFile("postcard-deck-outline.opml", interpreted.actionPayload.data);
+    }
+  }
   if (interpreted.choice) {
     butlerChoose(interpreted.choice);
     return;
