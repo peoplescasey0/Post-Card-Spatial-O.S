@@ -29,6 +29,7 @@ export type ButlerChoiceId =
   | "bin"
   | "blueprints"
   | "opml"
+  | "freeplane"
   | "vscode"
   | "swiftshader"
   | "snooze"
@@ -39,7 +40,7 @@ export type ButlerNote = {
   message: string;
   choices: ButlerChoiceId[];
   actionPayload?: {
-    type: "open-blueprint" | "download-opml" | "toggle-swiftshader";
+    type: "open-blueprint" | "download-opml" | "download-freeplane" | "toggle-swiftshader";
     blueprintId?: string;
     data?: string;
   };
@@ -102,6 +103,7 @@ export function butlerGreeting(context: ButlerContext): ButlerNote {
 export const BUTLER_CHOICE_LABELS: Record<ButlerChoiceId, string> = {
   blueprints: "📐 System Blueprints",
   opml: "📝 Export OPML Outline",
+  freeplane: "🧠 Freeplane Mind Map",
   vscode: "💻 VS Code Remote Hook",
   swiftshader: "⚡ SwiftShader / Vulkan",
   tour: "Show me around",
@@ -119,6 +121,8 @@ export function butlerAnswer(choice: ButlerChoiceId, context: ButlerContext): st
       return `Opening the Architectural Blueprint HUD. You have 5 verified system designs available: CI/CD Pipeline, Postgres/Supabase ERD Data Model, Spatial OS System Mindmap, LiDAR UART State-Machine Filter, and Product Development Flow.`;
     case "opml":
       return `Synthesizing OPML 2.0 outline from current spatial state. I have validated this against the opml.org specification. You can import this into any outliner, RSS reader, or note tree.`;
+    case "freeplane":
+      return `Generating Freeplane (.mm) Mind Map with full node core formatting, summary groups, calculations (=3+4), relations, cloud boundaries, and floating nodes. Spooling to download...`;
     case "vscode": {
       const safeName = (context.cardName || "Fedora-Workstation").toLowerCase().replace(/[^a-z0-9]+/g, "-");
       return `Launch a remote VS Code editor directly attached to ${context.cardName || "Fedora-Workstation"}'s isolated virtual filesystem.\nCommand: \`code --remote ssh-remote+postcard-${safeName} /opt/postcard/workspace\``;
@@ -192,6 +196,15 @@ export function butlerInterpretPrompt(
       choice: "opml",
       reply: `${engineBadge} Generated OPML 2.0 Deck Outline tree. Spooling to local download...`,
       actionPayload: { type: "download-opml", data: opmlText },
+    };
+  }
+
+  // Freeplane Mind Map
+  if (/\b(freeplane|freemind|mind\s*map|mindmap\.mm|\.mm|bubble node)\b/.test(q)) {
+    return {
+      choice: "freeplane",
+      reply: `${engineBadge} ${butlerAnswer("freeplane", context)}`,
+      actionPayload: { type: "download-freeplane" },
     };
   }
 

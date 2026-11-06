@@ -26,6 +26,7 @@ import {
   type ButlerContext,
 } from "./butler";
 import { BLUEPRINTS } from "./blueprints";
+import { createFreeplaneTutorialMindMap, stringifyFreeplaneMap } from "./freeplane-engine";
 
 /**
  * Windows "Animation effects: off" makes browsers report prefers-reduced-motion,
@@ -1804,6 +1805,11 @@ function butlerChoose(id: ButlerChoiceId): void {
     const xml = generateDeckOpml(context.cardsList);
     downloadTextFile("postcard-deck-outline.opml", xml);
   }
+  if (id === "freeplane") {
+    const map = createFreeplaneTutorialMindMap();
+    const xml = stringifyFreeplaneMap(map);
+    downloadTextFile("basic-freeplane-functions.mm", xml, "application/x-freemind");
+  }
   if (id === "snooze") butlerQuietUntil = performance.now() + SNOOZE_SECONDS * 1000;
   if (id === "dismiss") {
     if (butlerBubble) butlerBubble.hidden = true;
@@ -2111,6 +2117,10 @@ omniFormElement.addEventListener("submit", (event) => {
       openBlueprintHUD(interpreted.actionPayload.blueprintId);
     } else if (interpreted.actionPayload.type === "download-opml" && interpreted.actionPayload.data) {
       downloadTextFile("postcard-deck-outline.opml", interpreted.actionPayload.data);
+    } else if (interpreted.actionPayload.type === "download-freeplane") {
+      const map = createFreeplaneTutorialMindMap();
+      const xml = stringifyFreeplaneMap(map);
+      downloadTextFile("basic-freeplane-functions.mm", xml, "application/x-freemind");
     }
   }
   if (interpreted.choice) {
