@@ -1678,11 +1678,14 @@ for (const type of ["pointerdown", "keydown", "wheel"]) {
   window.addEventListener(type, () => { lastUserActivity = performance.now(); }, { passive: true });
 }
 
+const butlerModelSelect = document.querySelector<HTMLSelectElement>("#butler-model-select");
+
 function butlerContext(): ButlerContext {
   const errorText = guestErrorElement.hidden ? undefined : guestErrorElement.textContent?.trim() || undefined;
   const serviceUnavailable = Boolean(errorText && /unavailable|failed to fetch/i.test(errorText));
   const card = selectedCard;
   const os = card ? cardToGuestOs(card) : undefined;
+  const model = (butlerModelSelect?.value as ButlerContext["model"]) || "auto";
   return {
     idleSeconds: (performance.now() - lastUserActivity) / 1000,
     guestError: serviceUnavailable ? undefined : errorText,
@@ -1692,6 +1695,7 @@ function butlerContext(): ButlerContext {
     displayOpen: guestDialogElement.open,
     needsInstall: card ? cardButtonStates(card).guest.label === "Install" : false,
     cardsList: cards.map((c) => c.name),
+    model,
   };
 }
 

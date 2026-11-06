@@ -5013,7 +5013,42 @@ summary:focus-visible {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 6px;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.butler-title-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+
+.butler-model-select {
+  font-family: "DM Mono", monospace !important;
+  font-size: 10px !important;
+  font-weight: 600 !important;
+  color: #2dd4bf !important;
+  background: rgba(0, 0, 0, 0.45) !important;
+  border: 1px solid rgba(45, 212, 191, 0.3) !important;
+  border-radius: 8px !important;
+  padding: 2px 6px !important;
+  height: 24px !important;
+  cursor: pointer;
+  max-width: 190px;
+}
+
+.butler-model-select:focus {
+  outline: none;
+  border-color: #ffb81c !important;
+  color: #ffb81c !important;
+}
+
+.butler-model-select option {
+  background: #0f172a !important;
+  color: #f1f5f9 !important;
+  font-size: 11px !important;
 }
 
 .butler-title {

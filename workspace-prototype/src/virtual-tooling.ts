@@ -60,3 +60,4 @@ export function getVsCodeRemoteHook(cardName: string): { command: string; summar
     summary: `Launch a remote VS Code editor directly attached to ${cardName}'s isolated virtual filesystem.`,
   };
 }
+

@@ -1022,7 +1022,14 @@
     <aside class="butler" id="butler" aria-label="AI butler">
       <div class="butler-bubble" id="butler-bubble" role="status" aria-live="polite" hidden>
         <div class="butler-header">
-          <span class="butler-title">🎩 AI BUTLER</span>
+          <div class="butler-title-group">
+            <span class="butler-title">🎩 THE ONE AI CO-PILOT</span>
+            <select class="butler-model-select" id="butler-model-select" title="Active Local Dual-Engine Model">
+              <option value="auto">⚡ Auto-Switch (Smart Route)</option>
+              <option value="qwen-coder">💻 Qwen 2.5 Coder 1.5B (Tech &amp; Terminal)</option>
+              <option value="llama-chat">💬 Llama 3.2 1B (Conversation &amp; Banter)</option>
+            </select>
+          </div>
           <button class="butler-close" id="butler-close" type="button" aria-label="Dismiss butler">×</button>
         </div>
         <p id="butler-message"></p>

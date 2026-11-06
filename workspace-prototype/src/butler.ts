@@ -1,3 +1,5 @@
+export type ButlerEngineModel = "auto" | "qwen-coder" | "llama-chat";
+
 export type ButlerContext = {
   /** Seconds since the user last interacted with the page. */
   idleSeconds: number;
@@ -15,6 +17,8 @@ export type ButlerContext = {
   displayOpen: boolean;
   /** Optional summary of all active cards in the room. */
   cardsList?: string[];
+  /** Active local AI engine model. */
+  model?: ButlerEngineModel;
 };
 
 export type ButlerChoiceId =
@@ -158,6 +162,13 @@ export function butlerInterpretPrompt(
   const q = rawPrompt.trim().toLowerCase();
   if (!q) return { reply: "Tell me what you need, Operator, or select an operational capability below." };
 
+  // Determine engine persona
+  const activeModel = context.model || "auto";
+  const isCoder =
+    activeModel === "qwen-coder" ||
+    (activeModel === "auto" && /\b(code|build|script|terminal|qemu|kvm|bash|git|sh|kernel|patch|compile|test|port|bug|fix|error|opml|json)\b/i.test(q));
+  const engineBadge = isCoder ? "💻 [Qwen 2.5 Coder 1.5B]" : "💬 [Llama 3.2 1B]";
+
   // Blueprints & Architecture
   if (/\b(blueprint|diagram|architecture|erd|pipeline|mindmap|lidar|flowchart|mermaid|schema)\b/.test(q)) {
     let matchedId: string | undefined = undefined;
@@ -169,7 +180,7 @@ export function butlerInterpretPrompt(
 
     return {
       choice: "blueprints",
-      reply: butlerAnswer("blueprints", context),
+      reply: `${engineBadge} ${butlerAnswer("blueprints", context)}`,
       actionPayload: { type: "open-blueprint", blueprintId: matchedId },
     };
   }
@@ -179,44 +190,50 @@ export function butlerInterpretPrompt(
     const opmlText = generateDeckOpml(context.cardsList);
     return {
       choice: "opml",
-      reply: `Generated OPML 2.0 Deck Outline. Downloading outline file...`,
+      reply: `${engineBadge} Generated OPML 2.0 Deck Outline tree. Spooling to local download...`,
       actionPayload: { type: "download-opml", data: opmlText },
     };
   }
 
   // VS Code remote
   if (/\b(vscode|code|editor|ide|remote)\b/.test(q)) {
-    return { choice: "vscode", reply: butlerAnswer("vscode", context) };
+    return { choice: "vscode", reply: `${engineBadge} ${butlerAnswer("vscode", context)}` };
   }
 
   // SwiftShader / Vulkan graphics
   if (/\b(swiftshader|vulkan|egl|software render|software rasterizer|gpu)\b/.test(q)) {
-    return { choice: "swiftshader", reply: butlerAnswer("swiftshader", context) };
+    return { choice: "swiftshader", reply: `${engineBadge} ${butlerAnswer("swiftshader", context)}` };
   }
 
   if (/\b(screen|display|bigger|twist|full\s*screen|expand)\b/.test(q)) {
-    return { choice: "display", reply: butlerAnswer("display", context) };
+    return { choice: "display", reply: `${engineBadge} ${butlerAnswer("display", context)}` };
   }
   if (/\b(trash|bin|delete|restore|corner)\b/.test(q)) {
-    return { choice: "bin", reply: butlerAnswer("bin", context) };
+    return { choice: "bin", reply: `${engineBadge} ${butlerAnswer("bin", context)}` };
   }
   if (/\b(setting|back|hardware|flip)\b/.test(q)) {
-    return { choice: "settings", reply: butlerAnswer("settings", context) };
+    return { choice: "settings", reply: `${engineBadge} ${butlerAnswer("settings", context)}` };
   }
   if (/\b(tour|around|how\s+do\s+i|controls|buttons)\b/.test(q)) {
-    return { choice: "tour", reply: butlerAnswer("tour", context) };
+    return { choice: "tour", reply: `${engineBadge} ${butlerAnswer("tour", context)}` };
   }
   if (/\b(windows|iso|wsl)\b/.test(q)) {
     return {
       reply:
-        "Windows install media is not bundled. Point POSTCARD_WINDOWS_ISO at your own ISO; keeping it inside WSL Ubuntu lets QEMU read it directly without crossing the slow Windows mount.",
+        `${engineBadge} Windows install media is not bundled. Point POSTCARD_WINDOWS_ISO at your own ISO; keeping it inside WSL Ubuntu lets QEMU read it directly without crossing the slow Windows mount.`,
     };
   }
   if (/\b(stuck|trouble|error|broken|help|slow|fix)\b/.test(q)) {
-    return { choice: "stuck", reply: butlerAnswer("stuck", context) };
+    return { choice: "stuck", reply: `${engineBadge} ${butlerAnswer("stuck", context)}` };
+  }
+
+  if (isCoder) {
+    return {
+      reply: `${engineBadge} Standing by on code & hypervisor ops: "${rawPrompt}". I can generate QEMU launch flags, inspect system blueprints, export OPML outlines, or inject SecOps playbooks into running guests.`,
+    };
   }
 
   return {
-    reply: `I acknowledge the instruction: "${rawPrompt}". As 'The One' co-pilot, I can present system blueprints, export OPML outline trees, connect VS Code remote CLI, or manage your 3D spatial cards.`,
+    reply: `${engineBadge} Great to chat with you, Operator. I'm keeping your spatial deck running smoothly. What would you like to explore or customize today?`,
   };
 }

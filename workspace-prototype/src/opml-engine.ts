@@ -38,7 +38,7 @@ function renderNodeToXml(node: OpmlOutlineNode, indentLevel: number): string {
   const typeAttr = node.type ? ` type="${escapeXml(node.type)}"` : "";
   const createdAttr = node.created ? ` created="${escapeXml(node.created)}"` : "";
   const categoryAttr = node.category ? ` category="${escapeXml(node.category)}"` : "";
-  
+
   let extraAttrs = "";
   if (node.attributes) {
     for (const [k, v] of Object.entries(node.attributes)) {
@@ -133,3 +133,4 @@ export function validateOpmlString(xmlString: string): { valid: boolean; title?:
     };
   }
 }
+
