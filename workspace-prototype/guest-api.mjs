@@ -238,7 +238,7 @@ function buildNetworkArgs(networkMode = "nat", deviceModel = "virtio-net-pci") {
   ];
 }
 
-function qemuArguments({ bootMode, cardId, diskPath, isoPath, ports, networkMode = "nat", dropDir, memoryMb = 1024, vcpus = 2, isMacOs = false, openCorePath = "", macOvmfCode = "", macOvmfVars = "", kernelPath = "", initrdPath = "" }) {
+function qemuArguments({ bootMode, cardId, diskPath, isoPath, ports, networkMode = "nat", dropDir, memoryMb = 1024, vcpus = 2, isMacOs = false, isAndroid = false, openCorePath = "", macOvmfCode = "", macOvmfVars = "", kernelPath = "", initrdPath = "" }) {
   if (isMacOs) {
     const args = [
       "-name", `Post Card ${cardId} macOS guest`,
@@ -290,8 +290,9 @@ function qemuArguments({ bootMode, cardId, diskPath, isoPath, ports, networkMode
     ];
     return args;
   }
+  const guestLabel = isAndroid ? "Android" : "Linux";
   const args = [
-    "-name", `Post Card ${cardId} Linux guest`,
+    "-name", `Post Card ${cardId} ${guestLabel} guest`,
     "-machine", "q35",
     // WHPX's in-kernel IRQ chip hangs SeaBIOS at "Booting from Hard Disk...";
     // the userspace IRQ chip boots reliably.
@@ -308,6 +309,8 @@ function qemuArguments({ bootMode, cardId, diskPath, isoPath, ports, networkMode
     "-device", "qemu-xhci",
     "-device", "usb-kbd",
     "-device", "usb-tablet",
+    "-device", "intel-hda",
+    "-device", "hda-duplex",
     ...(dropDir ? ["-drive", `file=fat:rw:${dropDir},if=ide,index=2,format=raw`] : []),
     ...buildNetworkArgs(networkMode, "e1000"),
     ...(ports.serialPort
@@ -328,6 +331,11 @@ function qemuArguments({ bootMode, cardId, diskPath, isoPath, ports, networkMode
     if (initrdPath && existsSync(initrdPath)) {
       args.push("-initrd", initrdPath);
     }
+  } else if (isAndroid) {
+    if (isoPath && existsSync(isoPath)) {
+      args.push("-cdrom", isoPath);
+    }
+    args.push("-boot", bootMode === "installer" ? "order=d,menu=on" : "order=c,menu=on");
   } else if (bootMode === "installer") {
     args.push("-cdrom", isoPath, "-boot", "order=d");
   } else {
@@ -670,6 +678,7 @@ export function createGuestApi(options = {}) {
     ? path.resolve(process.env.POSTCARD_LINUX_BASE)
     : path.join(dataDirectory, "master-images", "debian-golden.qcow2");
   const overlayDirectory = path.join(dataDirectory, "overlays");
+  const androidDirectory = path.join(dataDirectory, "android");
   const readyMarkerPath = path.join(dataDirectory, "debian-golden.ready.json");
   const paperPlanesPath = path.join(dataDirectory, "paper-planes.json");
   const paperPlanesDropDir = path.join(dataDirectory, "paper-planes");
@@ -948,17 +957,24 @@ export function createGuestApi(options = {}) {
   }
 
   async function preparedCardIds() {
-    let entries;
+    let overlayEntries = [];
     try {
-      entries = await readdir(overlayDirectory, { withFileTypes: true });
+      overlayEntries = await readdir(overlayDirectory, { withFileTypes: true });
     } catch (error) {
-      if (error.code === "ENOENT") return [];
-      throw new GuestApiError(500, `Could not list Linux card overlays: ${error.message}`);
+      if (error.code !== "ENOENT") throw new GuestApiError(500, `Could not list Linux card overlays: ${error.message}`);
+    }
+    let androidEntries = [];
+    try {
+      androidEntries = await readdir(androidDirectory, { withFileTypes: true });
+    } catch (error) {
+      if (error.code !== "ENOENT") throw new GuestApiError(500, `Could not list Android card disks: ${error.message}`);
     }
 
-    return entries
-      .filter((entry) => entry.isFile() && /^[a-z0-9][a-z0-9_-]{0,63}\.qcow2$/.test(entry.name))
-      .map((entry) => entry.name.slice(0, -".qcow2".length));
+    const ids = [
+      ...overlayEntries.filter((entry) => entry.isFile() && /^[a-z0-9][a-z0-9_-]{0,63}\.qcow2$/.test(entry.name)).map((entry) => entry.name.slice(0, -".qcow2".length)),
+      ...androidEntries.filter((entry) => entry.isFile() && /^[a-z0-9][a-z0-9_-]{0,63}\.qcow2$/.test(entry.name)).map((entry) => entry.name.slice(0, -".qcow2".length)),
+    ];
+    return [...new Set(ids)];
   }
 
   async function preparedWindowsCardIds() {
@@ -1166,9 +1182,11 @@ export function createGuestApi(options = {}) {
           vcpus: guest.vcpus ?? resolveCardVcpus("balanced"),
           diskPath: guest.os === WINDOWS_OS
             ? path.join(windowsDiskDirectory, `${guest.cardId}.qcow2`)
-            : guest.bootMode === "installer"
-              ? baseDiskPath
-              : path.join(overlayDirectory, `${guest.cardId}.qcow2`),
+            : guest.os === ANDROID_OS
+              ? path.join(androidDirectory, `${guest.cardId}.qcow2`)
+              : guest.bootMode === "installer"
+                ? baseDiskPath
+                : path.join(overlayDirectory, `${guest.cardId}.qcow2`),
         };
       }),
     };
@@ -1428,6 +1446,33 @@ export function createGuestApi(options = {}) {
           macOvmfCode: macOvmfCodeMaster,
           macOvmfVars,
         });
+      } else if (os === ANDROID_OS) {
+        if (!(await executableExists(qemuPath))) {
+          throw new GuestApiError(503, `QEMU was not found at ${qemuPath}. Set POSTCARD_QEMU to its path.`);
+        }
+        await mkdir(androidDirectory, { recursive: true });
+        diskPath = path.join(androidDirectory, `${cardId}.qcow2`);
+        await createEmptyDiskIfNeeded(diskPath, qemuImgPath, "16G");
+        const effectiveIso = cardCustomIso && existsSync(cardCustomIso) ? cardCustomIso : androidIsoPath;
+        if ((bootMode === "installer" || !existsSync(diskPath)) && !existsSync(effectiveIso)) {
+          throw new GuestApiError(503, `Android installer ISO was not found at ${effectiveIso}. Set POSTCARD_ANDROID_ISO to its path.`);
+        }
+        const ports = await reservePorts(guest);
+        const cardDropDir = path.join(paperPlanesDropDir, cardId);
+        await mkdir(cardDropDir, { recursive: true });
+        const networkMode = (await readNetworkModes())[cardId] ?? "nat";
+        args = qemuArguments({
+          bootMode,
+          cardId,
+          diskPath,
+          isoPath: effectiveIso,
+          ports,
+          networkMode,
+          dropDir: cardDropDir,
+          memoryMb: Math.max(memoryMb, 1536),
+          vcpus,
+          isAndroid: true,
+        });
       } else {
         if (!(await executableExists(qemuPath))) {
           throw new GuestApiError(503, `QEMU was not found at ${qemuPath}. Set POSTCARD_QEMU to its path.`);
@@ -1460,11 +1505,10 @@ export function createGuestApi(options = {}) {
         const cardDropDir = path.join(paperPlanesDropDir, cardId);
         await mkdir(cardDropDir, { recursive: true });
         const networkMode = (await readNetworkModes())[cardId] ?? "nat";
-        const targetIso = os === ANDROID_OS && existsSync(androidIsoPath) ? androidIsoPath : isoPath;
-        const isKernelGuest = cardId === "postcard-os" || os === "kernel";
+        const isKernelGuest = os === "kernel";
         const kernelPath = isKernelGuest && existsSync(postcardKernelPath) ? postcardKernelPath : "";
         const initrdPath = isKernelGuest && existsSync(postcardRamdiskPath) ? postcardRamdiskPath : "";
-        args = qemuArguments({ bootMode, cardId, diskPath, isoPath: targetIso, ports, networkMode, dropDir: cardDropDir, memoryMb, vcpus, kernelPath, initrdPath });
+        args = qemuArguments({ bootMode, cardId, diskPath, isoPath, ports, networkMode, dropDir: cardDropDir, memoryMb, vcpus, kernelPath, initrdPath });
       }
 
       let child;
@@ -1762,6 +1806,11 @@ export function createGuestApi(options = {}) {
         { parent: windowsFirmwareDirectory, name: `${cardId}-VARS.fd`, type: "file" },
         { parent: windowsTpmDirectory, name: cardId, type: "directory" },
       ]
+      : os === ANDROID_OS
+      ? [
+        { parent: androidDirectory, name: `${cardId}.qcow2`, type: "file", disk: true },
+        { parent: androidDirectory, name: `${cardId}.qcow2.checkpoint`, type: "file" },
+      ]
       : [
         { parent: overlayDirectory, name: `${cardId}.qcow2`, type: "file", disk: true },
         { parent: overlayDirectory, name: `${cardId}.qcow2.checkpoint`, type: "file" },
@@ -1893,6 +1942,8 @@ export function createGuestApi(options = {}) {
       await rm(path.join(windowsDiskDirectory, `${cardId}.qcow2`), { force: true });
       await rm(path.join(windowsFirmwareDirectory, `${cardId}-VARS.fd`), { force: true });
       await rm(path.join(windowsTpmDirectory, cardId), { recursive: true, force: true });
+    } else if (os === ANDROID_OS) {
+      await rm(path.join(androidDirectory, `${cardId}.qcow2`), { force: true });
     } else {
       await rm(path.join(overlayDirectory, `${cardId}.qcow2`), { force: true });
     }
@@ -1931,6 +1982,16 @@ export function createGuestApi(options = {}) {
       }
       if (existsSync(srcDisk)) {
         await mkdir(windowsDiskDirectory, { recursive: true });
+        await copyFile(srcDisk, dstDisk, fsConstants.COPYFILE_EXCL);
+      }
+    } else if (os === ANDROID_OS) {
+      const srcDisk = path.join(androidDirectory, `${sourceCardId}.qcow2`);
+      const dstDisk = path.join(androidDirectory, `${targetCardId}.qcow2`);
+      if (existsSync(dstDisk)) {
+        throw new GuestApiError(409, "Target Android card already has a disk.");
+      }
+      if (existsSync(srcDisk)) {
+        await mkdir(androidDirectory, { recursive: true });
         await copyFile(srcDisk, dstDisk, fsConstants.COPYFILE_EXCL);
       }
     } else {
@@ -2229,7 +2290,9 @@ export function createGuestApi(options = {}) {
     const diskPath =
       os === WINDOWS_OS
         ? path.join(windowsDiskDirectory, `${cardId}.qcow2`)
-        : path.join(overlayDirectory, `${cardId}.qcow2`);
+        : os === ANDROID_OS
+          ? path.join(androidDirectory, `${cardId}.qcow2`)
+          : path.join(overlayDirectory, `${cardId}.qcow2`);
     const checkpointDiskPath = `${diskPath}.checkpoint`;
 
     if (targetGuest && targetGuest.phase === "running" && targetGuest.ports?.qmpPort) {

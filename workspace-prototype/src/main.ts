@@ -4765,7 +4765,7 @@ function updateGuestDialogCopy(): void {
       : isWindows
         ? "Windows uses a persistent 64 GiB disk, UEFI firmware, a per-card software TPM 2.0, and a virtio-balloon device."
         : isAndroid
-          ? "Android cards include a virtio-balloon device (1 GiB Eco default). Multiple Android, Windows, macOS, and Linux cards can run side-by-side."
+          ? "Android cards boot the official Android-x86 Live/Install system with private persistent virtual disk and virtio-balloon."
           : isMacOs
             ? "macOS / Darwin cards use a q35 + OpenCore UEFI + AppleSMC profile with 2 GiB Eco RAM and a virtio-balloon device on a private QCOW2 overlay."
             : "Install Debian once as the golden base, shut it down, then finish the base. Up to six cards can run at once with virtio-balloon devices and independent QCOW2 overlays.";
@@ -4780,14 +4780,14 @@ function updateGuestDialogCopy(): void {
     : isWindows
       ? (targetRunning ? "⟳ Reboot Windows" : "Install Windows (your ISO)")
       : isAndroid
-        ? (targetRunning ? "⟳ Reboot Android base" : "Install Android base")
+        ? (targetRunning ? "⟳ Reboot Android Live/ISO" : "Boot Android Live / Install")
         : isMacOs
           ? (targetRunning ? "⟳ Reboot macOS / Darwin" : "Install macOS / Darwin")
           : (targetRunning ? "⟳ Reboot Debian base" : "Install Debian base");
   guestBootDiskButtonElement.textContent = isWindows
     ? (targetRunning ? "⟳ Reboot Windows" : "Boot Windows")
     : isAndroid
-      ? (targetRunning ? "⟳ Reboot Android" : "Boot Android")
+      ? (targetRunning ? "⟳ Reboot Android" : "Boot Android (Disk)")
       : isMacOs
         ? (targetRunning ? "⟳ Reboot macOS" : "Boot macOS")
         : (targetRunning ? "⟳ Reboot Linux" : "Boot this card");

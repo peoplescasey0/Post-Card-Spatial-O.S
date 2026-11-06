@@ -192,3 +192,4 @@ The top toolbar provides two dedicated operations menus:
 
 ---
 *Post Card Spatial OS — 100% Local Hypervisor & Spatial Workspace.*
+
