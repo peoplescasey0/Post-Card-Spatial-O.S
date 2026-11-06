@@ -298,12 +298,13 @@
               <span class="button-icon" aria-hidden="true">➤</span>
               <span>Send a paper plane</span>
             </button>
-            <details class="pulldown omni-pulldown" id="omni-pulldown">
+            <!-- Split Pulldown 1: SecOps & Recon Playbooks -->
+            <details class="pulldown omni-pulldown" id="secops-pulldown">
               <summary class="dock-button pulldown-dock-trigger">
-                <span>Playbooks &amp; Ops ▾</span>
+                <span>🛡️ SecOps Playbooks ▾</span>
               </summary>
-              <div class="pulldown-panel pulldown-panel-down" id="omni-chips">
-                <div class="pulldown-section-label">SECOPS &amp; RECON PLAYBOOKS</div>
+              <div class="pulldown-panel pulldown-panel-down" id="secops-chips">
+                <div class="pulldown-section-label">CYBER RANGE &amp; RECON OPS</div>
                 <div class="pulldown-grid">
                   <button class="omni-chip" data-omni-action="recon-ports" type="button" title="Enumerate listening TCP/UDP ports">⚡ Recon Ports</button>
                   <button class="omni-chip" data-omni-action="priv-audit" type="button" title="Audit SUID binaries &amp; privilege posture">🛡️ Priv Audit</button>
@@ -311,7 +312,16 @@
                   <button class="omni-chip" data-omni-action="harden-fw" type="button" title="Audit firewall &amp; SSH hardening">🔥 Firewall</button>
                   <button class="omni-chip" data-omni-action="sys-forensics" type="button" title="Inspect top processes &amp; cron persistence">🕵️ Forensics</button>
                 </div>
-                <div class="pulldown-section-label">HYPERVISOR &amp; HORIZON OPS</div>
+              </div>
+            </details>
+
+            <!-- Split Pulldown 2: Hypervisor & Horizon Virtualization Ops -->
+            <details class="pulldown omni-pulldown" id="horizon-pulldown">
+              <summary class="dock-button pulldown-dock-trigger">
+                <span>⚡ Hypervisor Ops ▾</span>
+              </summary>
+              <div class="pulldown-panel pulldown-panel-down" id="horizon-chips">
+                <div class="pulldown-section-label">SNAPSHOT &amp; SWARM CONTROL</div>
                 <div class="pulldown-grid">
                   <button class="omni-chip omni-chip-horizon" data-omni-action="snapshot-save" type="button" title="Create a Time-Travel Savepoint (RAM + Disk)">⏱️ Savepoint</button>
                   <button class="omni-chip omni-chip-horizon" data-omni-action="snapshot-rewind" type="button" title="Rewind card to last Time-Travel Savepoint">⏪ Rewind</button>

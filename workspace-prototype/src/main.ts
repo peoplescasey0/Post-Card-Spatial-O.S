@@ -252,7 +252,9 @@ const benchToggle = document.querySelector<HTMLButtonElement>("#bench-toggle");
 const secopsToggle = document.querySelector<HTMLButtonElement>("#secops-toggle");
 const omniForm = document.querySelector<HTMLFormElement>("#omni-form");
 const omniInput = document.querySelector<HTMLInputElement>("#omni-input");
-const omniChips = document.querySelector<HTMLDivElement>("#omni-chips");
+const secopsChips = document.querySelector<HTMLDivElement>("#secops-chips");
+const horizonChips = document.querySelector<HTMLDivElement>("#horizon-chips");
+const omniChips = document.querySelector<HTMLDivElement>("#omni-chips") ?? horizonChips;
 const quickFileInput = document.querySelector<HTMLInputElement>("#quick-file-input");
 const flipCompass = document.querySelector<HTMLElement>("#flip-compass");
 const compassCycleButton = document.querySelector<HTMLButtonElement>("#compass-cycle");
@@ -2139,7 +2141,7 @@ omniFormElement.addEventListener("submit", (event) => {
   void runAiOrSecOpsCommand(prompt, selectedCard ?? undefined);
 });
 
-omniChipsElement.addEventListener("click", (event) => {
+function handleChipAction(event: MouseEvent): void {
   const button = (event.target as HTMLElement | null)?.closest<HTMLButtonElement>(
     "[data-omni-action]",
   );
@@ -2175,7 +2177,13 @@ omniChipsElement.addEventListener("click", (event) => {
     return;
   }
   void runAiOrSecOpsCommand(action, selectedCard ?? undefined);
-});
+}
+
+secopsChips?.addEventListener("click", handleChipAction);
+horizonChips?.addEventListener("click", handleChipAction);
+if (omniChipsElement && omniChipsElement !== secopsChips && omniChipsElement !== horizonChips) {
+  omniChipsElement.addEventListener("click", handleChipAction);
+}
 
 quickFileInput?.addEventListener("change", () => {
   const file = quickFileInput.files?.[0];
