@@ -638,13 +638,15 @@
             <details class="manual-chapter">
               <summary class="manual-chapter-summary">
                 <span class="manual-chapter-num">CH 02</span>
-                <span class="manual-chapter-title">Multi-OS Hypervisor &amp; Eco RAM Thinning</span>
+                <span class="manual-chapter-title">Multi-OS Hypervisor, Eco RAM Thinning &amp; Split Ops</span>
                 <span class="pulldown-chevron">▾</span>
               </summary>
               <div class="manual-chapter-body">
-                <div class="help-row"><span class="help-key">MULTI-INSTANCE</span><span>Run up to 6 concurrent Windows 11, Linux, and Android cards. Secondary Windows cards auto-clone from your base disk with isolated TPM 2.0 state.</span></div>
-                <div class="help-row"><span class="help-key">🍃 ECO RAM MODE</span><span>Streamlined default allocation: <strong>2 GiB</strong> for Windows, <strong>1 GiB</strong> for Linux &amp; Android (cycle via <em>Playbooks &amp; Ops ▾ → 🍃 Eco RAM</em>).</span></div>
-                <div class="help-row"><span class="help-key">VIRTIO BALLOON</span><span>VMs include <code>virtio-balloon</code> for guest memory reclamation when supported by the guest. Host page merging is disabled for compatibility.</span></div>
+                <div class="help-row"><span class="help-key">MULTI-INSTANCE</span><span>Run up to 6 concurrent Windows 11, Linux, macOS, and Android cards. Secondary Windows cards auto-clone from your base disk with isolated TPM 2.0 state.</span></div>
+                <div class="help-row"><span class="help-key">🍃 ECO RAM MODE</span><span>Streamlined default allocation: <strong>2 GiB</strong> for Windows, <strong>1 GiB</strong> for Linux &amp; Android (cycle via <em>⚡ Hypervisor Ops ▾ → 🍃 Eco RAM Thinning</em>).</span></div>
+                <div class="help-row"><span class="help-key">🛡️ SECOPS PLAYBOOKS</span><span>Dedicated security suite: <em>Host Isolation</em> (unplug virtual NICs), <em>RAM Sanitizer</em> (VirtIO balloon scrub), <em>SSH Lockdown</em> (drop remote sessions), and <em>C2 Decoy</em> (spool canary sockets).</span></div>
+                <div class="help-row"><span class="help-key">⚡ HYPERVISOR OPS</span><span>Dedicated infrastructure operations: <em>Emergency Crashdump</em> (core dump extraction), <em>VRAM Compact</em> (defragment host framebuffers), and <em>Cold Evacuate</em> (safe flush and power down).</span></div>
+                <div class="help-row"><span class="help-key">VIRTIO BALLOON</span><span>VMs include <code>virtio-balloon</code> for dynamic guest memory reclamation. Host page merging is disabled for hardware compatibility.</span></div>
               </div>
             </details>
             <details class="manual-chapter">
@@ -710,26 +712,51 @@
             <details class="manual-chapter">
               <summary class="manual-chapter-summary">
                 <span class="manual-chapter-num">CH 08</span>
-                <span class="manual-chapter-title">Custom Manual Placeholder &amp; Operator Notes</span>
-                <span class="pulldown-chevron">▾</span>
-              </summary>
-              <div class="manual-chapter-body">
-                <label for="manual-custom-notes">CUSTOM MANUAL SECTIONS / OPERATOR NOTES (AUTO-SAVED)</label>
-                <textarea id="manual-custom-notes" rows="4" placeholder="Write your own custom manual chapters, onboarding notes, or SOPs here…"></textarea>
-                <p class="dialog-subhint">Saved automatically in local storage so you can expand your official User Manual anytime.</p>
-              </div>
-            </details>
-            <details class="manual-chapter" open>
-              <summary class="manual-chapter-summary">
-                <span class="manual-chapter-num">CH 09</span>
                 <span class="manual-chapter-title">Commercial Editions, Licensing &amp; Add-On Marketplace</span>
                 <span class="pulldown-chevron">▾</span>
               </summary>
               <div class="manual-chapter-body">
                 <div class="help-row"><span class="help-key">🚀 FREEMIUM CORE + PRO</span><span><strong>The Developer Model:</strong> Open-core Rust micro-host, basic QEMU virtualization, and 3D card turntable free forever. Paid Pro ($19/mo or $190/yr) unlocks Pro AV matrix, NVIDIA GPU compute sandbox, and 24-VM concurrent scaling.</span></div>
                 <div class="help-row"><span class="help-key">🛡️ ENTERPRISE B2B</span><span><strong>Security &amp; Forensics Appliance:</strong> Air-gapped compliance workstation for SecOps and corporate IT. Licensed per-seat / per-node with tamper-evident audit logs, isolated snapshot Time-Travel recovery, and golden base locks.</span></div>
-                <div class="help-row"><span class="help-key">🤖 AI BUTLER HYBRID</span><span><strong>Smart Automation Subscription (coming soon):</strong> 100% local hypervisor protects user privacy while cloud-assisted AI co-pilot handles custom agent scripting, automated multi-VM provisioning, intelligent throttling, and predictive diagnostics.</span></div>
-                <div class="help-row"><span class="help-key">🧩 ADD-ON MARKETPLACE</span><span><strong>Modular Micro-DLCs:</strong> Clean empty canvas with modular card slots. Standalone DLCs planned (coming soon): Pro A/V Plugin, Deep-Dive Forensics Pack, Advanced NVIDIA Compute Module, and Swarm DirectLink 10.0.0.2 Gateway.</span></div>
+                <div class="help-row"><span class="help-key">🤖 AI BUTLER HYBRID</span><span><strong>Smart Automation Subscription:</strong> Active at $29/mo ($290/yr). 100% local hypervisor protects privacy while local AI co-pilot handles custom agent scripting, automated multi-VM provisioning, intelligent VirtIO balloon throttling, and predictive diagnostics.</span></div>
+                <div class="help-row"><span class="help-key">🧩 ADD-ON MARKETPLACE</span><span><strong>Modular Micro-DLCs:</strong> Clean canvas with modular card slots. 1-click active micro-DLC slots: 🎛️ The A/V Production Plugin, 🕵️ Deep-Dive Forensics Pack, ⚡ Advanced NVIDIA Compute Module, and 🌐 Swarm DirectLink 10.0.0.2 Gateway.</span></div>
+              </div>
+            </details>
+            <details class="manual-chapter">
+              <summary class="manual-chapter-summary">
+                <span class="manual-chapter-num">CH 09</span>
+                <span class="manual-chapter-title">Dual-Engine AI Butler ("The One") &amp; Blueprint Awareness</span>
+                <span class="pulldown-chevron">▾</span>
+              </summary>
+              <div class="manual-chapter-body">
+                <div class="help-row"><span class="help-key">🤖 DUAL LOCAL MODELS</span><span>Powered by 100% local inference on Fedora Workstation <code>10.0.0.2:11434</code> via Ollama. <code>qwen2.5-coder:1.5b</code> handles terminal commands, scripting, and Freeplane synthesis; <code>llama3.2:1b</code> handles conversational dialog.</span></div>
+                <div class="help-row"><span class="help-key">🔀 SMART AUTO-ROUTING</span><span>Intent-aware classifier automatically dispatches prompts to the optimal engine, with instant manual model override in the AI Butler toolbar.</span></div>
+                <div class="help-row"><span class="help-key">📐 BLUEPRINT INGESTION</span><span>AI Butler is self-aware of system architecture blueprints located in <code>/blueprints/</code>: System Mindmap, ERD Data Model, CI/CD Pipeline, LiDAR Decimation Filter, and Product Development Flowchart.</span></div>
+                <div class="help-row"><span class="help-key">🛠️ VIRTUAL TOOLING</span><span>Equipped with SwiftShader Vulkan software rasterizer ICD for headless GPU rendering and VS Code CLI hook integration (<code>code --install-extension</code>).</span></div>
+              </div>
+            </details>
+            <details class="manual-chapter">
+              <summary class="manual-chapter-summary">
+                <span class="manual-chapter-num">CH 10</span>
+                <span class="manual-chapter-title">Freeplane Mind Map Engine &amp; SpatialNode 3D Topology</span>
+                <span class="pulldown-chevron">▾</span>
+              </summary>
+              <div class="manual-chapter-body">
+                <div class="help-row"><span class="help-key">🧠 FREEPLANE XML (.MM)</span><span>Full FreeMind/Freeplane 1.11+ XML serialization: export workspaces and cards into hierarchical mind maps with clouds, relations, edge styling, and node details.</span></div>
+                <div class="help-row"><span class="help-key">🧮 DYNAMIC FORMULAS</span><span>Evaluate live in-node mathematical calculations (e.g., <code>=3+4</code> evaluates automatically to <code>7</code>) across mind map nodes.</span></div>
+                <div class="help-row"><span class="help-key">🌐 SPATIALNODE 3D</span><span>Every card and mind map node implements <code>SpatialNode</code> with <code>[f32; 3]</code> coordinates, supporting Pinned, Floating (double-click free space), Collapsed, and Active states.</span></div>
+              </div>
+            </details>
+            <details class="manual-chapter">
+              <summary class="manual-chapter-summary">
+                <span class="manual-chapter-num">CH 11</span>
+                <span class="manual-chapter-title">Custom Manual Sections &amp; Operator Notes (Auto-Saved)</span>
+                <span class="pulldown-chevron">▾</span>
+              </summary>
+              <div class="manual-chapter-body">
+                <label for="manual-custom-notes">CUSTOM MANUAL SECTIONS / OPERATOR NOTES (AUTO-SAVED)</label>
+                <textarea id="manual-custom-notes" rows="4" placeholder="Write your own custom manual chapters, onboarding notes, or SOPs here…"></textarea>
+                <p class="dialog-subhint">Saved automatically in local storage so you can expand your official User Manual anytime.</p>
               </div>
             </details>
           </div>

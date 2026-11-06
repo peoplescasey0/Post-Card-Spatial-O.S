@@ -4,6 +4,8 @@ An early host-side prototype of the spatial workspace concept. It is
 intentionally separate from the bare-metal kernel so the interaction model can
 be explored while the OS foundation continues to develop.
 
+For complete field instructions, see the **[User Manual & Field Guide](../USER_MANUAL.md)** or click **📖 USER MANUAL** (shortcut `?`) in the top HUD.
+
 ## Run
 
 ```powershell
