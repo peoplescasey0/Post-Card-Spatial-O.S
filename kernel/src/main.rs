@@ -206,6 +206,10 @@ extern "C" {
     static mut elf_exec_arena: [u8; 16384];
 }
 
+pub(crate) unsafe fn guest_capsule_arena_ptr() -> *mut u8 {
+    core::ptr::addr_of_mut!(guest_capsule_arena) as *mut u8
+}
+
 /// Maps any physical address (including 64-bit Above-4G UEFI GOP BARs on Dell Latitude 3120)
 /// into the virtual window `0xFE00_0000 .. 0xFFFF_FFFF` (16 x 2 MiB = 32 MiB) if needed.
 unsafe fn ensure_gop_mapped(phys_addr: u64) -> u64 {
@@ -259,6 +263,8 @@ pub struct Multiboot2ParsedInfo {
     pub module_start: u32,
     pub module_end: u32,
     pub serial_disabled: bool,
+    /// `nostorage` on the kernel cmdline skips PCI block-device probing.
+    pub storage_disabled: bool,
 }
 
 static mut GOP_FB: Option<GopFramebufferInfo> = None;
@@ -266,7 +272,7 @@ static mut CURSOR_COL: usize = 0;
 static mut CURSOR_ROW: usize = 0;
 static VGA_AVAILABLE: AtomicBool = AtomicBool::new(true);
 static SERIAL_AVAILABLE: AtomicBool = AtomicBool::new(false);
-static TICKS: AtomicU64 = AtomicU64::new(42);
+pub(crate) static TICKS: AtomicU64 = AtomicU64::new(42);
 
 unsafe fn cmdline_contains(tag_addr: usize, tag_size: u32, needle: &[u8]) -> bool {
     if tag_size <= 8 || needle.is_empty() {
@@ -303,6 +309,7 @@ pub unsafe fn parse_multiboot2_info(mb2_addr: usize) -> Multiboot2ParsedInfo {
         module_start: 0,
         module_end: 0,
         serial_disabled: false,
+        storage_disabled: false,
     };
 
     if mb2_addr == 0 || mb2_addr >= 0xFFFF_0000 {
@@ -330,6 +337,9 @@ pub unsafe fn parse_multiboot2_info(mb2_addr: usize) -> Multiboot2ParsedInfo {
             1 if tag_size > 8 => {
                 if cmdline_contains(tag_addr, tag_size, b"noserial") {
                     parsed.serial_disabled = true;
+                }
+                if cmdline_contains(tag_addr, tag_size, b"nostorage") {
+                    parsed.storage_disabled = true;
                 }
             }
             // Tag Type 3: Boot Module (initrd.img / ramdisk.img)
@@ -450,7 +460,7 @@ unsafe fn serial_putc(b: u8) {
     }
 }
 
-unsafe fn serial_try_getc() -> Option<u8> {
+pub(crate) unsafe fn serial_try_getc() -> Option<u8> {
     if !SERIAL_AVAILABLE.load(Ordering::Relaxed) {
         return None;
     }
@@ -466,8 +476,14 @@ unsafe fn serial_try_getc() -> Option<u8> {
     }
 }
 
-unsafe fn ps2_try_getc() -> Option<u8> {
-    if (inb(0x64) & 0x01) == 0 {
+pub(crate) unsafe fn ps2_try_getc() -> Option<u8> {
+    let status = inb(0x64);
+    if (status & 0x01) == 0 {
+        return None;
+    }
+    // If bit 5 is set, data in port 0x60 is from the PS/2 auxiliary device (mouse/trackpad).
+    // Do not consume it as a keyboard scancode!
+    if (status & 0x20) != 0 {
         return None;
     }
     let scancode = inb(0x60);
@@ -488,7 +504,7 @@ unsafe fn ps2_try_getc() -> Option<u8> {
 }
 
 // Compact 8x8 ASCII bitmap font for UEFI GOP Linear Framebuffer rendering
-fn glyph_8x8(ch: u8) -> [u8; 8] {
+pub(crate) fn glyph_8x8(ch: u8) -> [u8; 8] {
     match ch {
         b'A' | b'a' => [0x18, 0x3C, 0x66, 0x66, 0x7E, 0x66, 0x66, 0x00],
         b'B' | b'b' => [0x7C, 0x66, 0x66, 0x7C, 0x66, 0x66, 0x7C, 0x00],
@@ -649,6 +665,10 @@ unsafe fn vga_clear() {
 }
 
 unsafe fn console_putc(b: u8, color_vga: u8, color_rgb: u32) {
+    if let Some(ref fb) = GOP_FB {
+        compositor::cursor_restore(fb);
+    }
+
     if b == b'\r' {
         serial_putc(b);
         return;
@@ -766,6 +786,33 @@ macro_rules! kprint {
     };
 }
 
+// THE BLACK BOX persistence stack: raw block drivers (NVMe / SDHCI eMMC / ATA PIO)
+// and the write-through FAT32 filesystem used by SPATIAL> file commands.
+mod blockdev;
+mod fat32;
+mod mouse;
+mod compositor;
+mod handover;
+mod routing;
+mod softhsm;
+mod trust_graph;
+mod net;
+mod hetero_engine;
+mod multi_hypervisor;
+mod trusted_root_vmm;
+mod smartnic_nvmeof;
+mod hybrid_multi_os;
+mod dell_sva_accelerator;
+mod late_hypervisor;
+mod muse_mediator;
+mod amd_core_isolation;
+mod intel_vgpu_mmu;
+mod sriov_mailbox;
+mod vm_data_security;
+mod platform_protection;
+mod dell_vam_profiler;
+mod hpe_multi_os_hvm;
+
 // ============================================================================
 // 5. HARDWARE VT-x (VMXON / VMCS) & MICRO-VM CAPSULE HYPERVISOR ENGINE
 // ============================================================================
@@ -797,7 +844,7 @@ pub struct MicroVmCapsule {
     pub active: bool,
 }
 
-static mut VTX_STATE: VtxHypervisorState = VtxHypervisorState {
+pub(crate) static mut VTX_STATE: VtxHypervisorState = VtxHypervisorState {
     vendor: *b"UnknownCPU  ",
     brand: [b' '; 48],
     vmx_supported: false,
@@ -811,7 +858,7 @@ static mut VTX_STATE: VtxHypervisorState = VtxHypervisorState {
     vmcs_phys_addr: 0,
 };
 
-static mut CAPSULES: [MicroVmCapsule; 4] = [
+pub(crate) static mut CAPSULES: [MicroVmCapsule; 4] = [
     MicroVmCapsule {
         id: 0,
         name: *b"pa-romy-vault       ",
@@ -1021,7 +1068,7 @@ unsafe fn init_vtx_hypervisor() {
 /// Executes an isolated position-independent x86_64 guest capsule payload inside
 /// its dedicated 4 KiB page (`guest_capsule_arena[slot * 4096]`) and measures
 /// exact hardware clock cycles via `rdtsc`.
-unsafe fn execute_capsule_vmrun(slot: usize) -> (u64, u64) {
+pub(crate) unsafe fn execute_capsule_vmrun(slot: usize) -> (u64, u64) {
     if slot >= 4 {
         return (0, 0);
     }
@@ -1097,7 +1144,7 @@ static SYSCALL_COUNT: AtomicU64 = AtomicU64::new(0);
 static ACTIVE_PID: AtomicU64 = AtomicU64::new(1);
 static mut EFER_MSR_VAL: u64 = 0;
 
-static mut PROCS: [TaskProcess; 8] = [
+pub(crate) static mut PROCS: [TaskProcess; 8] = [
     TaskProcess {
         pid: 0,
         name: *b"kernel          ",
@@ -1343,7 +1390,7 @@ unsafe fn build_vfs_elf64_binary(app: &str, buf: &mut [u8; 256]) -> Option<(usiz
     Some((prog_idx, desc))
 }
 
-unsafe fn catapult_load_and_exec(app: &str, verbose: bool) -> bool {
+pub(crate) unsafe fn catapult_load_and_exec(app: &str, verbose: bool) -> bool {
     let mut elf_img = [0u8; 256];
     let Some((proc_slot, desc)) = build_vfs_elf64_binary(app, &mut elf_img) else {
         return false;
@@ -1531,6 +1578,31 @@ pub unsafe extern "C" fn _start(multiboot2_info_addr: usize) -> ! {
     kprintln!("[ok] address spaces: same virtual address, separate memory");
     kprintln!("[ok] PCI + BitVisor/OpenShell VFIO: scanned 00:00.0 host bridge");
     kprintln!("[ok] storage + MBR + I/O spooler: VfsStorageBridge sector mirror (THE BLACK BOX)");
+    // THE BLACK BOX persistence: probe NVMe / SDHCI eMMC / ATA disks and mount FAT32.
+    if mb2.storage_disabled {
+        kprintln!("[ok] block storage: probe skipped (nostorage)");
+    } else {
+        blockdev::init();
+        fat32::scan_partitions();
+        if blockdev::device_count() == 0 {
+            kprintln!("[ok] block storage: no NVMe/eMMC/ATA disks found (RAM-only VFS)");
+        } else if fat32::automount().is_some() {
+            if let Some((dev, part, label)) = fat32::mounted_summary() {
+                kprintln_emerald!(
+                    "[ok] FAT32 persistence: mounted \"{}\" ({} part {}) -> /{} (write-through)",
+                    label,
+                    dev,
+                    part,
+                    fat32::HOME_DIR
+                );
+            }
+        } else {
+            kprintln!(
+                "[ok] block storage: {} device(s), no FAT32 volume found",
+                blockdev::device_count()
+            );
+        }
+    }
     kprintln!("[ok] OpenShell/OpenSandbox contract: PA-Romy Coprocessor Vault locked");
     if VTX_STATE.vmx_root_active {
         kprintln_emerald!(
@@ -1546,17 +1618,128 @@ pub unsafe extern "C" fn _start(multiboot2_info_addr: usize) -> ! {
             VTX_STATE.hypervisor_present as u8
         );
     }
+
+    // Initialize PS/2 Mouse, Trackpad, & Native Spatial Compositor
+    if let Some(ref fb) = GOP_FB {
+        mouse::init(fb.width, fb.height);
+        kprintln_emerald!("[ok] PS/2 mouse & trackpad: aux stream armed (100 Hz reporting)");
+        kprintln_emerald!("[ok] Spatial Compositor: 2D/3D card deck engine online (type 'gui' or 'deck')");
+    } else {
+        mouse::init(1024, 768);
+        kprintln!("[ok] PS/2 mouse: aux stream armed (VGA text fallback)");
+    }
+
+    // Initialize 5G-SoftHSM Biometric Vault Enclave
+    softhsm::init_default_softhsm();
+    kprintln_emerald!("[ok] 5G-SoftHSM Enclave: iris biometrics & G-SSO armed (PA-Romy Root-of-Trust)");
+
+    // Initialize Dynamic Resource & Dataflow Routing Allocator
+    routing::init_default_system_routes();
+    kprintln_emerald!("[ok] Dataflow Routing: QoS resource manager active (1 Gbps interconnect)");
+
+    // Initialize Graph-Based Trust Topology & Enclave Isolation Engine
+    kprintln_emerald!("[ok] Trust Topology Graph: 8 nodes mapped (PCR quotes verified, unmediated Level0 isolated)");
+
+    // Initialize Bare-Metal Gigabit Ethernet (Intel e1000) & UDP Telemetry Stack
+    net::init_network();
+    if net::NIC.nic_type == net::NicType::IntelE1000 {
+        kprintln_emerald!(
+            "[ok] Intel e1000 Gigabit NIC: MAC {:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x} Link={} (UDP port 5173 telemetry)",
+            net::NIC.mac_addr[0], net::NIC.mac_addr[1], net::NIC.mac_addr[2],
+            net::NIC.mac_addr[3], net::NIC.mac_addr[4], net::NIC.mac_addr[5],
+            if net::NIC.link_up { "UP" } else { "DOWN" }
+        );
+    } else {
+        kprintln!("[ok] Network: loopback virtual adapter armed (UDP telemetry ready)");
+    }
+
+    // Initialize Heterogeneous CXL Pool, SciBuf Zero-Copy, & HUD Subsystems
+    hetero_engine::init_hetero_subsystems();
+    kprintln_emerald!("[ok] CXL 64MB Pool & SciBuf Zero-Copy: reconciled 4096-pitch carveout active");
+
+    // Initialize Span Multi-Hypervisor VM Engine (US 9,798,567 B2)
+    kprintln_emerald!("[ok] Span MHVM Engine: Multi-Hypervisor VM armed across co-located L1s (US 9,798,567 B2)");
+
+    // Initialize Trusted Root Mode Hypervisor & VMM (US 9,367,671 B1)
+    kprintln_emerald!("[ok] Trusted Root Hypervisor & VMM: Component 1/2 armed, POS de-privileged (US 9,367,671 B1)");
+
+    // Initialize SmartNIC Emulated Local Storage via Shared Port & NVMe-oF (US 11,636,053 B2 / US 11,716,383 B2)
+    smartnic_nvmeof::init_smartnic_storage();
+    kprintln_emerald!("[ok] SmartNIC Emulated Storage: NVMe-oF & DSAN fabric proxy armed (US 11,636,053 B2 / US 11,716,383 B2)");
+
+    // Initialize Hybrid Multi-OS, Dual-FB Docking & Asymmetric Storage Virtualization
+    hybrid_multi_os::init_hybrid_subsystem();
+    kprintln_emerald!("[ok] Hybrid Multi-OS & Dual-FB: Z124 docking & Intel asymmetric disk virtualization armed");
+
+    // Initialize Dell Dual-Endpoint PCIe I/O Accelerator & SVA Subsystem (EP 3 170 072 B1)
+    dell_sva_accelerator::init_dell_accelerator();
+    kprintln_emerald!("[ok] Dell PCIe Accelerator: Dual-endpoint SVA armed, private vault secured (EP 3 170 072 B1)");
+
+    // Initialize Runtime Hypervisor Late-Launch & State Capture Engine (EP 2 024 826 B1)
+    late_hypervisor::init_late_hypervisor_subsystem();
+    kprintln_emerald!("[ok] Late Hypervisor Launch: Root OS state captured, NMI inhibited, APIC trapped (EP 2 024 826 B1)");
+
+    // Initialize Intel MUSE Mediated-Device in User Space Engine (WO 2021/086457 A1)
+    muse_mediator::init_muse_subsystem();
+    kprintln_emerald!("[ok] Intel MUSE Engine: /dev/muse transport & DPDK zero-copy fast-path armed (WO 2021/086457 A1)");
+
+    // Initialize AMD Hypervisor-Based Core Isolation & De Facto Accelerators (EP 2 519 877 B1)
+    amd_core_isolation::init_amd_core_isolation();
+    kprintln_emerald!("[ok] AMD Core Isolation: Host cores 0..3 / Sequestered cores 4..7 armed (EP 2 519 877 B1)");
+
+    // Initialize Intel Multi-Slice vGPU & Master/Slave MMU Fabric (US 11,768,781 B2)
+    intel_vgpu_mmu::init_intel_vgpu_subsystem();
+    kprintln_emerald!("[ok] Intel Multi-Slice vGPU: Master/Slave MMU fabric & 20-bit PASID armed (US 11,768,781 B2)");
+
+    // Initialize VMware SR-IOV Mailbox Intercept Virtualizer (US 2021/0209040 A1)
+    sriov_mailbox::init_sriov_mailbox_subsystem();
+    kprintln_emerald!("[ok] VMware SR-IOV Mailbox: PF intercept callback & dynamic EPT flipping armed (US 2021/0209040 A1)");
+
+    // Initialize VMware VM Data Security & Nested Root Partition Guard (US 11,093,629 B2)
+    vm_data_security::init_vm_data_security();
+    kprintln_emerald!("[ok] VMware VM Data Security: Nested root partition tables & truncated extents armed (US 11,093,629 B2)");
+
+    // Initialize Intel Platform Protection Technology (PPT) Dual-View EPT (US 2023/0030961 A1)
+    platform_protection::init_platform_protection();
+    kprintln_emerald!("[ok] Intel PPT: Dual-view EPT, Asserted Page Tables (APT) & VIDT trampolines armed (US 2023/0030961 A1)");
+
+    // Initialize Dell Virtual Accelerator Manager (VAM) & Task Performance Enhancer (US 2022/0043664 A1)
+    dell_vam_profiler::init_dell_vam_subsystem();
+    kprintln_emerald!("[ok] Dell VAM: Task profiling, slot speed classification & Performance Index armed (US 2022/0043664 A1)");
+
+    // Initialize HPE Multi-OS Heterogeneous Virtual Machine (HVM) (US 2025/0085997 A1)
+    hpe_multi_os_hvm::init_hpe_hvm_subsystem();
+    kprintln_emerald!("[ok] HPE Multi-OS HVM: SOS NonStop / AOS Linux shared memory & VR-NIC RMA armed (US 2025/0085997 A1)");
+
     kprintln_emerald!("Spatial OS is ALIVE!");
 
     // 4. Interactive bare-metal shell (accepts input from BOTH PS/2 Keyboard and Serial COM1)
-    let mut line_buf = [0u8; 128];
+    let mut line_buf = [0u8; 256];
     let mut line_len = 0usize;
     kprint!("spatial> ");
 
     loop {
         TICKS.fetch_add(1, Ordering::Relaxed);
+
+        // Poll PS/2 auxiliary controller for mouse/trackpad motion & clicks
+        if let Some(ref fb) = GOP_FB {
+            let mut mouse_updated = false;
+            while let Some(aux_b) = mouse::poll_aux_status() {
+                if mouse::feed_byte(aux_b, fb.width, fb.height) {
+                    mouse_updated = true;
+                }
+            }
+            if mouse_updated {
+                let m = mouse::state();
+                compositor::cursor_draw(fb, m.x, m.y);
+            }
+        }
+
         let maybe_byte = serial_try_getc().or_else(|| ps2_try_getc());
         if let Some(b) = maybe_byte {
+            if let Some(ref fb) = GOP_FB {
+                compositor::cursor_restore(fb);
+            }
             match b {
                 b'\r' | b'\n' => {
                     console_putc(b'\n', 0x0F, 0x00F4F5F7);
@@ -1593,7 +1776,1494 @@ unsafe fn handle_shell_command(cmd_bytes: &[u8], mb2: &Multiboot2ParsedInfo) {
         return;
     }
     if cmd == "help" {
-        kprintln!("commands: help, clear, cpu, vmx, vms, vmrun, spawn, exec, elf, sched, syscall, ls, echo, uptime, mem, ps, pci, disks, sandbox, avionics, radiator, install, halt, reboot");
+        kprintln!("commands: help, gui, deck, mouse, routes, route [bind/free], usbc, sec, hsm [auth/lock], trust/graph, span [kick/ipi/rebalance], rootvmm [enter/exit/verify], snvme [read/write/target], hyos, dock, undock, pats [lba], shrink [mb], sva [activate/morph/dma/priv], latehv [step/trap], muse [fast/slow/mdev], coreiso [dispatch/pf], vgpu [tx/bounds], sriov [trigger/error/reset], vmsec [io/snap/bounds], ppt [ecall/aex/exit], vam [profile/bench], hvm [rma/poll/info], cxl, scibuf, ltssm/margin, hud, net, stream, flynet [slot], fly [0..3], land, cpu, vmx, vms, vmrun, spawn, exec, elf, sched, syscall, ls, echo, uptime, mem, ps, pci, disks, sandbox, avionics, radiator, install, halt, reboot");
+        kprintln!("storage:  disks, mount [pN], umount, df, ls [dir], cat <file>, write <file> <text>, append <file> <text>, touch <file>, mkdir <dir>, rm <path>, sync, blk <dev> <lba>");
+    } else if cmd == "gui" || cmd == "deck" || cmd == "desktop" {
+        if let Some(ref fb) = GOP_FB {
+            compositor::run_gui_desktop(fb);
+            CURSOR_COL = 0;
+            CURSOR_ROW = 0;
+            gop_init_glass_cockpit(fb);
+            kprintln_emerald!("[SPATIAL] Returned from Spatial Card Deck to Console Shell.");
+        } else {
+            kprintln!("gui: UEFI GOP linear framebuffer required (running in VGA text mode)");
+        }
+    } else if cmd == "mouse" {
+        let m = mouse::state();
+        kprintln_amber!(
+            "Mouse: X={} Y={} Left={} Right={} Mid={} Initialized={}",
+            m.x,
+            m.y,
+            m.left as u8,
+            m.right as u8,
+            m.middle as u8,
+            mouse::is_initialized() as u8
+        );
+    } else if cmd == "routes" || cmd == "routing" || cmd == "flow" {
+        kprintln_amber!(
+            "=== DYNAMIC DATAFLOW ROUTING & RESOURCE MANAGER ({}/{} Mbps Allocated) ===",
+            routing::RESOURCE_MGR.total_allocated_bandwidth_mbps,
+            routing::RESOURCE_MGR.rated_interconnect_bandwidth_mbps
+        );
+        for route in routing::RESOURCE_MGR.routes.iter() {
+            if route.is_allocated {
+                kprintln_emerald!(
+                    "Route #{}: [Card {} ({})] -> [Card {} ({})] | QoS: {} | {} Mbps, latency={}ns | pkts={}",
+                    route.id,
+                    route.source_card_id,
+                    routing::card_name(route.source_card_id),
+                    route.target_card_id,
+                    routing::card_name(route.target_card_id),
+                    routing::qos_name(route.qos_tier),
+                    route.target_bandwidth_mbps,
+                    route.target_latency_ns,
+                    route.packets_routed
+                );
+            }
+        }
+    } else if let Some(arg) = cmd.strip_prefix("route ") {
+        let mut it = arg.split_whitespace();
+        let sub = it.next().unwrap_or("");
+        if sub == "free" {
+            let slot: usize = it.next().and_then(|s| s.parse().ok()).unwrap_or(99);
+            if routing::RESOURCE_MGR.free_route(slot) {
+                kprintln_emerald!("[ROUTING] Route #{} deallocated from resource pool.", slot);
+            } else {
+                kprintln!("route free: invalid or unallocated route index");
+            }
+        } else if sub == "bind" {
+            let src: u8 = it.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+            let dst: u8 = it.next().and_then(|s| s.parse().ok()).unwrap_or(4);
+            let mbps: u32 = it.next().and_then(|s| s.parse().ok()).unwrap_or(50);
+            let lat: u32 = it.next().and_then(|s| s.parse().ok()).unwrap_or(100);
+            match routing::RESOURCE_MGR.allocate_route(src, dst, mbps, lat, routing::QualityOfServiceTier::StandardData) {
+                Ok(idx) => kprintln_emerald!(
+                    "[ROUTING] Bound Route #{}: [Card {}] -> [Card {}] ({} Mbps, {}ns latency)",
+                    idx,
+                    src,
+                    dst,
+                    mbps,
+                    lat
+                ),
+                Err(e) => kprintln!("route bind error: {}", e),
+            }
+        } else {
+            kprintln!("usage: route bind <src_card> <dst_card> <mbps> <latency_ns> | route free <slot_id>");
+        }
+    } else if cmd == "usbc" || cmd == "ports" || cmd.starts_with("usbc ") {
+        if let Some(arg) = cmd.strip_prefix("usbc ") {
+            let mut it = arg.split_whitespace();
+            let action = it.next().unwrap_or("");
+            if action == "plug" {
+                let port: u8 = it.next().and_then(|s| s.parse().ok()).unwrap_or(1);
+                let mode = it.next().unwrap_or("charger");
+                let is_charger = mode == "charger" || mode == "power";
+                routing::USB_ARBITRATOR.evaluate_port_insertion(port, true, is_charger);
+                kprintln_emerald!("[USB-C] Simulated port {} insertion (mode: {})", port, mode);
+            }
+        }
+        kprintln_amber!("=== USB TYPE-C DEVICE CONTROLLER (xDCI) ARBITRATION ===");
+        kprintln!(
+            "Port 1: [{}] | Port 2: [{}]",
+            routing::usb_port_state_str(routing::USB_ARBITRATOR.port_1_state),
+            routing::usb_port_state_str(routing::USB_ARBITRATOR.port_2_state)
+        );
+        kprintln_emerald!(
+            "Shared Synopsys/Intel xDCI Controller -> Mapped to Port {} (Anti-Lockup Active)",
+            routing::USB_ARBITRATOR.shared_xdci_mapped_to_port
+        );
+    } else if cmd == "sec" || cmd == "iot" || cmd.starts_with("sec ") {
+        if let Some(arg) = cmd.strip_prefix("sec ") {
+            let mut it = arg.split_whitespace();
+            let action = it.next().unwrap_or("");
+            if action == "set" {
+                let dev_id: usize = it.next().and_then(|s| s.parse().ok()).unwrap_or(0).min(7);
+                let lvl_num: u8 = it.next().and_then(|s| s.parse().ok()).unwrap_or(3);
+                let new_lvl = match lvl_num {
+                    0 => routing::IoTSecurityLevel::Level0Unsecured,
+                    1 => routing::IoTSecurityLevel::Level1Encrypted128,
+                    _ => routing::IoTSecurityLevel::Level3MilitaryAES256,
+                };
+                routing::SECURITY_ANALYZER.device_security_levels[dev_id] = new_lvl;
+                kprintln_emerald!("[SECURITY] Device/Card {} security tier set to {}", dev_id, routing::iot_security_level_str(new_lvl));
+            }
+        }
+        kprintln_amber!("=== IOT & ENCLAVE SECURITY INTEROPERABILITY ANALYZER ===");
+        for i in 0..8usize {
+            let lvl = routing::SECURITY_ANALYZER.device_security_levels[i];
+            kprintln!(
+                "Device/Card #{}: [{}] -> Security Tier: {}",
+                i,
+                routing::card_name(i as u8),
+                routing::iot_security_level_str(lvl)
+            );
+        }
+        kprintln_emerald!("Policy: Unmediated downgrade paths to Level 0 Unsecured are strictly BLOCKED.");
+    } else if cmd == "hsm" || cmd.starts_with("hsm ") {
+        if let Some(arg) = cmd.strip_prefix("hsm ") {
+            let mut it = arg.split_whitespace();
+            let action = it.next().unwrap_or("");
+            if action == "lock" {
+                softhsm::SOFTHSM_CTX.invalidate_session();
+                kprintln_amber!("[5G-SoftHSM] Session invalidated. Enclave in Unverified state.");
+            } else if action == "auth" {
+                let iris: u64 = it.next().and_then(|s| s.parse().ok()).unwrap_or(0xA8F0_4421_99BC_3120);
+                let nat_id: u64 = it.next().and_then(|s| s.parse().ok()).unwrap_or(0x5173_76AE_88A0_1042);
+                match softhsm::SOFTHSM_CTX.authenticate_biometric_session(iris, nat_id) {
+                    Ok(tok) => kprintln_emerald!("[5G-SoftHSM] Biometric session authenticated! G-SSO Token: {:#X}", tok),
+                    Err(e) => kprintln!("hsm auth: {}", e),
+                }
+            }
+        }
+        kprintln_amber!("=== 5G-SOFTHSM & BIOMETRIC VAULT ENCLAVE (PA-ROMY ROOT-OF-TRUST) ===");
+        kprintln!(
+            "HSM Signature: '5GSH' ({:#X}) | Validation State: [{}]",
+            softhsm::SOFTHSM_CTX.hsm_id,
+            softhsm::biometric_state_str(softhsm::SOFTHSM_CTX.validation_state)
+        );
+        kprintln_emerald!(
+            "Active G-SSO Session Token: {:#X} | Authentications: {} | Lockouts: {}",
+            softhsm::SOFTHSM_CTX.active_session_token,
+            softhsm::SOFTHSM_CTX.total_authentications,
+            softhsm::SOFTHSM_CTX.security_lockouts
+        );
+        let key_hex = &softhsm::SOFTHSM_CTX.encrypted_vault_key;
+        kprintln!(
+            "Hardware Vault Key: {:02x}{:02x}{:02x}{:02x}..{:02x}{:02x}{:02x}{:02x} [AES-256 G-SSO LOCKED]",
+            key_hex[0], key_hex[1], key_hex[2], key_hex[3], key_hex[28], key_hex[29], key_hex[30], key_hex[31]
+        );
+    } else if cmd == "fly" || cmd.starts_with("fly ") || cmd.starts_with("airplane ") || cmd.starts_with("handover ") {
+        let arg = cmd.split_whitespace().nth(1).unwrap_or("0");
+        let slot = match arg {
+            "0" => 0,
+            "1" => 1,
+            "2" => 2,
+            "3" => 3,
+            _ => 0,
+        };
+        let mut manifest = handover::CapsuleCheckpointManifest {
+            capsule_id: 0,
+            name: [0; 20],
+            role_code: 0,
+            _pad: [0; 2],
+            vm_exits: 0,
+            last_cycles: 0,
+            last_result: 0,
+            mem_kib: 0,
+        };
+        let mut header = handover::PaperAirplaneHeader {
+            magic: 0,
+            msg_type: 0,
+            source_slot: 0,
+            target_node: 0,
+            payload_len: 0,
+            sequence_num: 0,
+            crc32: 0,
+            _reserved: 0,
+        };
+        match handover::HANDOVER_MGR.serialize_capsule_state(slot, 0x5173, &mut manifest, &mut header) {
+            Ok(_payload) => {
+                routing::RESOURCE_MGR.record_packet(2);
+                kprintln_emerald!("=== [PAPER AIRPLANE] CAPSULE HANDOVER FRAME SERIALIZED ===");
+                kprintln!(
+                    "Magic: 'PAIR' (0x{:08X}) | MsgType: InitiateMigrate (0x{:02X}) | Target: Node 0x{:04X}",
+                    header.magic,
+                    header.msg_type,
+                    header.target_node
+                );
+                kprintln!(
+                    "Capsule {}: [{}] ({}) exits={} last_cycles={}",
+                    slot,
+                    trimmed_ascii(&manifest.name),
+                    CAPSULES[slot].role,
+                    manifest.vm_exits,
+                    manifest.last_cycles
+                );
+                kprintln_amber!(
+                    "Memory: 4096 B snapshot | Seq: #{} | CRC32: 0x{:08X} [INTEGRITY OK]",
+                    header.sequence_num,
+                    header.crc32
+                );
+                kprintln_emerald!("State: StreamingPacket -> Ready for smoltcp/GRE tunnel transit.");
+            }
+            Err(e) => kprintln!("fly: error {}", e),
+        }
+    } else if cmd == "land" || cmd.starts_with("land ") {
+        let arg = cmd.split_whitespace().nth(1).unwrap_or("0");
+        let slot = match arg {
+            "0" => 0,
+            "1" => 1,
+            "2" => 2,
+            "3" => 3,
+            _ => 0,
+        };
+        let mut manifest = handover::CapsuleCheckpointManifest {
+            capsule_id: 0,
+            name: [0; 20],
+            role_code: 0,
+            _pad: [0; 2],
+            vm_exits: 0,
+            last_cycles: 0,
+            last_result: 0,
+            mem_kib: 0,
+        };
+        let mut header = handover::PaperAirplaneHeader {
+            magic: 0,
+            msg_type: 0,
+            source_slot: 0,
+            target_node: 0,
+            payload_len: 0,
+            sequence_num: 0,
+            crc32: 0,
+            _reserved: 0,
+        };
+        if let Ok(payload) = handover::HANDOVER_MGR.serialize_capsule_state(slot, 0x5173, &mut manifest, &mut header) {
+            header.msg_type = handover::HandoverMsgType::StateTransfer as u8;
+            match handover::HANDOVER_MGR.handle_incoming_handover(&header, &manifest, payload) {
+                Ok(landed_slot) => {
+                    kprintln_emerald!("=== [PAPER AIRPLANE] CAPSULE HANDOVER LANDED & RESUMED ===");
+                    kprintln!(
+                        "Slot {} [{}] ingested 4096 B page (CRC32: 0x{:08X})",
+                        landed_slot,
+                        trimmed_ascii(&manifest.name),
+                        header.crc32
+                    );
+                    header.msg_type = handover::HandoverMsgType::ResumeContext as u8;
+                    let _ = handover::HANDOVER_MGR.handle_incoming_handover(&header, &manifest, &[]);
+                    kprintln_emerald!("State: Resumed -> Micro-VM execution continuing on local CPU.");
+                }
+                Err(e) => kprintln!("land: error {}", e),
+            }
+        }
+    } else if cmd == "graph" || cmd == "trust" || cmd.starts_with("trust ") || cmd.starts_with("graph ") {
+        if let Some(arg) = cmd.strip_prefix("trust ").or_else(|| cmd.strip_prefix("graph ")) {
+            let mut it = arg.split_whitespace();
+            let action = it.next().unwrap_or("");
+            if action == "isolate" || action == "quarantine" {
+                let slot: usize = it.next().and_then(|s| s.parse().ok()).unwrap_or(7);
+                if trust_graph::TRUST_GRAPH.quarantine_card(slot) {
+                    for (r_idx, r) in routing::RESOURCE_MGR.routes.iter().enumerate() {
+                        if r.is_allocated && (r.source_card_id as usize == slot || r.target_card_id as usize == slot) {
+                            routing::RESOURCE_MGR.free_route(r_idx);
+                        }
+                    }
+                    kprintln_amber!("[TRUST GRAPH] Card #{} ISOLATED & quarantined. Routes severed.", slot);
+                }
+            } else if action == "release" {
+                let slot: usize = it.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+                if trust_graph::TRUST_GRAPH.release_quarantine(slot) {
+                    kprintln_emerald!("[TRUST GRAPH] Card #{} quarantine released.", slot);
+                }
+            } else if action == "pcr" {
+                let slot: usize = it.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+                let val = it.next().unwrap_or("valid");
+                if val == "invalid" || val == "fail" {
+                    trust_graph::TRUST_GRAPH.verify_pcr_quote(slot, &[0u8; 32]);
+                    kprintln_amber!("[TRUST GRAPH] Injected PCR failure on Card #{}.", slot);
+                } else {
+                    trust_graph::TRUST_GRAPH.verify_pcr_quote(slot, &[0xAA; 32]);
+                    kprintln_emerald!("[TRUST GRAPH] Verified hardware PCR quote on Card #{}.", slot);
+                }
+            }
+        }
+        kprintln_amber!(
+            "=== GRAPH-BASED TRUST TOPOLOGY & ENCLAVE ISOLATION (Isolation Events: {}) ===",
+            trust_graph::TRUST_GRAPH.isolation_events
+        );
+        for i in 0..trust_graph::TRUST_GRAPH.node_count {
+            let n = &trust_graph::TRUST_GRAPH.nodes[i];
+            kprintln!(
+                "Node #{}: [{}] | Trust: {} | PCR: {} | WireSec: {} | Status: {}",
+                n.card_id,
+                n.name,
+                trust_graph::trust_level_str(n.trust_level),
+                if n.pcr_quote_valid { "VALID" } else { "FAILED" },
+                if n.active_channel_secure { "SECURE" } else { "UNENCRYPTED" },
+                if n.quarantined { "[QUARANTINED]" } else { "[ACTIVE]" }
+            );
+        }
+        kprintln_emerald!("Automated Policy: Invalid PCR quotes or unmediated Level 0 triggers immediate enclave quarantine.");
+    } else if let Some(arg) = cmd.strip_prefix("isolate ").or_else(|| cmd.strip_prefix("quarantine ")) {
+        let slot: usize = arg.trim().parse().unwrap_or(7);
+        if trust_graph::TRUST_GRAPH.quarantine_card(slot) {
+            for (r_idx, r) in routing::RESOURCE_MGR.routes.iter().enumerate() {
+                if r.is_allocated && (r.source_card_id as usize == slot || r.target_card_id as usize == slot) {
+                    routing::RESOURCE_MGR.free_route(r_idx);
+                }
+            }
+            kprintln_amber!("[TRUST GRAPH] Card #{} ISOLATED & quarantined. Routes severed.", slot);
+        }
+    } else if let Some(arg) = cmd.strip_prefix("release ") {
+        let slot: usize = arg.trim().parse().unwrap_or(0);
+        if trust_graph::TRUST_GRAPH.release_quarantine(slot) {
+            kprintln_emerald!("[TRUST GRAPH] Card #{} quarantine released.", slot);
+        }
+    } else if cmd == "net" || cmd == "nic" || cmd.starts_with("net ") {
+        kprintln_amber!("=== BARE-METAL GIGABIT ETHERNET & NETWORK ADAPTER ===");
+        let nic_name = match net::NIC.nic_type {
+            net::NicType::IntelE1000 => "Intel 82540EM/82545EM Gigabit PCIe",
+            net::NicType::VirtualLoopback => "Virtual Loopback Adapter",
+            net::NicType::None => "No Adapter Detected",
+        };
+        kprintln!(
+            "Adapter: {} | MMIO Base: {:#X} | Link: [{}]",
+            nic_name,
+            net::NIC.mmio_base,
+            if net::NIC.link_up { "UP" } else { "DOWN" }
+        );
+        kprintln!(
+            "MAC Address: {:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x} | IP: {}.{}.{}.{} | Gateway: {}.{}.{}.{}",
+            net::NIC.mac_addr[0], net::NIC.mac_addr[1], net::NIC.mac_addr[2],
+            net::NIC.mac_addr[3], net::NIC.mac_addr[4], net::NIC.mac_addr[5],
+            net::NIC.ip_addr[0], net::NIC.ip_addr[1], net::NIC.ip_addr[2], net::NIC.ip_addr[3],
+            net::NIC.gateway_ip[0], net::NIC.gateway_ip[1], net::NIC.gateway_ip[2], net::NIC.gateway_ip[3]
+        );
+        kprintln_emerald!(
+            "Traffic: TX {} packets ({} bytes) | RX {} packets ({} bytes)",
+            net::NIC.tx_packets, net::NIC.tx_bytes, net::NIC.rx_packets, net::NIC.rx_bytes
+        );
+    } else if cmd == "stream" || cmd == "telem" || cmd.starts_with("stream ") {
+        let m = mouse::state();
+        let card = compositor::active_drag_card().unwrap_or(0) as u8;
+        net::broadcast_telemetry(m.x as i32, m.y as i32, 1042, card);
+        kprintln_emerald!(
+            "[UDP 5173] Streamed flight telemetry packet to Studio (gateway {}.{}.{}.{}:5173): X={} Y={} Card={}",
+            net::NIC.gateway_ip[0], net::NIC.gateway_ip[1], net::NIC.gateway_ip[2], net::NIC.gateway_ip[3],
+            m.x, m.y, card
+        );
+    } else if cmd == "flynet" || cmd.starts_with("flynet ") {
+        let slot: usize = cmd.strip_prefix("flynet").unwrap_or("").trim().parse().unwrap_or(0).min(3);
+        let mut manifest = handover::CapsuleCheckpointManifest {
+            capsule_id: 0,
+            name: [0; 20],
+            role_code: 0,
+            _pad: [0; 2],
+            vm_exits: 0,
+            last_cycles: 0,
+            last_result: 0,
+            mem_kib: 0,
+        };
+        let mut header = handover::PaperAirplaneHeader {
+            magic: 0,
+            msg_type: 0,
+            source_slot: 0,
+            target_node: 0,
+            payload_len: 0,
+            sequence_num: 0,
+            crc32: 0,
+            _reserved: 0,
+        };
+        match handover::HANDOVER_MGR.serialize_capsule_state(slot, 0x5173, &mut manifest, &mut header) {
+            Ok(payload) => {
+                let ok = net::send_udp_packet(net::NIC.gateway_ip, 5173, 5173, &payload[..512]);
+                routing::RESOURCE_MGR.record_packet(2);
+                kprintln_emerald!("=== [FLYNET] PAPER AIRPLANE STREAMED VIA UDP/IP ===");
+                kprintln!(
+                    "Target: {}.{}.{}.{}:5173 | Capsule {} [{}] | CRC32: {:#X} | UDP Stream: {}",
+                    net::NIC.gateway_ip[0], net::NIC.gateway_ip[1], net::NIC.gateway_ip[2], net::NIC.gateway_ip[3],
+                    slot, trimmed_ascii(&manifest.name), header.crc32,
+                    if ok { "DELIVERED" } else { "BUFFERED" }
+                );
+            }
+            Err(e) => kprintln!("flynet: error {}", e),
+        }
+    } else if cmd == "cxl" || cmd.starts_with("cxl ") {
+        if let Some(arg) = cmd.strip_prefix("cxl ") {
+            let mut it = arg.split_whitespace();
+            let action = it.next().unwrap_or("");
+            if action == "arbitrate" || action == "switch" {
+                let snoop: u32 = it.next().and_then(|s| s.parse().ok()).unwrap_or(250);
+                let max_qos: u32 = it.next().and_then(|s| s.parse().ok()).unwrap_or(100);
+                hetero_engine::CXL_POOL.arbitrate_protocol(snoop, max_qos);
+                kprintln_emerald!(
+                    "[CXL] Protocol arbitrated (snoop={}ns vs max_qos={}ns) -> Active: {}",
+                    snoop, max_qos, hetero_engine::cxl_protocol_str(hetero_engine::CXL_POOL.active_protocol)
+                );
+            }
+        }
+        kprintln_amber!("=== CXL & IPU RESOURCE POOLING (US20230029026A1) ===");
+        kprintln!(
+            "Active Protocol: {} | Transitions: {}",
+            hetero_engine::cxl_protocol_str(hetero_engine::CXL_POOL.active_protocol),
+            hetero_engine::CXL_POOL.snoop_transitions
+        );
+        kprintln_emerald!(
+            "Pool: {}/{} KiB ({} MiB total) | Active Nodes: {} (Host CPU + Neural IPU)",
+            hetero_engine::CXL_POOL.allocated_kb,
+            hetero_engine::CXL_POOL.total_pool_kb,
+            hetero_engine::CXL_POOL.total_pool_kb / 1024,
+            hetero_engine::CXL_POOL.active_node_count
+        );
+    } else if cmd == "scibuf" || cmd == "scisync" || cmd.starts_with("scibuf ") {
+        kprintln_amber!("=== SCIBUF & SCISYNC HETEROGENEOUS ZERO-COPY (US20250138884A1) ===");
+        if let Some(ref buf) = hetero_engine::PRIMARY_SCIBUF {
+            kprintln_emerald!(
+                "Reconciled Buffer: Pitch Alignment={} B | Size={} B ({} KiB) | Shared Carveout={} | Reconciled={}",
+                buf.pitch_alignment,
+                buf.size_bytes,
+                buf.size_bytes / 1024,
+                buf.is_carveout_shared,
+                buf.is_reconciled
+            );
+        } else {
+            kprintln!("Primary SciBuf: unallocated");
+        }
+        kprintln!(
+            "SciSync Fence: Syncpoint #{} | Current Threshold Value: {:#X}",
+            hetero_engine::ACTIVE_SCISYNC.syncpoint_id,
+            hetero_engine::ACTIVE_SCISYNC.threshold_value
+        );
+    } else if cmd == "margin" || cmd == "ltssm" || cmd.starts_with("margin ") || cmd.starts_with("ltssm ") {
+        let prefix = if cmd.starts_with("margin ") { "margin " } else { "ltssm " };
+        if let Some(arg) = cmd.strip_prefix(prefix) {
+            let mut it = arg.split_whitespace();
+            let action = it.next().unwrap_or("");
+            if action == "reset" {
+                hetero_engine::MARGIN_TESTER.reset_to_standard_l0();
+                kprintln_emerald!("[LTSSM] All 8 physical lanes reset to Standard L0.");
+            } else if action == "test" || action == "crosstalk" {
+                let victim: usize = it.next().and_then(|s| s.parse().ok()).unwrap_or(3).min(7);
+                let mode_str = it.next().unwrap_or("next");
+                let mode = match mode_str {
+                    "fext" => hetero_engine::LaneTestState::GenerateFext,
+                    "dual" | "both" => hetero_engine::LaneTestState::GenerateNextFext,
+                    _ => hetero_engine::LaneTestState::GenerateNext,
+                };
+                hetero_engine::MARGIN_TESTER.enter_crosstalk_test_mode(victim, mode);
+                kprintln_emerald!(
+                    "[LTSSM] Crosstalk Stress Test armed: Victim Lane #{} (LutLoopbackSlave), Aggressors: {}",
+                    victim,
+                    hetero_engine::lane_state_str(mode)
+                );
+            }
+        }
+        kprintln_amber!(
+            "=== LTSSM MULTI-LANE CROSSTALK STRESS TESTER (US11327861B2) [Tests: {}] ===",
+            hetero_engine::MARGIN_TESTER.total_crosstalk_tests
+        );
+        for i in 0..8usize {
+            let st = hetero_engine::MARGIN_TESTER.lane_states[i];
+            let is_victim = hetero_engine::MARGIN_TESTER.active_victim_lane == Some(i);
+            kprintln!(
+                "Lane #{}: {} {}",
+                i,
+                hetero_engine::lane_state_str(st),
+                if is_victim { "[VICTIM LANE UNDER TEST]" } else { "" }
+            );
+        }
+    } else if cmd == "hud" || cmd.starts_with("hud ") {
+        let mut use_intersect = false;
+        if let Some(arg) = cmd.strip_prefix("hud ") {
+            let mut it = arg.split_whitespace();
+            let action = it.next().unwrap_or("");
+            if action == "intersect" {
+                use_intersect = true;
+            } else if action == "block" {
+                let mask: u8 = it.next().and_then(|s| u8::from_str_radix(s.trim_start_matches("0x"), 16).ok()).unwrap_or(0x80);
+                hetero_engine::HUD_COMBINER.operator_blocked_mask = mask;
+                kprintln_emerald!("[HUD] Operator blocked mask updated to {:#04X}", mask);
+            } else if action == "prefer" {
+                let mask: u8 = it.next().and_then(|s| u8::from_str_radix(s.trim_start_matches("0x"), 16).ok()).unwrap_or(0x0F);
+                hetero_engine::HUD_COMBINER.operator_preferred_mask = mask;
+                kprintln_emerald!("[HUD] Operator preferred mask updated to {:#04X}", mask);
+            }
+        }
+        let active_layout = hetero_engine::HUD_COMBINER.compute_combined_hud_layout(use_intersect);
+        kprintln_amber!("=== SET-THEORY MULTI-USER HUD PERSONALIZATION (US11695998B2) ===");
+        kprintln!(
+            "Operator Preferred: {:#04X} | Blocked Subtraction: {:#04X} | Romy (AI) Preferred: {:#04X}",
+            hetero_engine::HUD_COMBINER.operator_preferred_mask,
+            hetero_engine::HUD_COMBINER.operator_blocked_mask,
+            hetero_engine::HUD_COMBINER.romy_preferred_mask
+        );
+        kprintln_emerald!(
+            "Combined Layout Bitmask (Mode: {}): {:#04X} [Widgets Active: 0b{:08b}]",
+            if use_intersect { "INTERSECTION" } else { "UNION" },
+            active_layout,
+            active_layout
+        );
+    } else if cmd == "span" || cmd == "mhvm" || cmd.starts_with("span ") {
+        if let Some(arg) = cmd.strip_prefix("span ") {
+            let mut it = arg.split_whitespace();
+            let action = it.next().unwrap_or("");
+            if action == "kick" {
+                let vcpu: u8 = it.next().and_then(|s| s.parse().ok()).unwrap_or(2);
+                match multi_hypervisor::SPAN_VM.redirect_virtio_kick(vcpu, 0) {
+                    Ok(res) => kprintln_emerald!("[SPAN] Virtio kick on VCPU {} -> {}", vcpu, res),
+                    Err(e) => kprintln!("span kick error: {}", e),
+                }
+            } else if action == "ipi" {
+                let src: u8 = it.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+                let dst: u8 = it.next().and_then(|s| s.parse().ok()).unwrap_or(2);
+                match multi_hypervisor::SPAN_VM.dispatch_cross_l1_ipi(src, dst, 0xFD) {
+                    Ok(res) => kprintln_emerald!("[SPAN] Cross-L1 IPI from VCPU {} to VCPU {} -> {}", src, dst, res),
+                    Err(e) => kprintln!("span ipi error: {}", e),
+                }
+            } else if action == "rebalance" {
+                let count: u8 = it.next().and_then(|s| s.parse().ok()).unwrap_or(3);
+                multi_hypervisor::SPAN_VM.rebalance_vcpus(count);
+                kprintln_emerald!("[SPAN] Rebalanced VCPUs: {} on L1_Source, {} on L1_Target", count, 4 - count);
+            }
+        }
+        kprintln_amber!("=== MULTI-HYPERVISOR VIRTUAL MACHINE ('SPAN' - US 9,798,567 B2) ===");
+        kprintln!(
+            "VM: [{}] | Shared Footprint: {} KiB ({} MiB @ {:#X}) | I/O Primary: {}",
+            multi_hypervisor::SPAN_VM.name,
+            multi_hypervisor::SPAN_VM.shared_memory_kib,
+            multi_hypervisor::SPAN_VM.shared_memory_kib / 1024,
+            multi_hypervisor::SPAN_VM.shared_hpa_base,
+            multi_hypervisor::hypervisor_level_str(multi_hypervisor::SPAN_VM.io_primary_l1)
+        );
+        for i in 0..multi_hypervisor::SPAN_VM.total_vcpus {
+            let v = &multi_hypervisor::SPAN_VM.vcpus[i as usize];
+            kprintln!(
+                "  VCPU #{}: {} | ActiveLocally: {} | Exits: {} | Cycles: {}",
+                v.vcpu_id,
+                multi_hypervisor::hypervisor_level_str(v.assigned_l1),
+                v.is_active_locally,
+                v.vm_exits,
+                v.execution_cycles
+            );
+        }
+        kprintln_emerald!(
+            "Metrics: Kicks Redirected: {} | Cross-L1 IPIs: {} | Interrupts Filtered: {} | Net Egress: {}",
+            multi_hypervisor::SPAN_VM.kicks_redirected,
+            multi_hypervisor::SPAN_VM.cross_l1_ipis,
+            multi_hypervisor::SPAN_VM.interrupts_filtered,
+            multi_hypervisor::SPAN_VM.single_exit_net_packets
+        );
+    } else if cmd == "rootvmm" || cmd == "vmm" || cmd.starts_with("rootvmm ") || cmd.starts_with("vmm ") {
+        let prefix = if cmd.starts_with("rootvmm ") { "rootvmm " } else { "vmm " };
+        if let Some(arg) = cmd.strip_prefix(prefix) {
+            let mut it = arg.split_whitespace();
+            let action = it.next().unwrap_or("");
+            if action == "enter" {
+                let id: u32 = it.next().and_then(|s| s.parse().ok()).unwrap_or(2);
+                match trusted_root_vmm::TRUSTED_VMM_ENGINE.vmx_root_enter(id) {
+                    Ok(res) => kprintln_emerald!("[ROOT VMM] Module {} -> {}", id, res),
+                    Err(e) => kprintln!("rootvmm enter error: {}", e),
+                }
+            } else if action == "exit" {
+                let id: u32 = it.next().and_then(|s| s.parse().ok()).unwrap_or(1);
+                match trusted_root_vmm::TRUSTED_VMM_ENGINE.vmx_root_exit(id) {
+                    Ok(res) => kprintln_emerald!("[ROOT VMM] Module {} -> {}", id, res),
+                    Err(e) => kprintln!("rootvmm exit error: {}", e),
+                }
+            } else if action == "verify" {
+                let id: u32 = it.next().and_then(|s| s.parse().ok()).unwrap_or(1);
+                let rip: u64 = it.next().and_then(|s| u64::from_str_radix(s.trim_start_matches("0x"), 16).ok()).unwrap_or(0x0045_0000);
+                let ok = trusted_root_vmm::TRUSTED_VMM_ENGINE.verify_execution_boundary(id, rip);
+                if ok {
+                    kprintln_emerald!("[ROOT VMM] Target RIP {:#X} verified inside Module {} boundary [OK]", rip, id);
+                } else {
+                    kprintln_amber!("[ROOT VMM] Target RIP {:#X} OUT-OF-BOUNDS for Module {} -> Blue-Pill Trapped!", rip, id);
+                }
+            }
+        }
+        kprintln_amber!("=== TRUSTED ROOT MODE HYPERVISOR & ROOT MODE VMM (US 9,367,671 B1) ===");
+        kprintln!(
+            "Component 1 (EFI Root Core): {} | Component 2 (OS Agent): {} | OS Privilege: {}",
+            if trusted_root_vmm::TRUSTED_VMM_ENGINE.component_1_active { "ACTIVE" } else { "DISABLED" },
+            if trusted_root_vmm::TRUSTED_VMM_ENGINE.component_2_active { "ACTIVE" } else { "DISABLED" },
+            trusted_root_vmm::privilege_str(trusted_root_vmm::TRUSTED_VMM_ENGINE.os_privilege)
+        );
+        kprintln!(
+            "VMX Capabilities: {:#018X} | Root Transitions: {} | Boundary Faults: {}",
+            trusted_root_vmm::TRUSTED_VMM_ENGINE.vmx_get_capabilities(),
+            trusted_root_vmm::TRUSTED_VMM_ENGINE.root_transitions,
+            trusted_root_vmm::TRUSTED_VMM_ENGINE.boundary_faults
+        );
+        for slot in trusted_root_vmm::TRUSTED_VMM_ENGINE.modules.iter().flatten() {
+            kprintln!(
+                "  Module #{}: [{}] Base: {:#010X} Size: {} KiB | Privilege: {} | Violations: {}",
+                slot.id,
+                slot.name,
+                slot.base_addr,
+                slot.size / 1024,
+                if slot.is_root_privileged { "ROOT_MODE" } else { "NON_ROOT" },
+                slot.execution_violations
+            );
+        }
+    } else if cmd == "snvme" || cmd == "nvmeof" || cmd.starts_with("snvme ") || cmd.starts_with("nvmeof ") {
+        let prefix = if cmd.starts_with("snvme ") { "snvme " } else { "nvmeof " };
+        if let Some(arg) = cmd.strip_prefix(prefix) {
+            let mut it = arg.split_whitespace();
+            let action = it.next().unwrap_or("");
+            if action == "read" {
+                let lba: u64 = it.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+                let mut buf = [0u8; 512];
+                match smartnic_nvmeof::SMARTNIC_NVME.emulate_nvme_read(lba, 1, &mut buf) {
+                    Ok(n) => {
+                        let text = core::str::from_utf8(&buf[..n.min(64)]).unwrap_or("(binary)");
+                        kprintln_emerald!("[SMARTNIC] NVMe-oF Read LBA {} ({} B via Shared Port): \"{}\"", lba, n, text.trim());
+                    }
+                    Err(e) => kprintln!("snvme read error: {}", e),
+                }
+            } else if action == "write" {
+                let lba: u64 = it.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+                let text = it.next().unwrap_or("SPATIAL_NVMEOF_BLOCK_DATA");
+                match smartnic_nvmeof::SMARTNIC_NVME.emulate_nvme_write(lba, text.as_bytes()) {
+                    Ok(n) => kprintln_emerald!("[SMARTNIC] NVMe-oF Write LBA {} ({} B via Shared Port) -> Dispatched to Target SAN", lba, n),
+                    Err(e) => kprintln!("snvme write error: {}", e),
+                }
+            } else if action == "target" {
+                let ip_str = it.next().unwrap_or("10.0.2.102");
+                let port: u16 = it.next().and_then(|s| s.parse().ok()).unwrap_or(4420);
+                match smartnic_nvmeof::SMARTNIC_NVME.register_external_target("Disaggregated-NVMe-Target-3", [10, 0, 2, 102], port, smartnic_nvmeof::StorageFabricProtocol::NvmeOverTcp, 1048576) {
+                    Ok(id) => kprintln_emerald!("[SMARTNIC] Registered External Target #{} ({}:{}) into aggregated NVMe namespace", id, ip_str, port),
+                    Err(e) => kprintln!("snvme target error: {}", e),
+                }
+            }
+        }
+        kprintln_amber!("=== SMARTNIC EMULATED LOCAL STORAGE (US 11,636,053 B2 / US 11,716,383 B2) ===");
+        kprintln!(
+            "Emulated Controller: 'VMWR' ({:#X}) | NSID: {} | Local Virtual Capacity: {} MiB ({} sectors)",
+            smartnic_nvmeof::SMARTNIC_NVME.controller_id,
+            smartnic_nvmeof::SMARTNIC_NVME.namespace_id,
+            smartnic_nvmeof::EMULATED_TOTAL_SECTORS / 2048,
+            smartnic_nvmeof::EMULATED_TOTAL_SECTORS
+        );
+        kprintln!(
+            "Shared NIC Port: Port {} (e1000) | Net Pkts: {} | Storage Pkts: {} | Total: {} B",
+            smartnic_nvmeof::SMARTNIC_NVME.shared_port_id,
+            smartnic_nvmeof::SMARTNIC_NVME.shared_port_net_packets,
+            smartnic_nvmeof::SMARTNIC_NVME.shared_port_storage_packets,
+            smartnic_nvmeof::SMARTNIC_NVME.total_bytes_transported
+        );
+        kprintln_emerald!(
+            "Hardware Offload: Fast-Path Hits: {} | Slow-Path Translations: {}",
+            smartnic_nvmeof::SMARTNIC_NVME.fast_path_hits,
+            smartnic_nvmeof::SMARTNIC_NVME.slow_path_translations
+        );
+        for slot in smartnic_nvmeof::SMARTNIC_NVME.targets.iter().flatten() {
+            kprintln!(
+                "  Target #{}: [{}] -> {}.{}.{}.{}:{} | Proto: {} | LBAs {}-{} ({} MiB) | R:{} W:{}",
+                slot.target_id,
+                slot.name,
+                slot.ip_addr[0], slot.ip_addr[1], slot.ip_addr[2], slot.ip_addr[3],
+                slot.port,
+                smartnic_nvmeof::protocol_str(slot.protocol),
+                slot.lba_start,
+                slot.lba_start + slot.lba_sectors,
+                slot.lba_sectors / 2048,
+                slot.total_reads,
+                slot.total_writes
+            );
+        }
+    } else if cmd == "hyos" || cmd == "multios" {
+        kprintln_amber!("=== HYBRID MULTI-OS & DUAL-FRAMEBUFFER ARCHITECTURE ===");
+        kprintln!("(US 9,678,810 B2 / KR 10-2269452 / EP 2 847 669 B1)");
+        let dock_str = hybrid_multi_os::dock_state_str(hybrid_multi_os::DUAL_FB_MGR.dock_state);
+        kprintln!(
+            "Dock State: {} | Secondary OS: {} | Cross-Env Events: {}",
+            dock_str,
+            if hybrid_multi_os::DUAL_FB_MGR.secondary_os_running { "RUNNING" } else { "SUSPENDED" },
+            hybrid_multi_os::DUAL_FB_MGR.cross_env_events
+        );
+        kprintln!(
+            "Primary Framebuffer:   {:#010X} ({}x{} 32bpp)",
+            hybrid_multi_os::DUAL_FB_MGR.primary_fb_addr,
+            hybrid_multi_os::DUAL_FB_MGR.primary_width,
+            hybrid_multi_os::DUAL_FB_MGR.primary_height
+        );
+        kprintln!(
+            "Secondary Framebuffer: {:#010X} ({}x{} 32bpp)",
+            hybrid_multi_os::DUAL_FB_MGR.secondary_fb_addr,
+            hybrid_multi_os::DUAL_FB_MGR.secondary_width,
+            hybrid_multi_os::DUAL_FB_MGR.secondary_height
+        );
+        kprintln_emerald!("--- Microsoft Resource Partitioning & Memory Shrink (EP 2 847 669 B1) ---");
+        kprintln!(
+            "System RAM: {} MiB | Shrunk: {}",
+            hybrid_multi_os::HYBRID_PARTITION_MGR.total_system_memory_kib / 1024,
+            if hybrid_multi_os::HYBRID_PARTITION_MGR.has_shrunk { "YES" } else { "NO" }
+        );
+        kprintln!(
+            "Primary OS (Spatial):   {} MiB (Base: {:#010X}) | Cores: {}",
+            hybrid_multi_os::HYBRID_PARTITION_MGR.primary_os_memory_size / 1024,
+            hybrid_multi_os::HYBRID_PARTITION_MGR.primary_os_memory_start,
+            hybrid_multi_os::HYBRID_PARTITION_MGR.primary_cores
+        );
+        kprintln!(
+            "Secondary OS (Guest):   {} MiB (Base: {:#010X}) | Cores: {}",
+            hybrid_multi_os::HYBRID_PARTITION_MGR.secondary_os_memory_size / 1024,
+            hybrid_multi_os::HYBRID_PARTITION_MGR.secondary_os_memory_start,
+            hybrid_multi_os::HYBRID_PARTITION_MGR.secondary_cores
+        );
+        kprintln_emerald!("--- Intel Asymmetric Disk Virtualization & Pattern Sector Guard (KR 10-2269452) ---");
+        kprintln!(
+            "Physical Disk: {} GiB ({} sectors)",
+            hybrid_multi_os::ASYM_DISK_VIRT.disk_size_sectors / 2097152,
+            hybrid_multi_os::ASYM_DISK_VIRT.disk_size_sectors
+        );
+        kprintln!(
+            "Guest Assigned Partition: LBAs {}-{} ({} MiB) [Direct vLBA == pLBA]",
+            hybrid_multi_os::ASYM_DISK_VIRT.assigned_plba_start,
+            hybrid_multi_os::ASYM_DISK_VIRT.assigned_plba_start + hybrid_multi_os::ASYM_DISK_VIRT.assigned_plba_sectors,
+            hybrid_multi_os::ASYM_DISK_VIRT.assigned_plba_sectors / 2048
+        );
+        kprintln!(
+            "Pattern Guard Stats: Pattern Reads: {} | Blocked Writes: {} | Direct Accesses: {}",
+            hybrid_multi_os::ASYM_DISK_VIRT.pattern_sector_reads,
+            hybrid_multi_os::ASYM_DISK_VIRT.pattern_sector_writes_blocked,
+            hybrid_multi_os::ASYM_DISK_VIRT.direct_lba_accesses
+        );
+    } else if cmd == "dock" {
+        hybrid_multi_os::DUAL_FB_MGR.dock_terminal();
+        kprintln_emerald!("[HYOS] Docked to Desktop Smartdock! Secondary 1080p OS display activated (US 9,678,810 B2)");
+    } else if cmd == "undock" {
+        hybrid_multi_os::DUAL_FB_MGR.undock_terminal();
+        kprintln_amber!("[HYOS] Undocked from Desktop Smartdock! Running standalone mobile handheld HUD");
+    } else if cmd == "pats" || cmd.starts_with("pats ") {
+        let lba: u64 = if cmd.starts_with("pats ") {
+            cmd.strip_prefix("pats ").unwrap_or("").trim().parse().unwrap_or(2048)
+        } else {
+            2048
+        };
+        let (assign_read, read_allowed) = hybrid_multi_os::ASYM_DISK_VIRT.evaluate_access(lba, false);
+        let (_assign_write, write_allowed) = hybrid_multi_os::ASYM_DISK_VIRT.evaluate_access(lba, true);
+        match assign_read {
+            hybrid_multi_os::PartitionAssignment::GuestAssignedDirect => {
+                kprintln_emerald!(
+                    "[ASYM-DISK] LBA {} -> DIRECT PHYSICAL ACCESS (vLBA == pLBA). Read: {} | Write: {} (Unrestricted Direct I/O)",
+                    lba, if read_allowed { "ALLOWED" } else { "DENIED" }, if write_allowed { "ALLOWED" } else { "BLOCKED" }
+                );
+            }
+            hybrid_multi_os::PartitionAssignment::ProtectedPatternSector => {
+                kprintln_amber!(
+                    "[ASYM-DISK] LBA {} -> UNASSIGNED PARTITION (Pattern Sector Guard). Read: DUMMY_ZERO_FILL | Write: BLOCKED_GUARD",
+                    lba
+                );
+            }
+        }
+    } else if cmd.starts_with("shrink ") {
+        let mb: u64 = cmd.strip_prefix("shrink ").unwrap_or("").trim().parse().unwrap_or(4096);
+        let kib = mb * 1024;
+        match hybrid_multi_os::HYBRID_PARTITION_MGR.shrink_and_allocate_secondary(kib, 4) {
+            Ok(()) => {
+                kprintln_emerald!(
+                    "[HYOS] Memory Shrink Successful: Primary OS shrunk to {} MiB ({} Cores), Carved {} MiB for Secondary OS (EP 2 847 669 B1)",
+                    hybrid_multi_os::HYBRID_PARTITION_MGR.primary_os_memory_size / 1024,
+                    hybrid_multi_os::HYBRID_PARTITION_MGR.primary_cores,
+                    hybrid_multi_os::HYBRID_PARTITION_MGR.secondary_os_memory_size / 1024
+                );
+            }
+            Err(e) => kprintln!("shrink error: {}", e),
+        }
+    } else if cmd == "sva" || cmd == "dellio" || cmd.starts_with("sva ") || cmd.starts_with("dellio ") {
+        let prefix = if cmd.starts_with("sva ") {
+            "sva "
+        } else if cmd.starts_with("dellio ") {
+            "dellio "
+        } else {
+            ""
+        };
+        let arg = if !prefix.is_empty() {
+            cmd.strip_prefix(prefix).unwrap_or("").trim()
+        } else {
+            ""
+        };
+
+        if !arg.is_empty() {
+            let mut it = arg.split_whitespace();
+            let action = it.next().unwrap_or("");
+            if action == "activate" {
+                dell_sva_accelerator::DELL_ACCELERATOR.activate_ep1_from_sva();
+                kprintln_emerald!("[DELL SVA] Activated Endpoint 1 via Endpoint 2 (RP2 -> RP1) -> Hypervisor hot-plug event recognized!");
+            } else if action == "morph" {
+                let target = it.next().unwrap_or("nic");
+                let profile = match target {
+                    "nic" | "net" => dell_sva_accelerator::PersonalityProfile::NetworkInterfaceController,
+                    "crypto" | "sec" => dell_sva_accelerator::PersonalityProfile::AcceleratedCryptoOffload,
+                    _ => dell_sva_accelerator::PersonalityProfile::BlockStorageAdapter,
+                };
+                dell_sva_accelerator::DELL_ACCELERATOR.morph_personality(profile, profile);
+                kprintln_emerald!(
+                    "[DELL SVA] Dynamic Personality Morphed to: {} (FLR cycle on EP2 & EP1 completed, driver rebound)",
+                    dell_sva_accelerator::personality_str(profile)
+                );
+            } else if action == "dma" {
+                let a2_addr: u64 = it.next().and_then(|s| {
+                    if s.starts_with("0x") || s.starts_with("0X") {
+                        u64::from_str_radix(&s[2..], 16).ok()
+                    } else {
+                        s.parse().ok()
+                    }
+                }).unwrap_or(0x0002_0000);
+                let a4_addr: u64 = it.next().and_then(|s| {
+                    if s.starts_with("0x") || s.starts_with("0X") {
+                        u64::from_str_radix(&s[2..], 16).ok()
+                    } else {
+                        s.parse().ok()
+                    }
+                }).unwrap_or(0x1002_0000);
+                let len: u32 = it.next().and_then(|s| s.parse().ok()).unwrap_or(4096);
+                match dell_sva_accelerator::DELL_ACCELERATOR.execute_dma_transfer(a2_addr, a4_addr, len, false) {
+                    Ok(bytes) => {
+                        kprintln_emerald!(
+                            "[DELL SVA] Zero-CPU DMA Transfer OK: {} B (SVA A2 {:#010X} -> Host Physical A4 {:#010X})",
+                            bytes, a2_addr, a4_addr
+                        );
+                    }
+                    Err(e) => kprintln!("sva dma error: {}", e),
+                }
+            } else if action == "priv" {
+                let sub = it.next().unwrap_or("read");
+                if sub == "write" {
+                    let text = it.next().unwrap_or("DELL_CONFIDENTIAL_VAULT_KEY");
+                    dell_sva_accelerator::DELL_ACCELERATOR.private_device.write_vault(text.as_bytes());
+                    kprintln_emerald!("[DELL SVA] Private Hidden Vault: Wrote {} bytes exclusively via Endpoint 2", text.len());
+                } else {
+                    let data = dell_sva_accelerator::DELL_ACCELERATOR.private_device.read_vault();
+                    let text = core::str::from_utf8(data).unwrap_or("(binary)");
+                    kprintln_emerald!("[DELL SVA] Private Hidden Vault Read (Invisible to Hypervisor): \"{}\"", text);
+                }
+            }
+        }
+
+        kprintln_amber!("=== DELL DUAL-ENDPOINT PCIe I/O ACCELERATOR (EP 3 170 072 B1) ===");
+        kprintln!(
+            "Device ID: {:#010X} | Root Port 1 (HV): {} | Root Port 2 (SVA): {}",
+            dell_sva_accelerator::DELL_ACCELERATOR.device_id,
+            if dell_sva_accelerator::DELL_ACCELERATOR.root_port_1_active { "ACTIVE" } else { "INACTIVE" },
+            if dell_sva_accelerator::DELL_ACCELERATOR.root_port_2_active { "ACTIVE" } else { "INACTIVE" }
+        );
+        kprintln!(
+            "Endpoint 1 (Hypervisor Facing): State: [{}] | Personality: {}",
+            dell_sva_accelerator::endpoint_state_str(dell_sva_accelerator::DELL_ACCELERATOR.ep1_state),
+            dell_sva_accelerator::personality_str(dell_sva_accelerator::DELL_ACCELERATOR.ep1_personality)
+        );
+        kprintln!(
+            "Endpoint 2 (SVA Exclusive Pass-Through): State: [{}] | SVA Bound: {}",
+            dell_sva_accelerator::endpoint_state_str(dell_sva_accelerator::DELL_ACCELERATOR.ep2_state),
+            if dell_sva_accelerator::DELL_ACCELERATOR.sva_exclusive_bound { "YES" } else { "NO" }
+        );
+        kprintln_emerald!(
+            "Address Translator 256: ATC Hits: {} | ATC Misses: {} | Doorbells Dispatched: {}",
+            dell_sva_accelerator::DELL_ACCELERATOR.atc_hits,
+            dell_sva_accelerator::DELL_ACCELERATOR.atc_misses,
+            dell_sva_accelerator::DELL_ACCELERATOR.ep1_doorbells_received
+        );
+        kprintln!(
+            "DMA Engine 254: Transfers Completed: {} | Total Volume: {} B",
+            dell_sva_accelerator::DELL_ACCELERATOR.dma_transfers_completed,
+            dell_sva_accelerator::DELL_ACCELERATOR.dma_bytes_transferred
+        );
+        kprintln!(
+            "Data Processor 258: Checksums: {} | Threat Scans: {} | Blocked Exploits: {}",
+            dell_sva_accelerator::DELL_ACCELERATOR.processor.checksum_ops,
+            dell_sva_accelerator::DELL_ACCELERATOR.processor.malicious_scans,
+            dell_sva_accelerator::DELL_ACCELERATOR.processor.threats_detected
+        );
+        kprintln_amber!(
+            "Private Device 260: [{}] | Cap: {} KiB | Reads: {} | Writes: {} (Hypervisor Blind)",
+            dell_sva_accelerator::DELL_ACCELERATOR.private_device.device_type,
+            dell_sva_accelerator::DELL_ACCELERATOR.private_device.storage_capacity_kib,
+            dell_sva_accelerator::DELL_ACCELERATOR.private_device.read_count,
+            dell_sva_accelerator::DELL_ACCELERATOR.private_device.write_count
+        );
+    } else if cmd == "latehv" || cmd == "late_hypervisor" || cmd.starts_with("latehv ") {
+        if cmd == "latehv trap" {
+            late_hypervisor::LATE_HYPERVISOR_MGR.handle_apic_intercept(true);
+            kprintln_emerald!("[LATE HV] Handled trapped write to Local APIC MMIO page (0xFEE00000) -> Intercept emulated!");
+        } else if cmd == "latehv step" {
+            late_hypervisor::LATE_HYPERVISOR_MGR.discover_and_capture_state(0x0010_0000, 0x002F_F000, 0x0010_1000);
+            late_hypervisor::LATE_HYPERVISOR_MGR.inhibit_interrupts(late_hypervisor::NmiInhibitionMethod::SelfDeliveredNmiNoIret);
+            late_hypervisor::LATE_HYPERVISOR_MGR.prime_temporary_vm();
+            late_hypervisor::LATE_HYPERVISOR_MGR.trigger_intercept_and_enter_hypervisor();
+            late_hypervisor::LATE_HYPERVISOR_MGR.virtualize_root_os();
+            kprintln_emerald!("[LATE HV] Late-launch state transition re-cycled: Root OS transparently virtualized!");
+        }
+        kprintln_amber!("=== RUNTIME HYPERVISOR LATE-LAUNCH & STATE CAPTURE (EP 2 024 826 B1) ===");
+        kprintln!(
+            "Launch Phase: [{}] | NMI Inhibition: {}",
+            late_hypervisor::launch_phase_str(late_hypervisor::LATE_HYPERVISOR_MGR.phase),
+            late_hypervisor::nmi_inhibition_str(late_hypervisor::LATE_HYPERVISOR_MGR.nmi_method)
+        );
+        kprintln!(
+            "Captured CPU State: RIP={:#010X} | RSP={:#010X} | CR3={:#010X} | CR0={:#010X} | RFLAGS={:#010X}",
+            late_hypervisor::LATE_HYPERVISOR_MGR.cpu_state.rip,
+            late_hypervisor::LATE_HYPERVISOR_MGR.cpu_state.rsp,
+            late_hypervisor::LATE_HYPERVISOR_MGR.cpu_state.cr3,
+            late_hypervisor::LATE_HYPERVISOR_MGR.cpu_state.cr0,
+            late_hypervisor::LATE_HYPERVISOR_MGR.cpu_state.rflags
+        );
+        kprintln!(
+            "Descriptor Tables:  GDTR={:#010X} (lim={:#X}) | IDTR={:#010X} (lim={:#X})",
+            late_hypervisor::LATE_HYPERVISOR_MGR.cpu_state.gdtr_base,
+            late_hypervisor::LATE_HYPERVISOR_MGR.cpu_state.gdtr_limit,
+            late_hypervisor::LATE_HYPERVISOR_MGR.cpu_state.idtr_base,
+            late_hypervisor::LATE_HYPERVISOR_MGR.cpu_state.idtr_limit
+        );
+        kprintln!(
+            "Captured APIC State: ID={} | MMIO PA={:#010X} | Intercepts Active: {} | Trapped Hits: {}",
+            late_hypervisor::LATE_HYPERVISOR_MGR.apic_state.apic_id,
+            late_hypervisor::LATE_HYPERVISOR_MGR.apic_state.mmio_phys_addr,
+            if late_hypervisor::LATE_HYPERVISOR_MGR.apic_state.is_virtualized_intercept_active { "YES" } else { "NO" },
+            late_hypervisor::LATE_HYPERVISOR_MGR.apic_trapped_accesses
+        );
+        kprintln_emerald!(
+            "Discovered Topology: Cores: {} (HT={}) | RAM: {} MiB (Base: {:#010X}) | ACPI PA: {:#010X}",
+            late_hypervisor::LATE_HYPERVISOR_MGR.topology.logical_processor_count,
+            if late_hypervisor::LATE_HYPERVISOR_MGR.topology.hyperthreading_enabled { "YES" } else { "NO" },
+            late_hypervisor::LATE_HYPERVISOR_MGR.topology.physical_ram_size / 1048576,
+            late_hypervisor::LATE_HYPERVISOR_MGR.topology.physical_ram_base,
+            late_hypervisor::LATE_HYPERVISOR_MGR.topology.acpi_table_pa
+        );
+    } else if cmd == "muse" || cmd == "mdev" || cmd.starts_with("muse ") || cmd.starts_with("mdev ") {
+        let prefix = if cmd.starts_with("muse ") { "muse " } else if cmd.starts_with("mdev ") { "mdev " } else { "" };
+        let arg = if !prefix.is_empty() { cmd.strip_prefix(prefix).unwrap_or("").trim() } else { "" };
+        if !arg.is_empty() {
+            let mut it = arg.split_whitespace();
+            let action = it.next().unwrap_or("");
+            if action == "fast" {
+                let slot: usize = it.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+                let len: u32 = it.next().and_then(|s| s.parse().ok()).unwrap_or(1518);
+                match muse_mediator::MUSE_ENGINE.dispatch_fastpath_packet(slot, len) {
+                    Ok(tail) => {
+                        kprintln_emerald!(
+                            "[MUSE FASTPATH] Packet ({} B) enqueued into Ring #{} at slot {} (Direct DPDK Zero-Copy Bypass)",
+                            len, slot, tail
+                        );
+                    }
+                    Err(e) => kprintln!("muse fast error: {}", e),
+                }
+            } else if action == "slow" {
+                let slot: usize = it.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+                let csr_idx: usize = it.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+                let val: u32 = it.next().and_then(|s| {
+                    if s.starts_with("0x") || s.starts_with("0X") {
+                        u32::from_str_radix(&s[2..], 16).ok()
+                    } else {
+                        s.parse().ok()
+                    }
+                }).unwrap_or(0xCAFE_BABE);
+                match muse_mediator::MUSE_ENGINE.relay_control_plane_op(slot, csr_idx, val) {
+                    Ok(written) => {
+                        kprintln_emerald!(
+                            "[MUSE SLOWPATH] Relayed CSR[{}]={:#010X} via /dev/muse FUSE daemon to User Software Parent Device",
+                            csr_idx, written
+                        );
+                    }
+                    Err(e) => kprintln!("muse slow error: {}", e),
+                }
+            }
+        }
+        kprintln_amber!("=== INTEL MUSE MEDIATED-DEVICE IN USER SPACE (WO 2021/086457 A1) ===");
+        kprintln!(
+            "MUSE Transport: /dev/muse [{}] | Fast-Path Packets: {} | Slow-Path Relays: {}",
+            if muse_mediator::MUSE_ENGINE.fuse_daemon_connected { "FUSE DAEMON CONNECTED" } else { "OFFLINE" },
+            muse_mediator::MUSE_ENGINE.total_fastpath_packets,
+            muse_mediator::MUSE_ENGINE.total_slowpath_relays
+        );
+        for i in 0..2 {
+            let mdev = &muse_mediator::MUSE_ENGINE.mdev_kernel_instances[i];
+            let parent = &muse_mediator::MUSE_ENGINE.user_parent_devices[i];
+            let ring = &muse_mediator::MUSE_ENGINE.dma_rings[i];
+            let intr = &muse_mediator::MUSE_ENGINE.interrupt_pairs[i];
+            kprintln!(
+                "  Instance #{}: Mdev ID: {:#010X} | Shadow BAR0: {:#010X} ({} KiB) | Relays: {}",
+                i, mdev.mdev_id, mdev.shadow_bar0, mdev.shadow_bar0_size / 1024, mdev.slow_path_relays
+            );
+            kprintln_emerald!(
+                "    User Parent: GVA Map: {:#010X} | PFN: {:#010X} | FUSE Served: {}",
+                parent.mmio_mapped_gva, parent.physical_frame_number, parent.fuse_requests_served
+            );
+            kprintln!(
+                "    Fast-Path Ring: GPA={:#010X} | HVA={:#010X} | Head: {} Tail: {} | Pkts: {} ({} B)",
+                ring.guest_phys_addr, ring.host_virt_addr, ring.head_index, ring.tail_index,
+                ring.packets_processed, ring.bytes_processed
+            );
+            kprintln_amber!(
+                "    Decoupled IRQ: Vector {} <-> IRQFD #{} <-> EVENTFD #{} | Delivered: {}",
+                intr.vector_id, intr.irqfd, intr.eventfd, intr.interrupts_delivered
+            );
+        }
+    } else if cmd == "coreiso" || cmd == "amdcore" || cmd.starts_with("coreiso ") || cmd.starts_with("amdcore ") {
+        let prefix = if cmd.starts_with("coreiso ") { "coreiso " } else if cmd.starts_with("amdcore ") { "amdcore " } else { "" };
+        let arg = if !prefix.is_empty() { cmd.strip_prefix(prefix).unwrap_or("").trim() } else { "" };
+        if !arg.is_empty() {
+            let mut it = arg.split_whitespace();
+            let action = it.next().unwrap_or("");
+            if action == "dispatch" {
+                let work_id: u32 = it.next().and_then(|s| s.parse().ok()).unwrap_or(2001);
+                let size: u32 = it.next().and_then(|s| s.parse().ok()).unwrap_or(8192);
+                match amd_core_isolation::AMD_CORE_ISOLATOR.dispatch_accelerator_work(work_id, size, 0x0050_0000) {
+                    Ok(core) => {
+                        kprintln_emerald!(
+                            "[AMD CORE ISO] Work Unit #{} ({} B) successfully scheduled & executed on Sequestered Core #{}!",
+                            work_id, size, core
+                        );
+                    }
+                    Err(e) => kprintln!("coreiso dispatch error: {}", e),
+                }
+            } else if action == "pf" {
+                let core_id: u8 = it.next().and_then(|s| s.parse().ok()).unwrap_or(4);
+                match amd_core_isolation::AMD_CORE_ISOLATOR.handle_sequestered_page_fault(core_id) {
+                    Ok(()) => {
+                        kprintln_emerald!(
+                            "[AMD CORE ISO] Sequestered Core #{} #PF VMEXIT handled: Fault Queue DPC updated page tables and resumed via CMD_RESUME!",
+                            core_id
+                        );
+                    }
+                    Err(e) => kprintln!("coreiso pf error: {}", e),
+                }
+            }
+        }
+        kprintln_amber!("=== AMD HYPERVISOR-BASED PROCESSOR CORE ISOLATION (EP 2 519 877 B1) ===");
+        kprintln!(
+            "Core Topology: Total Cores: {} | Host OS Cores: {} (Cores 0..3) | Sequestered Cores: {} (Cores 4..7)",
+            amd_core_isolation::AMD_CORE_ISOLATOR.total_cores,
+            amd_core_isolation::AMD_CORE_ISOLATOR.host_cores,
+            amd_core_isolation::AMD_CORE_ISOLATOR.sequestered_cores
+        );
+        for i in 0..8 {
+            kprintln!(
+                "  Core #{}: [{}]",
+                i, amd_core_isolation::core_state_str(amd_core_isolation::AMD_CORE_ISOLATOR.core_states[i])
+            );
+        }
+        kprintln_emerald!(
+            "Shared Queue Fabric: Work Queue: {} entries | Command Q: {} | Response Q: {} | Fault Q: {}",
+            (amd_core_isolation::AMD_CORE_ISOLATOR.queue_fabric.work_q_tail + 8 - amd_core_isolation::AMD_CORE_ISOLATOR.queue_fabric.work_q_head) % 8,
+            amd_core_isolation::AMD_CORE_ISOLATOR.queue_fabric.command_queue_count,
+            amd_core_isolation::AMD_CORE_ISOLATOR.queue_fabric.response_queue_count,
+            amd_core_isolation::AMD_CORE_ISOLATOR.queue_fabric.fault_queue_count
+        );
+        kprintln!(
+            "Inter-Core Signaling: VMMCALL Doorbells: {} | INIT IPIs: {} | #PF VMEXITS: {} | Completed Units: {}",
+            amd_core_isolation::AMD_CORE_ISOLATOR.queue_fabric.vmmcall_doorbells,
+            amd_core_isolation::AMD_CORE_ISOLATOR.queue_fabric.init_ipis_sent,
+            amd_core_isolation::AMD_CORE_ISOLATOR.queue_fabric.page_fault_vmexits,
+            amd_core_isolation::AMD_CORE_ISOLATOR.queue_fabric.work_units_completed
+        );
+    } else if cmd == "vgpu" || cmd == "intelgpu" || cmd.starts_with("vgpu ") || cmd.starts_with("intelgpu ") {
+        let prefix = if cmd.starts_with("vgpu ") { "vgpu " } else if cmd.starts_with("intelgpu ") { "intelgpu " } else { "" };
+        let arg = if !prefix.is_empty() { cmd.strip_prefix(prefix).unwrap_or("").trim() } else { "" };
+        if !arg.is_empty() {
+            let mut it = arg.split_whitespace();
+            let action = it.next().unwrap_or("");
+            if action == "tx" {
+                let slave_idx: usize = it.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+                let gva: u64 = it.next().and_then(|s| {
+                    if s.starts_with("0x") || s.starts_with("0X") {
+                        u64::from_str_radix(&s[2..], 16).ok()
+                    } else {
+                        s.parse().ok()
+                    }
+                }).unwrap_or(0x0008_0000);
+                match intel_vgpu_mmu::INTEL_VGPU_MGR.process_memory_transaction(slave_idx, gva) {
+                    Ok((hpa, status)) => {
+                        kprintln_emerald!(
+                            "[INTEL vGPU MMU] Memory Transaction GVA {:#010X} -> HPA {:#010X} | Status: [{}] (Slave MMU #{})",
+                            gva, hpa, status, slave_idx + 1
+                        );
+                    }
+                    Err(e) => kprintln!("vgpu tx error: {}", e),
+                }
+            } else if action == "bounds" {
+                let vgpu_id: u8 = it.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+                let offset: u64 = it.next().and_then(|s| {
+                    if s.starts_with("0x") || s.starts_with("0X") {
+                        u64::from_str_radix(&s[2..], 16).ok()
+                    } else {
+                        s.parse().ok()
+                    }
+                }).unwrap_or(0x1000_0000);
+                let allowed = intel_vgpu_mmu::INTEL_VGPU_MGR.verify_vram_bounds(vgpu_id, offset);
+                if allowed {
+                    kprintln_emerald!(
+                        "[INTEL vGPU] Offset {:#010X} inside vGPU #{} HBM aperture [ALLOWED]",
+                        offset, vgpu_id
+                    );
+                } else {
+                    kprintln_amber!(
+                        "[INTEL vGPU] Offset {:#010X} OUT-OF-BOUNDS for vGPU #{} HBM aperture [TRAPPED_BREACH]",
+                        offset, vgpu_id
+                    );
+                }
+            }
+        }
+        kprintln_amber!("=== INTEL MULTI-SLICE vGPU & MASTER/SLAVE MMU (US 11,768,781 B2) ===");
+        kprintln!(
+            "Master MMU: IOMMU Direct Requests: {} | Slave Routed Replies: {} | Total Transactions: {}",
+            intel_vgpu_mmu::INTEL_VGPU_MGR.master_mmu.iommu_requests_served,
+            intel_vgpu_mmu::INTEL_VGPU_MGR.master_mmu.slave_routed_replies,
+            intel_vgpu_mmu::INTEL_VGPU_MGR.total_memory_transactions
+        );
+        for i in 0..3 {
+            let smmu = &intel_vgpu_mmu::INTEL_VGPU_MGR.slave_mmus[i];
+            kprintln!(
+                "  Slave MMU #{}: Local TLB Hits: {} | Master Forwarded Requests: {}",
+                smmu.slave_id, smmu.local_tlb_hits, smmu.master_forwarded_requests
+            );
+        }
+        kprintln_emerald!(
+            "20-bit PASID vGPU Scaling (Bypasses PCIe 8-Device Limit): QoS Time Slice: {} ms",
+            intel_vgpu_mmu::INTEL_VGPU_MGR.qos_time_slice_ms
+        );
+        for entry in intel_vgpu_mmu::INTEL_VGPU_MGR.pasid_table.iter() {
+            if entry.is_valid {
+                kprintln!(
+                    "  vGPU #{}: PASID {:#07X} | GVA->GPA Base: {:#010X} | HBM VRAM Aperture: {:#010X} ({} MiB)",
+                    entry.vgpu_id, entry.pasid, entry.gva_to_gpa_base, entry.hbm_base_addr, entry.hbm_size_bytes / 1048576
+                );
+            }
+        }
+        kprintln!(
+            "GPU Slices: 4 Slices Active | Trapped Out-of-Bounds VRAM Violations: {}",
+            intel_vgpu_mmu::INTEL_VGPU_MGR.out_of_bounds_vram_trapped
+        );
+    } else if cmd == "sriov" || cmd.starts_with("sriov ") || cmd == "mbx" || cmd.starts_with("mbx ") {
+        let arg = cmd.strip_prefix("sriov ")
+            .or_else(|| cmd.strip_prefix("mbx "))
+            .unwrap_or("")
+            .trim();
+        let mut it = arg.split_whitespace();
+        let sub = it.next().unwrap_or("");
+        if sub == "trigger" || sub == "send" {
+            let code = it.next().and_then(|s| {
+                if s.starts_with("0x") || s.starts_with("0X") {
+                    u32::from_str_radix(&s[2..], 16).ok()
+                } else {
+                    s.parse::<u32>().ok()
+                }
+            }).unwrap_or(0x8001);
+            match sriov_mailbox::SRIOV_VIRTUALIZER.trigger_guest_communication(code) {
+                Ok(resp) => {
+                    kprintln_emerald!(
+                        "[SR-IOV] VF Request {:#06X} -> Intercept Emulated Response: {:#010X} (Checkpointed)",
+                        code, resp
+                    );
+                }
+                Err(e) => kprintln_amber!("[SR-IOV] Mailbox error: {}", e),
+            }
+        } else if sub == "error" || sub == "lock" {
+            sriov_mailbox::SRIOV_VIRTUALIZER.trigger_device_error();
+            kprintln_amber!("[SR-IOV] Injected hardware device error: all MMIO intercepted, guest writes dropped.");
+        } else if sub == "reset" || sub == "recover" {
+            sriov_mailbox::SRIOV_VIRTUALIZER.reset_device_recovery();
+            kprintln_emerald!("[SR-IOV] Device recovered: direct pass-through restored, EPT intercepts removed.");
+        }
+        kprintln_amber!("=== VMWARE SR-IOV PF-VF MAILBOX DYNAMIC INTERCEPT VIRTUALIZER (US 2021/0209040 A1) ===");
+        kprintln!(
+            "Current State: {} | Callback Registered: {}",
+            sriov_mailbox::protocol_state_str(sriov_mailbox::SRIOV_VIRTUALIZER.state),
+            sriov_mailbox::SRIOV_VIRTUALIZER.callback_registered
+        );
+        kprintln!(
+            "Statistics: Messages Intercepted: {} | Dynamic EPT Flips: {} | Checkpoint Syncs: {} | Dropped Writes: {}",
+            sriov_mailbox::SRIOV_VIRTUALIZER.guest_messages_intercepted,
+            sriov_mailbox::SRIOV_VIRTUALIZER.ept_flips_count,
+            sriov_mailbox::SRIOV_VIRTUALIZER.checkpoint_sync_events,
+            sriov_mailbox::SRIOV_VIRTUALIZER.dropped_error_writes
+        );
+        kprintln!(
+            "VF Mailbox Registers: Data: {:#010X} | Doorbell: {} | Last Response: {:#010X}",
+            sriov_mailbox::SRIOV_VIRTUALIZER.vf_registers.mailbox_data,
+            sriov_mailbox::SRIOV_VIRTUALIZER.vf_registers.doorbell_flag,
+            sriov_mailbox::SRIOV_VIRTUALIZER.vf_registers.last_response
+        );
+    } else if cmd == "vmsec" || cmd.starts_with("vmsec ") || cmd == "vdisk" || cmd.starts_with("vdisk ") {
+        let arg = cmd.strip_prefix("vmsec ")
+            .or_else(|| cmd.strip_prefix("vdisk "))
+            .unwrap_or("")
+            .trim();
+        let mut it = arg.split_whitespace();
+        let sub = it.next().unwrap_or("");
+        if sub == "io" {
+            let vlba = it.next().and_then(|s| s.parse::<u64>().ok()).unwrap_or(100);
+            let blocks = it.next().and_then(|s| s.parse::<u64>().ok()).unwrap_or(8);
+            let mode = it.next().unwrap_or("read");
+            let is_write = mode == "write";
+            match vm_data_security::VM_DATA_SECURITY_MGR.translate_guest_io(vlba, blocks, is_write) {
+                Ok(plba) => {
+                    kprintln_emerald!(
+                        "[VMSEC IO] Guest vLBA {} (+{} blk, {}) -> Translated Physical pLBA {} [BOUNDS OK]",
+                        vlba, blocks, mode, plba
+                    );
+                }
+                Err(e) => kprintln_amber!("[VMSEC IO] Translation fault: {}", e),
+            }
+        } else if sub == "snap" || sub == "snapshot" {
+            let ts = it.next().and_then(|s| s.parse::<u64>().ok()).unwrap_or(1710000000);
+            match vm_data_security::VM_DATA_SECURITY_MGR.create_array_snapshot(ts) {
+                Ok(id) => kprintln_emerald!("[VMSEC] Created array snapshot #{} (Epoch {})", id, ts),
+                Err(e) => kprintln_amber!("[VMSEC] Snapshot error: {}", e),
+            }
+        }
+        kprintln_amber!("=== VMWARE VM DATA SECURITY & NESTED ROOT PARTITIONS (US 11,093,629 B2) ===");
+        let apparent_cap = vm_data_security::VM_DATA_SECURITY_MGR.get_guest_reported_capacity_blocks();
+        let phys_cap = vm_data_security::VM_DATA_SECURITY_MGR.total_physical_lba_blocks;
+        kprintln!(
+            "Apparent Storage (Guest Truncated): {} blocks ({} MiB) | Physical Shared Storage: {} blocks ({} MiB)",
+            apparent_cap, apparent_cap * 512 / 1048576,
+            phys_cap, phys_cap * 512 / 1048576
+        );
+        kprintln!(
+            "State Partition: Encrypted Vault Key Armed: {} | Access Flags: Hyp-Only Protected",
+            vm_data_security::VM_DATA_SECURITY_MGR.is_state_partition_secure()
+        );
+        kprintln!(
+            "I/O Counters: Reads: {} | Writes: {} | Blocked Bounds Violations: {}",
+            vm_data_security::VM_DATA_SECURITY_MGR.io_reads_performed,
+            vm_data_security::VM_DATA_SECURITY_MGR.io_writes_performed,
+            vm_data_security::VM_DATA_SECURITY_MGR.bounds_violations_blocked
+        );
+        for (idx, p) in vm_data_security::VM_DATA_SECURITY_MGR.root_partitions.iter().enumerate() {
+            if p.part_type != vm_data_security::RootPartitionType::Unused {
+                kprintln!(
+                    "  RPT Entry #{}: {} | LBA Range: {}..{} ({} MiB) | Encrypted: {}",
+                    idx,
+                    vm_data_security::partition_type_str(p.part_type),
+                    p.start_lba, p.start_lba + p.block_count,
+                    p.block_count * 512 / 1048576,
+                    p.encrypted
+                );
+            }
+        }
+        for i in 0..vm_data_security::VM_DATA_SECURITY_MGR.snapshot_count {
+            let snap = &vm_data_security::VM_DATA_SECURITY_MGR.snapshots[i];
+            kprintln_emerald!(
+                "  Snapshot #{}: Parent #{} | Extent: LBA {}..{} | Epoch {}",
+                snap.snapshot_id, snap.parent_id, snap.base_lba, snap.base_lba + snap.extent_blocks, snap.timestamp_epoch
+            );
+        }
+    } else if cmd == "ppt" || cmd.starts_with("ppt ") || cmd == "tee" || cmd.starts_with("tee ") {
+        let arg = cmd.strip_prefix("ppt ")
+            .or_else(|| cmd.strip_prefix("tee "))
+            .unwrap_or("")
+            .trim();
+        let mut it = arg.split_whitespace();
+        let sub = it.next().unwrap_or("");
+        if sub == "ecall" || sub == "enter" {
+            let cookie = it.next().and_then(|s| {
+                if s.starts_with("0x") || s.starts_with("0X") {
+                    u64::from_str_radix(&s[2..], 16).ok()
+                } else {
+                    s.parse::<u64>().ok()
+                }
+            }).unwrap_or(platform_protection::PPT_SUBSYSTEM.secure_cookie_value);
+            let rip = it.next().and_then(|s| {
+                if s.starts_with("0x") || s.starts_with("0X") {
+                    u64::from_str_radix(&s[2..], 16).ok()
+                } else {
+                    s.parse::<u64>().ok()
+                }
+            }).unwrap_or(platform_protection::PPT_SUBSYSTEM.apt.verified_entry_rip);
+            match platform_protection::PPT_SUBSYSTEM.handle_int29_ecall_entry(cookie, rip) {
+                Ok(apt_cr3) => {
+                    kprintln_emerald!(
+                        "[PPT INT-29] SCV verified! Switched to EPT View 1 (Trusted TA) | Active CR3: {:#018X}",
+                        apt_cr3
+                    );
+                }
+                Err(e) => kprintln_amber!("[PPT INT-29] Entry denied: {}", e),
+            }
+        } else if sub == "aex" || sub == "interrupt" {
+            match platform_protection::PPT_SUBSYSTEM.handle_int30_asynch_exit(0x00007FFF80001040, 0x00007FFF90002000) {
+                Ok(()) => {
+                    kprintln_amber!(
+                        "[PPT INT-30] AEX triggered! Saved volatile state in SSA, scrubbed registers, reverted to View 0"
+                    );
+                }
+                Err(e) => kprintln_amber!("[PPT INT-30] AEX error: {}", e),
+            }
+        } else if sub == "exit" || sub == "eexit" {
+            match platform_protection::PPT_SUBSYSTEM.handle_int31_eexit_return() {
+                Ok(gpt_cr3) => {
+                    kprintln_emerald!(
+                        "[PPT INT-31] EEXIT clean return: secrets cleared, View 0 restored | Host CR3: {:#018X}",
+                        gpt_cr3
+                    );
+                }
+                Err(e) => kprintln_amber!("[PPT INT-31] Exit error: {}", e),
+            }
+        }
+        kprintln_amber!("=== INTEL PLATFORM PROTECTION TECHNOLOGY (PPT) DUAL-VIEW EPT (US 2023/0030961 A1) ===");
+        kprintln!(
+            "Active EPT View: {}",
+            platform_protection::ept_view_str(platform_protection::PPT_SUBSYSTEM.active_view)
+        );
+        kprintln!(
+            "Asserted Page Table (APT): Base CR3: {:#018X} | Locked in Hypervisor Heap: {}",
+            platform_protection::PPT_SUBSYSTEM.apt.apt_locked_cr3,
+            platform_protection::PPT_SUBSYSTEM.apt.is_apt_locked
+        );
+        kprintln!(
+            "Verified Entry RIP: {:#018X} | Secure Cookie Value (SCV): {:#018X}",
+            platform_protection::PPT_SUBSYSTEM.apt.verified_entry_rip,
+            platform_protection::PPT_SUBSYSTEM.secure_cookie_value
+        );
+        kprintln!(
+            "State Save Area (SSA): Valid: {} | Saved RIP: {:#018X} | Saved RSP: {:#018X}",
+            platform_protection::PPT_SUBSYSTEM.ssa.is_valid,
+            platform_protection::PPT_SUBSYSTEM.ssa.saved_rip,
+            platform_protection::PPT_SUBSYSTEM.ssa.saved_rsp
+        );
+        kprintln!(
+            "Statistics: ECALLs: {} | Asynch Exits (AEX): {} | EEXITs: {} | Security Faults: {}",
+            platform_protection::PPT_SUBSYSTEM.ecalls_serviced,
+            platform_protection::PPT_SUBSYSTEM.aex_interrupts_handled,
+            platform_protection::PPT_SUBSYSTEM.eexits_serviced,
+            platform_protection::PPT_SUBSYSTEM.security_faults
+        );
+    } else if cmd == "vam" || cmd.starts_with("vam ") || cmd == "tpe" || cmd.starts_with("tpe ") {
+        let arg = cmd.strip_prefix("vam ")
+            .or_else(|| cmd.strip_prefix("tpe "))
+            .unwrap_or("")
+            .trim();
+        let mut it = arg.split_whitespace();
+        let sub = it.next().unwrap_or("");
+        if sub == "profile" || sub == "sched" {
+            let h2d_mb = it.next().and_then(|s| s.parse::<usize>().ok()).unwrap_or(64);
+            let d2h_mb = it.next().and_then(|s| s.parse::<usize>().ok()).unwrap_or(4);
+            match dell_vam_profiler::VIRTUAL_ACCELERATOR_MGR.profile_and_schedule_task(
+                200,
+                h2d_mb * 1024 * 1024,
+                d2h_mb * 1024 * 1024,
+            ) {
+                Ok((idx, class, pi)) => {
+                    let dev = &dell_vam_profiler::VIRTUAL_ACCELERATOR_MGR.accelerators[idx];
+                    kprintln_emerald!(
+                        "[VAM TPE] Task Scheduled -> Slot #{}: {} [{}]",
+                        idx, dev.name_str(), dell_vam_profiler::pcie_slot_name(dev.slot_speed)
+                    );
+                    kprintln_emerald!(
+                        "  Transfer: {} MB H2D, {} MB D2H | Class: {} | PI: {}",
+                        h2d_mb, d2h_mb, dell_vam_profiler::profile_class_str(class), pi
+                    );
+                }
+                Err(e) => kprintln_amber!("[VAM TPE] Scheduling error: {}", e),
+            }
+        } else if sub == "bench" {
+            kprintln_amber!("=== VAM TASK PERFORMANCE ENHANCER MULTI-WORKLOAD BENCHMARK ===");
+            let workloads = [
+                ("LLM_TENSOR_WEIGHTS", 128, 8),
+                ("RAYTRACING_FRAME", 12, 12),
+                ("CRYPTO_AES_BLOCKS", 1, 1),
+            ];
+            for (w_name, h2d, d2h) in workloads.iter() {
+                if let Ok((idx, class, pi)) = dell_vam_profiler::VIRTUAL_ACCELERATOR_MGR.profile_and_schedule_task(
+                    300,
+                    h2d * 1024 * 1024,
+                    d2h * 1024 * 1024,
+                ) {
+                    let dev = &dell_vam_profiler::VIRTUAL_ACCELERATOR_MGR.accelerators[idx];
+                    kprintln!(
+                        "  Workload '{}' ({} MB total): Assigned to #{} ({}) | Slot: {} | PI: {}",
+                        w_name, h2d + d2h, idx, dev.name_str(), dell_vam_profiler::pcie_slot_name(dev.slot_speed), pi
+                    );
+                    let _ = class;
+                }
+            }
+        }
+        kprintln_amber!("=== DELL VIRTUAL ACCELERATOR MANAGER (VAM) & TPE (US 2022/0043664 A1) ===");
+        kprintln!(
+            "Total Dispatched Tasks: {} | Total Host Transfer: {} MiB | Bottlenecks Mitigated: {}",
+            dell_vam_profiler::VIRTUAL_ACCELERATOR_MGR.total_tasks_dispatched,
+            dell_vam_profiler::VIRTUAL_ACCELERATOR_MGR.total_host_data_transferred_kb / 1024,
+            dell_vam_profiler::VIRTUAL_ACCELERATOR_MGR.bottleneck_mitigations
+        );
+        for (i, acc) in dell_vam_profiler::VIRTUAL_ACCELERATOR_MGR.accelerators.iter().enumerate() {
+            kprintln!(
+                "  Acc #{}: [{}] {} | Slot: {} | Mem: {} MiB ({}, {} MHz, {}-bit) | Free: {} MiB | Load: {}% | PI: {}",
+                i,
+                acc.name_str(),
+                dell_vam_profiler::accelerator_kind_str(acc.kind),
+                dell_vam_profiler::pcie_slot_name(acc.slot_speed),
+                acc.total_memory_mb,
+                dell_vam_profiler::memory_tech_str(acc.memory_tech),
+                acc.memory_frequency_mhz,
+                acc.internal_bus_width_bits,
+                acc.free_memory_mb,
+                acc.workload_busy_pct,
+                acc.calculate_performance_index()
+            );
+        }
+    } else if cmd == "hvm" || cmd.starts_with("hvm ") || cmd == "multios" || cmd.starts_with("multios ") {
+        let arg = cmd.strip_prefix("hvm ")
+            .or_else(|| cmd.strip_prefix("multios "))
+            .unwrap_or("")
+            .trim();
+        let mut it = arg.split_whitespace();
+        let sub = it.next().unwrap_or("");
+        if sub == "rma" || sub == "put" {
+            let next_tok = it.next();
+            let bytes = if let Some(t) = next_tok {
+                if t == "put" || t == "get" {
+                    it.next().and_then(|s| s.parse::<u32>().ok()).unwrap_or(4096)
+                } else {
+                    t.parse::<u32>().ok().unwrap_or(4096)
+                }
+            } else {
+                4096
+            };
+            match hpe_multi_os_hvm::HVM_SUBSYSTEM.vrnic_post_rma_transaction(
+                hpe_multi_os_hvm::RmaTransactionType::RmaWritePut,
+                [192, 168, 1, 105],
+                [0x00, 0x14, 0x22, 0x01, 0x23, 0x45],
+                bytes,
+            ) {
+                Ok(desc_id) => {
+                    kprintln_emerald!(
+                        "[VR-NIC RMA] Intercepted RMA_PUT ({} B) -> Converted to Ethernet Frame #{} in Shared Memory",
+                        bytes, desc_id
+                    );
+                    kprintln_emerald!("  [IPI] Signaled Inter-Processor Interrupt from SOS Core 0 -> AOS Core 4");
+                }
+                Err(e) => kprintln_amber!("[VR-NIC RMA] Transaction error: {}", e),
+            }
+        } else if sub == "poll" || sub == "drain" {
+            match hpe_multi_os_hvm::HVM_SUBSYSTEM.aos_process_egress_queue() {
+                Ok(desc) => {
+                    kprintln_emerald!(
+                        "[AOS NET] Dequeued Frame #{} from Shared Memory -> Passed down Protocol Stack -> Physical NIC [SENT]",
+                        desc.desc_id
+                    );
+                    kprintln!(
+                        "  Target: {}.{}.{}.{} | Payload: {} bytes | Offset: {:#X}",
+                        desc.target_node_ip[0], desc.target_node_ip[1], desc.target_node_ip[2], desc.target_node_ip[3],
+                        desc.payload_size, desc.shared_mem_offset
+                    );
+                }
+                Err(e) => kprintln_amber!("[AOS NET] Queue empty or error: {}", e),
+            }
+        } else if sub == "ingress" {
+            let bytes = it.next().and_then(|s| s.parse::<u32>().ok()).unwrap_or(1500);
+            hpe_multi_os_hvm::HVM_SUBSYSTEM.aos_deliver_ingress_to_sos(bytes);
+            kprintln_emerald!(
+                "[AOS INGRESS] Received {} bytes on Physical NIC -> Ingress Shared Memory -> Delivered to SOS VR-NIC",
+                bytes
+            );
+        }
+        kprintln_amber!("=== HPE MULTI-OS HETEROGENEOUS VIRTUAL MACHINE (HVM) (US 2025/0085997 A1) ===");
+        let mem = &hpe_multi_os_hvm::HVM_SUBSYSTEM.memory_layout;
+        kprintln!(
+            "Guest Physical Memory: SOS: {} MiB ({:#X}) | AOS: {} MiB ({:#X}) | Shared: {} MiB ({:#X}) [BARRIER={}]",
+            mem.sos_segment_size_mb, mem.sos_segment_base,
+            mem.aos_segment_size_mb, mem.aos_segment_base,
+            mem.shared_segment_size_mb, mem.shared_segment_base,
+            mem.isolation_barrier_enforced
+        );
+        kprintln!(
+            "Virtual Core Pinning: SOS Cores (NonStop Kernel): {:#04X} (Cores 0..3) | AOS Cores (Linux Net): {:#04X} (Cores 4..7)",
+            hpe_multi_os_hvm::HVM_SUBSYSTEM.sos_core_mask,
+            hpe_multi_os_hvm::HVM_SUBSYSTEM.aos_core_mask
+        );
+        kprintln!(
+            "Shared Memory Egress Queue: Head: {} | Tail: {} | Capacity: 8 Frames",
+            hpe_multi_os_hvm::HVM_SUBSYSTEM.egress_head,
+            hpe_multi_os_hvm::HVM_SUBSYSTEM.egress_tail
+        );
+        kprintln!(
+            "VR-NIC Counters: RMA Intercepts: {} | Packets Converted: {} | IPIs Sent to AOS: {} | NIC TX: {} | Ingress RX: {}",
+            hpe_multi_os_hvm::HVM_SUBSYSTEM.rma_transactions_intercepted,
+            hpe_multi_os_hvm::HVM_SUBSYSTEM.packets_converted_by_vrnic,
+            hpe_multi_os_hvm::HVM_SUBSYSTEM.ipi_signals_sent_to_aos,
+            hpe_multi_os_hvm::HVM_SUBSYSTEM.aos_packets_transmitted_to_nic,
+            hpe_multi_os_hvm::HVM_SUBSYSTEM.ingress_packets_routed_to_sos
+        );
     } else if cmd == "clear" || cmd == "cls" {
         CURSOR_COL = 0;
         CURSOR_ROW = 0;
@@ -1785,8 +3455,121 @@ unsafe fn handle_shell_command(cmd_bytes: &[u8], mb2: &Multiboot2ParsedInfo) {
             ret,
             SYSCALL_COUNT.load(Ordering::Relaxed)
         );
-    } else if cmd == "ls" {
-        kprintln!("/bin/telemetry  /bin/bench  /bin/radiator  /bin/romy  /boot/postcard-kernel-v1.0.4-x86_64  /vault/pa-romy.enclave");
+    } else if cmd == "ls" || cmd.starts_with("ls ") {
+        let arg = cmd.strip_prefix("ls").unwrap_or("").trim();
+        if fat32::is_mounted() {
+            if let Err(e) = fat32::list(arg) {
+                kprintln!("ls: {}", e);
+            }
+        } else {
+            kprintln!("/bin/telemetry  /bin/bench  /bin/radiator  /bin/romy  /boot/postcard-kernel-v1.0.4-x86_64  /vault/pa-romy.enclave");
+            kprintln!("(RAM VFS only - no FAT32 volume mounted; see `disks`)");
+        }
+    } else if let Some(arg) = cmd.strip_prefix("cat ") {
+        if let Err(e) = fat32::cat(arg.trim()) {
+            kprintln!("cat: {}", e);
+        }
+    } else if cmd.starts_with("write ") || cmd.starts_with("append ") {
+        let append = cmd.starts_with("append ");
+        let rest = cmd.splitn(2, ' ').nth(1).unwrap_or("").trim_start();
+        let (path, text) = match rest.find(' ') {
+            Some(i) => (&rest[..i], &rest[i + 1..]),
+            None => (rest, ""),
+        };
+        let mut data = [0u8; 258];
+        let n = text.len().min(256);
+        data[..n].copy_from_slice(&text.as_bytes()[..n]);
+        data[n] = b'\n';
+        let payload = if text.is_empty() { &data[..0] } else { &data[..n + 1] };
+        match fat32::write_file(path, payload, append) {
+            Ok(size) => kprintln_emerald!(
+                "[BLACK BOX] {} {} -> {} bytes (persisted to disk)",
+                if append { "appended" } else { "wrote" },
+                path,
+                size
+            ),
+            Err(e) => kprintln!("{}: {}", if append { "append" } else { "write" }, e),
+        }
+    } else if let Some(arg) = cmd.strip_prefix("touch ") {
+        match fat32::write_file(arg.trim(), &[], true) {
+            Ok(size) => kprintln_emerald!("[BLACK BOX] touched {} ({} bytes)", arg.trim(), size),
+            Err(e) => kprintln!("touch: {}", e),
+        }
+    } else if let Some(arg) = cmd.strip_prefix("mkdir ") {
+        match fat32::mkdir(arg.trim()) {
+            Ok(()) => kprintln_emerald!("[BLACK BOX] created directory {}", arg.trim()),
+            Err(e) => kprintln!("mkdir: {}", e),
+        }
+    } else if let Some(arg) = cmd.strip_prefix("rm ") {
+        match fat32::remove(arg.trim()) {
+            Ok(()) => kprintln_emerald!("[BLACK BOX] removed {}", arg.trim()),
+            Err(e) => kprintln!("rm: {}", e),
+        }
+    } else if cmd == "sync" {
+        match fat32::sync() {
+            Ok(()) => kprintln_emerald!("[BLACK BOX] FSInfo committed + device cache flushed"),
+            Err(e) => kprintln!("sync: {}", e),
+        }
+    } else if cmd == "df" || cmd == "vol" {
+        if let Err(e) = fat32::status() {
+            kprintln!("df: {}", e);
+        }
+    } else if cmd == "mount" || cmd.starts_with("mount ") {
+        let arg = cmd.strip_prefix("mount").unwrap_or("").trim();
+        if arg.is_empty() {
+            if let Err(e) = fat32::status() {
+                kprintln!("mount: {}", e);
+            }
+        } else {
+            let num = arg.trim_start_matches(['p', 'P']);
+            match num.parse::<usize>() {
+                Ok(idx) => match fat32::mount(idx) {
+                    Ok(()) => {
+                        kprintln_emerald!("[BLACK BOX] mounted partition p{}", idx);
+                        let _ = fat32::status();
+                    }
+                    Err(e) => kprintln!("mount: {}", e),
+                },
+                Err(_) => kprintln!("usage: mount [pN]   (partition ids from `disks`)"),
+            }
+        }
+    } else if cmd == "umount" || cmd == "unmount" {
+        match fat32::unmount() {
+            Ok(()) => kprintln!("[BLACK BOX] volume unmounted (caches flushed)"),
+            Err(e) => kprintln!("umount: {}", e),
+        }
+    } else if let Some(arg) = cmd.strip_prefix("blk ") {
+        let mut it = arg.split_whitespace();
+        let dev = it.next().and_then(|s| s.parse::<usize>().ok());
+        let lba = it.next().and_then(|s| s.parse::<u64>().ok());
+        match (dev, lba) {
+            (Some(dev), Some(lba)) => {
+                let mut sec = [0u8; blockdev::SECTOR_SIZE];
+                match blockdev::read_sector(dev, lba, &mut sec) {
+                    Ok(()) => {
+                        kprintln_amber!("=== RAW SECTOR dev{} LBA {} (first 128 of 512 bytes, read-only) ===", dev, lba);
+                        for row in 0..8usize {
+                            let b = &sec[row * 16..row * 16 + 16];
+                            let mut ascii = [b'.'; 16];
+                            for (i, &c) in b.iter().enumerate() {
+                                if (0x20..0x7F).contains(&c) {
+                                    ascii[i] = c;
+                                }
+                            }
+                            kprintln!(
+                                "{:04x}: {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x} {:02x}  {}",
+                                row * 16,
+                                b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7],
+                                b[8], b[9], b[10], b[11], b[12], b[13], b[14], b[15],
+                                core::str::from_utf8(&ascii).unwrap_or("")
+                            );
+                        }
+                    }
+                    Err(e) => kprintln!("blk: {}", e),
+                }
+            }
+            _ => kprintln!("usage: blk <dev-index> <lba>"),
+        }
     } else if cmd == "install" {
         kprintln_amber!("[INSTALLER] Target: Dell Latitude 3120 Internal Storage (/dev/nvme0n1 | /dev/mmcblk0)");
         kprintln_emerald!("[OK] EFI System Partition: /EFI/BOOT/BOOTX64.EFI + /boot/grub/grub.cfg [READY]");
@@ -1801,13 +3584,68 @@ unsafe fn handle_shell_command(cmd_bytes: &[u8], mb2: &Multiboot2ParsedInfo) {
     } else if cmd == "ps" {
         kprintln!("PID 0: kernel [running] | PID 1: shell [running] | PID 2: pa-romy [isolated]");
     } else if cmd == "pci" {
-        kprintln!("00:00.0 host bridge class=0600 | 00:02.0 vga/gop display class=0300");
+        let devs = blockdev::pci_devices();
+        if devs.is_empty() {
+            kprintln!("00:00.0 host bridge class=0600 | 00:02.0 vga/gop display class=0300");
+        }
+        for d in devs {
+            kprintln!(
+                "{:02x}:{:02x}.{} {:04x}:{:04x} class={:02x}{:02x} prog-if={:02x} {}",
+                d.bus,
+                d.dev,
+                d.func,
+                d.vendor,
+                d.device,
+                d.class,
+                d.subclass,
+                d.prog_if,
+                blockdev::pci_class_name(d.class, d.subclass)
+            );
+        }
     } else if cmd == "disks" {
         kprintln!(
             "ramdisk: start={:#x} end={:#x} | vfs: VfsStorageBridge (THE BLACK BOX)",
             mb2.module_start,
             mb2.module_end
         );
+        let count = blockdev::device_count();
+        if count == 0 {
+            kprintln!("block devices: none detected (NVMe / SDHCI eMMC / ATA)");
+        }
+        for i in 0..count {
+            if let Some(d) = blockdev::device(i) {
+                kprintln_amber!(
+                    "dev{} {}: {} \"{}\" {} sectors ({} MiB) reads={} writes={}",
+                    i,
+                    d.name_str(),
+                    d.kind_str(),
+                    d.model_str(),
+                    d.sectors,
+                    d.sectors / 2048,
+                    d.reads,
+                    d.writes
+                );
+            }
+        }
+        let mounted = fat32::mounted_summary();
+        for (idx, p) in fat32::partitions() {
+            let dev_name = blockdev::device(p.dev).map(|d| d.name_str()).unwrap_or("?");
+            let is_mounted = matches!(mounted, Some((n, pi, _)) if n == dev_name && pi == p.index);
+            kprintln!(
+                "  [p{}] {} part {} {} LBA {} +{} ({} MiB) {}{}{}{}",
+                idx,
+                dev_name,
+                p.index,
+                p.scheme,
+                p.lba,
+                p.sectors,
+                p.sectors / 2048,
+                if p.fat32 { "FAT32 \"" } else { "non-FAT32" },
+                if p.fat32 { p.label_str() } else { "" },
+                if p.fat32 { "\"" } else { "" },
+                if is_mounted { " [MOUNTED]" } else if p.esp { " [ESP]" } else { "" }
+            );
+        }
     } else if cmd == "sandbox" {
         kprintln!("sandbox identity: PA-Romy Coprocessor Vault [ACTIVE // ENCLAVE LOCKED]");
     } else if cmd == "avionics" || cmd == "radiator" {

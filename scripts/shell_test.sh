@@ -88,6 +88,8 @@ qemu_cmd = [
     "-name", "Post Card OS Shell Test",
     "-machine", "pc",
     "-m", "256M",
+    "-net", "nic,model=e1000",
+    "-net", "user,net=10.0.2.0/24,host=10.0.2.2",
     "-display", "none",
     "-serial", "stdio",
     "-no-reboot"
@@ -187,17 +189,96 @@ try:
     print("Initial shell prompt reached.")
 
     test_commands = [
-        ("help", ["echo", "uptime", "ps", "disks", "vmx", "vmrun"]),
+        ("help", ["echo", "uptime", "ps", "disks", "vmx", "vmrun", "gui", "mouse"]),
         ("uptime", ["ticks)"]),
         ("mem", ["frames"]),
         ("ps", ["shell", "running"]),
         ("pci", ["class="]),
         ("disks", ["ramdisk:"]),
+        ("mouse", ["Mouse: X=", "Y="]),
+        ("routes", ["DYNAMIC DATAFLOW ROUTING", "Route #0", "Route #1", "Route #2", "Allocated"]),
+        ("usbc", ["USB TYPE-C DEVICE CONTROLLER", "Port 1:", "Port 2:"]),
+        ("sec", ["IOT & ENCLAVE SECURITY", "Security Tier:"]),
+        ("hsm", ["5G-SOFTHSM & BIOMETRIC VAULT", "Validation State: [AUTHENTICATED_GSSO]", "Hardware Vault Key:"]),
+        ("graph", ["GRAPH-BASED TRUST TOPOLOGY", "Avionics-HUD", "BlackBox-FAT32", "PA-Romy-Vault", "IoT-Sensor-Bus"]),
+        ("trust isolate 7", ["[TRUST GRAPH] Card #7 ISOLATED & quarantined"]),
+        ("trust release 7", ["[TRUST GRAPH] Card #7 quarantine released"]),
+        ("net", ["BARE-METAL GIGABIT ETHERNET", "MAC Address:", "Traffic:"]),
+        ("stream", ["[UDP 5173] Streamed flight telemetry packet to Studio"]),
+        ("flynet 0", ["[FLYNET] PAPER AIRPLANE STREAMED VIA UDP/IP", "CRC32:"]),
+        ("cxl", ["CXL & IPU RESOURCE POOLING", "Active Protocol:", "Pool:"]),
+        ("cxl arbitrate 300 100", ["[CXL] Protocol arbitrated", "CXL.mem (Direct Pool)"]),
+        ("scibuf", ["SCIBUF & SCISYNC HETEROGENEOUS ZERO-COPY", "Pitch Alignment=4096 B", "SciSync Fence:"]),
+        ("margin test 3 next", ["[LTSSM] Crosstalk Stress Test armed: Victim Lane #3", "GEN_NEXT (Near-End)"]),
+        ("margin reset", ["[LTSSM] All 8 physical lanes reset to Standard L0."]),
+        ("hud", ["SET-THEORY MULTI-USER HUD PERSONALIZATION", "Operator Preferred:", "Combined Layout Bitmask"]),
+        ("hud intersect", ["Combined Layout Bitmask (Mode: INTERSECTION)"]),
+        ("span", ["MULTI-HYPERVISOR VIRTUAL MACHINE", "Span-MHVM-Enclave", "Shared Footprint:"]),
+        ("span kick 2", ["[SPAN] Virtio kick on VCPU 2 -> kick_redirected_to_l1_source"]),
+        ("span ipi 0 2", ["[SPAN] Cross-L1 IPI from VCPU 0 to VCPU 2 -> cross_l1_ipi_forwarded"]),
+        ("span rebalance 3", ["[SPAN] Rebalanced VCPUs: 3 on L1_Source, 1 on L1_Target"]),
+        ("rootvmm", ["TRUSTED ROOT MODE HYPERVISOR & ROOT MODE VMM", "Component 1 (EFI Root Core): ACTIVE", "PA-Romy-VMM-Core"]),
+        ("rootvmm enter 2", ["[ROOT VMM] Module 2 -> promoted_to_root_mode"]),
+        ("rootvmm exit 2", ["[ROOT VMM] Module 2 -> de_privileged_to_non_root_mode"]),
+        ("rootvmm verify 1 0x00450000", ["[ROOT VMM] Target RIP 0x450000 verified inside Module 1 boundary [OK]"]),
+        ("rootvmm verify 1 0x00900000", ["[ROOT VMM] Target RIP 0x900000 OUT-OF-BOUNDS for Module 1 -> Blue-Pill Trapped!"]),
+        ("snvme", ["SMARTNIC EMULATED LOCAL STORAGE", "Emulated Controller: 'VMWR'", "Shared NIC Port: Port 0 (e1000)"]),
+        ("snvme read 0", ["[SMARTNIC] NVMe-oF Read LBA 0", "POSTCARD_OS_SMARTNIC_NVMEOF"]),
+        ("snvme write 100 HELLO_NVMEOF_WORLD", ["[SMARTNIC] NVMe-oF Write LBA 100", "Dispatched to Target SAN"]),
+        ("snvme target 10.0.2.102 4420", ["[SMARTNIC] Registered External Target #3"]),
+        ("hyos", ["HYBRID MULTI-OS & DUAL-FRAMEBUFFER ARCHITECTURE", "Primary Framebuffer:", "Secondary Framebuffer:", "Microsoft Resource Partitioning", "Intel Asymmetric Disk Virtualization"]),
+        ("dock", ["Docked to Desktop Smartdock!", "Secondary 1080p OS display activated"]),
+        ("undock", ["Undocked from Desktop Smartdock!", "standalone mobile handheld HUD"]),
+        ("pats 2048", ["DIRECT PHYSICAL ACCESS (vLBA == pLBA)", "Unrestricted Direct I/O"]),
+        ("pats 100", ["UNASSIGNED PARTITION (Pattern Sector Guard)", "DUMMY_ZERO_FILL", "BLOCKED_GUARD"]),
+        ("shrink 4096", ["Memory Shrink Successful: Primary OS shrunk to 4096 MiB", "Carved 12288 MiB for Secondary OS"]),
+        ("sva", ["DELL DUAL-ENDPOINT PCIe I/O ACCELERATOR", "Root Port 1 (HV): ACTIVE", "Root Port 2 (SVA): ACTIVE", "Endpoint 1 (Hypervisor Facing):", "Endpoint 2 (SVA Exclusive Pass-Through):", "Address Translator 256:", "DMA Engine 254:", "Private Device 260:"]),
+        ("sva activate", ["[DELL SVA] Activated Endpoint 1 via Endpoint 2", "Hypervisor hot-plug event recognized"]),
+        ("sva morph nic", ["[DELL SVA] Dynamic Personality Morphed to:", "Network Controller (PCI Class 0x02"]),
+        ("sva dma 0x20000 0x80000 4096", ["[DELL SVA] Zero-CPU DMA Transfer OK: 4096 B", "Host Physical A4"]),
+        ("sva priv write DELL_AERO_MISSION_TOKEN", ["[DELL SVA] Private Hidden Vault: Wrote 23 bytes exclusively via Endpoint 2"]),
+        ("sva priv read", ["DELL_AERO_MISSION_TOKEN", "Invisible to Hypervisor"]),
+        ("latehv", ["RUNTIME HYPERVISOR LATE-LAUNCH & STATE CAPTURE", "Launch Phase:", "NMI Inhibition:", "Captured CPU State: RIP=", "Captured APIC State:", "Discovered Topology:"]),
+        ("latehv trap", ["Handled trapped write to Local APIC MMIO page (0xFEE00000)", "Intercept emulated!"]),
+        ("latehv step", ["Late-launch state transition re-cycled: Root OS transparently virtualized!"]),
+        ("muse", ["INTEL MUSE MEDIATED-DEVICE IN USER SPACE", "MUSE Transport: /dev/muse", "Instance #0: Mdev ID:", "User Parent: GVA Map:", "Fast-Path Ring:", "Decoupled IRQ:"]),
+        ("muse fast 0 1024", ["Packet (1024 B) enqueued into Ring #0", "Direct DPDK Zero-Copy Bypass"]),
+        ("muse slow 0 2 0xDEADBEEF", ["Relayed CSR[2]=0xDEADBEEF via /dev/muse FUSE daemon to User Software Parent Device"]),
+        ("coreiso", ["AMD HYPERVISOR-BASED PROCESSOR CORE ISOLATION", "Core Topology: Total Cores: 8", "Host OS Cores: 4", "Sequestered Cores: 4", "Shared Queue Fabric:", "Inter-Core Signaling:"]),
+        ("coreiso dispatch 2048 4096", ["Work Unit #2048 (4096 B) successfully scheduled & executed on Sequestered Core #4!"]),
+        ("coreiso pf 4", ["Sequestered Core #4 #PF VMEXIT handled: Fault Queue DPC updated page tables and resumed via CMD_RESUME!"]),
+        ("vgpu", ["INTEL MULTI-SLICE vGPU & MASTER/SLAVE MMU", "Master MMU: IOMMU Direct Requests:", "Slave MMU #1:", "20-bit PASID vGPU Scaling", "QoS Time Slice: 16 ms", "GPU Slices: 4 Slices Active"]),
+        ("vgpu tx 0 0x00080000", ["Memory Transaction GVA 0x00080000 -> HPA 0x80080000", "Slave MMU #1"]),
+        ("vgpu bounds 0 0x10000000", ["Offset 0x10000000 inside vGPU #0 HBM aperture [ALLOWED]"]),
+        ("vgpu bounds 0 0x30000000", ["Offset 0x30000000 OUT-OF-BOUNDS for vGPU #0 HBM aperture [TRAPPED_BREACH]"]),
+        ("sriov", ["VMWARE SR-IOV PF-VF MAILBOX DYNAMIC INTERCEPT VIRTUALIZER", "Current State:", "Callback Registered: true", "Statistics: Messages Intercepted:"]),
+        ("sriov trigger 0x8042", ["[SR-IOV] VF Request 0x8042 -> Intercept Emulated Response: 0x52498042 (Checkpointed)"]),
+        ("sriov error", ["Injected hardware device error: all MMIO intercepted, guest writes dropped.", "ERROR_ISOLATION"]),
+        ("sriov reset", ["Device recovered: direct pass-through restored, EPT intercepts removed.", "DIRECT_PASS_THROUGH"]),
+        ("vmsec", ["VMWARE VM DATA SECURITY & NESTED ROOT PARTITIONS", "Apparent Storage (Guest Truncated):", "State Partition: Encrypted Vault Key Armed: true", "PRIMARY_VDISK", "STATE_DATA"]),
+        ("vmsec io 500 16 read", ["[VMSEC IO] Guest vLBA 500 (+16 blk, read) -> Translated Physical pLBA 2548 [BOUNDS OK]"]),
+        ("vmsec io 2000000 10 write", ["Translation fault: vmsec_err: guest I/O violates truncated partition bounds", "Blocked Bounds Violations: 1"]),
+        ("vmsec snap 1712000000", ["[VMSEC] Created array snapshot #2 (Epoch 1712000000)"]),
+        ("ppt", ["INTEL PLATFORM PROTECTION TECHNOLOGY (PPT) DUAL-VIEW EPT", "Active EPT View: VIEW_0_UNTRUSTED", "Asserted Page Table (APT): Base CR3:", "Verified Entry RIP: 0x00007FFF80001000", "Secure Cookie Value (SCV): 0x5050545F53454356"]),
+        ("ppt ecall 0x5050545F53454356 0x7FFF80001000", ["[PPT INT-29] SCV verified! Switched to EPT View 1 (Trusted TA)", "Active EPT View: VIEW_1_TRUSTED"]),
+        ("ppt aex", ["[PPT INT-30] AEX triggered! Saved volatile state in SSA", "Active EPT View: VIEW_0_UNTRUSTED", "State Save Area (SSA): Valid: true"]),
+        ("ppt exit", ["Exit error: ppt_err: EEXIT called outside View 1 Trusted state"]),
+        ("ppt ecall 0x5050545F53454356 0x7FFF80001000", ["[PPT INT-29] SCV verified! Switched to EPT View 1 (Trusted TA)"]),
+        ("ppt exit", ["[PPT INT-31] EEXIT clean return: secrets cleared, View 0 restored", "Active EPT View: VIEW_0_UNTRUSTED"]),
+        ("vam", ["DELL VIRTUAL ACCELERATOR MANAGER (VAM) & TPE", "Total Dispatched Tasks:", "dell-aero-hbm3", "PCIe Gen5 x16 (63.0 GB/s)", "dell-rtx-gddr6", "dell-fpga-hbm2", "dell-qcom-sec"]),
+        ("vam profile 64 4", ["[VAM TPE] Task Scheduled -> Slot #0: dell-aero-hbm3", "HIGH_BANDWIDTH_INTENSIVE"]),
+        ("vam bench", ["VAM TASK PERFORMANCE ENHANCER MULTI-WORKLOAD BENCHMARK", "LLM_TENSOR_WEIGHTS", "RAYTRACING_FRAME", "CRYPTO_AES_BLOCKS"]),
+        ("hvm", ["HPE MULTI-OS HETEROGENEOUS VIRTUAL MACHINE (HVM)", "Guest Physical Memory: SOS:", "BARRIER=true", "Virtual Core Pinning: SOS Cores", "VR-NIC Counters: RMA Intercepts:"]),
+        ("hvm rma put 8192", ["[VR-NIC RMA] Intercepted RMA_PUT (8192 B) -> Converted to Ethernet Frame", "Signaled Inter-Processor Interrupt from SOS Core 0 -> AOS Core 4"]),
+        ("hvm poll", ["[AOS NET] Dequeued Frame", "Passed down Protocol Stack -> Physical NIC [SENT]"]),
+        ("hvm ingress 1400", ["[AOS INGRESS] Received 1400 bytes on Physical NIC -> Ingress Shared Memory -> Delivered to SOS VR-NIC"]),
         ("sandbox", ["sandbox identity:"]),
         ("cpu", ["CPU Vendor:", "Features: VMX="]),
         ("vmx", ["VMX Root Active:", "VMXON Region PA:"]),
         ("vms", ["pa-romy-vault", "radiator-rtos"]),
         ("vmrun 0", ["[VM-EXIT] VM 0 [pa-romy-vault]"]),
+        ("fly 0", ["[PAPER AIRPLANE]", "CAPSULE HANDOVER FRAME SERIALIZED", "CRC32:"]),
+        ("land 0", ["[PAPER AIRPLANE]", "CAPSULE HANDOVER LANDED & RESUMED", "State: Resumed"]),
         ("elf bench", ["Magic: 7F 45 4C 46", "EM_X86_64"]),
         ("exec telemetry", ["[CATAPULT] Loaded ELF64", "[EXEC OK]"]),
         ("sched", ["PREEMPTIVE / ROUND-ROBIN SCHEDULER", "PID 4: [telemetry]"]),
@@ -216,6 +297,20 @@ try:
             if expected not in output:
                 raise AssertionError(f"Command '{cmd}' output missing expected substring '{expected}'. Output:\n{output}")
         print(f"  [OK] '{cmd}' returned expected output.")
+
+    # Test full GUI Desktop mode entry and exit via 'q'
+    print("Executing GUI Desktop launch and exit round-trip...")
+    log_write("spatial> gui\n")
+    proc.stdin.write(b"gui\n")
+    proc.stdin.flush()
+    time.sleep(0.5)
+    log_write("q\n")
+    proc.stdin.write(b"q\n")
+    proc.stdin.flush()
+    gui_out = read_until("spatial> ", timeout=10.0)
+    if "Returned from Spatial Card Deck" not in gui_out:
+        raise AssertionError(f"Expected GUI return message. Output:\n{gui_out}")
+    print("  [OK] GUI Desktop entered and cleanly returned to shell.")
 
     print("\nAll shell tests passed successfully!")
 

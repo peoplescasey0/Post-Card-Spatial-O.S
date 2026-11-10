@@ -4,31 +4,29 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-# Ensure cargo is in PATH
-if ! command -v cargo &>/dev/null; then
-    if [[ -f "${HOME}/.cargo/env" ]]; then
-        # shellcheck source=/dev/null
-        source "${HOME}/.cargo/env"
-    fi
-fi
-
-if ! command -v cargo &>/dev/null; then
-    echo "Error: cargo not found in PATH or ~/.cargo/env" >&2
-    exit 1
-fi
-
-export CARGO_INCREMENTAL=0
-
-# Ensure kernel is built via build_kernel.sh
+# Ensure kernel exists; build if missing and cargo is available
 KERNEL_ELF="${REPO_ROOT}/target/x86_64-unknown-none/release/postcard-minimal-kernel"
-"${SCRIPT_DIR}/build_kernel.sh"
+
+if [[ ! -f "${KERNEL_ELF}" ]]; then
+    if ! command -v cargo &>/dev/null; then
+        if [[ -f "${HOME}/.cargo/env" ]]; then
+            source "${HOME}/.cargo/env"
+        fi
+    fi
+    if ! command -v cargo &>/dev/null; then
+        echo "Error: ${KERNEL_ELF} missing and cargo not found" >&2
+        exit 1
+    fi
+    export CARGO_INCREMENTAL=0
+    "${SCRIPT_DIR}/build_kernel.sh"
+fi
 
 if [[ ! -f "${KERNEL_ELF}" ]]; then
     echo "Error: Kernel ELF not found at ${KERNEL_ELF}" >&2
     exit 1
 fi
 
-# Verify Multiboot2 header
+# Verify Multiboot2 heade
 if command -v grub-file &>/dev/null; then
     if grub-file --is-x86-multiboot2 "${KERNEL_ELF}"; then
         echo "Multiboot2 header verified for ${KERNEL_ELF}"
