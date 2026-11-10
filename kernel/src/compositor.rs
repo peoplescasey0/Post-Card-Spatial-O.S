@@ -518,6 +518,10 @@ unsafe fn render_card_content(fb: &GopFramebufferInfo, card: &SpatialCard) {
             draw_str(fb, bx, by, "Ericsson: 6DoF Hetero-Audio (JP'910)", COLOR_AMBER, None);
             by += 14;
             draw_str(fb, bx, by, "AstoundSound: 4D Trajectory/Bypass (US'896)", COLOR_CYAN, None);
+            by += 14;
+            draw_str(fb, bx, by, "RBC VCR: Clean Room Enclave (US'636)", COLOR_EMERALD, None);
+            by += 14;
+            draw_str(fb, bx, by, "UCF FS/M: DAX Dual-Pad/Audit (US'894)", COLOR_AMBER, None);
         }
         _ => {}
     }

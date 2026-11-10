@@ -829,6 +829,8 @@ mod langhe_mesh;
 mod soundhound_spatial;
 mod ericsson_hetero_audio;
 mod genaudio_astoundsound;
+mod rbc_vcr_enclave;
+mod ucf_dax_fsm;
 
 // ============================================================================
 // 5. HARDWARE VT-x (VMXON / VMCS) & MICRO-VM CAPSULE HYPERVISOR ENGINE
@@ -1796,6 +1798,14 @@ pub unsafe extern "C" fn _start(multiboot2_info_addr: usize) -> ! {
     genaudio_astoundsound::init_astoundsound_subsystem();
     kprintln_emerald!("[ok] GenAudio AstoundSound: 4D trajectory, Doppler pitch & %-center bypass armed (US 9,154,896 B2)");
 
+    // Initialize RBC Virtual Clean Room (VCR) Multiparty Enclave Subsystem (US 12,210,636 B2)
+    unsafe { rbc_vcr_enclave::init_vcr_subsystem(); }
+    kprintln_emerald!("[ok] RBC VCR: Multiparty Clean Room, Attestation Quote & NE Custodian armed (US 12,210,636 B2)");
+
+    // Initialize UCF Dual FS/M Byte-Addressable Persistent Memory & DAX Auditing (US 11,398,894 B2)
+    unsafe { ucf_dax_fsm::init_dax_fsm_subsystem(); }
+    kprintln_emerald!("[ok] UCF Dual FS/M: DAX Dual-Pad XOR Encryption & GlobalBuffer Audit armed (US 11,398,894 B2)");
+
     kprintln_emerald!("Spatial OS is ALIVE!");
 
     // 4. Interactive bare-metal shell (accepts input from BOTH PS/2 Keyboard and Serial COM1)
@@ -1861,7 +1871,7 @@ unsafe fn handle_shell_command(cmd_bytes: &[u8], mb2: &Multiboot2ParsedInfo) {
         return;
     }
     if cmd == "help" {
-        kprintln!("commands: help, gui, deck, mouse, routes, route [bind/free], usbc, sec, hsm [auth/lock], trust/graph, span [kick/ipi/rebalance], rootvmm [enter/exit/verify], snvme [read/write/target], hyos, dock, undock, pats [lba], shrink [mb], sva [activate/morph/dma/priv], latehv [step/trap], muse [fast/slow/mdev], coreiso [dispatch/pf], vgpu [tx/bounds], sriov [trigger/error/reset], vmsec [io/snap/bounds], ppt [ecall/aex/exit], vam [profile/bench], hvm [rma/poll/info], wasm [test/fuel/status], maxq [opt/step/tdp], shm [pub/sub], arais [level/flush], astguard [test], kwasm [test/call], mddma [burst/5d], dtree [eval/test], panda [test/parse], fortinet [test/eos], nudt [test/rule], snic [test/rule], afxdp [test/bind], mesh [test/arp], soundhound [test/move], ericsson [test/move], astound [test/bypass], cxl, scibuf, ltssm/margin, hud, net, stream, flynet [slot], fly [0..3], land, cpu, vmx, vms, vmrun, spawn, exec, elf, sched, syscall, ls, echo, uptime, mem, ps, pci, disks, sandbox, avionics, radiator, install, halt, reboot");
+        kprintln!("commands: help, gui, deck, mouse, routes, route [bind/free], usbc, sec, hsm [auth/lock], trust/graph, span [kick/ipi/rebalance], rootvmm [enter/exit/verify], snvme [read/write/target], hyos, dock, undock, pats [lba], shrink [mb], sva [activate/morph/dma/priv], latehv [step/trap], muse [fast/slow/mdev], coreiso [dispatch/pf], vgpu [tx/bounds], sriov [trigger/error/reset], vmsec [io/snap/bounds], ppt [ecall/aex/exit], vam [profile/bench], hvm [rma/poll/info], wasm [test/fuel/status], maxq [opt/step/tdp], shm [pub/sub], arais [level/flush], astguard [test], kwasm [test/call], mddma [burst/5d], dtree [eval/test], panda [test/parse], fortinet [test/eos], nudt [test/rule], snic [test/rule], afxdp [test/bind], mesh [test/arp], soundhound [test/move], ericsson [test/move], astound [test/bypass], vcr [test/query], fsm [test/audit], cxl, scibuf, ltssm/margin, hud, net, stream, flynet [slot], fly [0..3], land, cpu, vmx, vms, vmrun, spawn, exec, elf, sched, syscall, ls, echo, uptime, mem, ps, pci, disks, sandbox, avionics, radiator, install, halt, reboot");
         kprintln!("storage:  disks, mount [pN], umount, df, ls [dir], cat <file>, write <file> <text>, append <file> <text>, touch <file>, mkdir <dir>, rm <path>, sync, blk <dev> <lba>");
     } else if cmd == "gui" || cmd == "deck" || cmd == "desktop" {
         if let Some(ref fb) = GOP_FB {
@@ -4166,6 +4176,104 @@ unsafe fn handle_shell_command(cmd_bytes: &[u8], mb2: &Multiboot2ParsedInfo) {
             genaudio_astoundsound::ASTOUNDSOUND_ENGINE.total_4d_frames.load(core::sync::atomic::Ordering::Relaxed),
             genaudio_astoundsound::ASTOUNDSOUND_ENGINE.doppler_shifts_calculated.load(core::sync::atomic::Ordering::Relaxed),
             genaudio_astoundsound::ASTOUNDSOUND_ENGINE.center_bypass_frames.load(core::sync::atomic::Ordering::Relaxed)
+        );
+    } else if cmd == "vcr" || cmd.starts_with("vcr ") {
+        let arg = if cmd.len() > 3 { &cmd[4..] } else { "" };
+        let mut it = arg.split_whitespace();
+        let sub = it.next().unwrap_or("");
+        if sub == "test" {
+            let (ok, msg) = unsafe { rbc_vcr_enclave::VCR_ENGINE.test_vcr_platform() };
+            if ok {
+                kprintln_emerald!("[VCR PASS] RBC Virtual Clean Room: {}", msg);
+            } else {
+                kprintln_amber!("[VCR FAIL] RBC Virtual Clean Room: {}", msg);
+            }
+        } else if sub == "query" {
+            let partner = it.next().and_then(|s| s.parse::<u32>().ok()).unwrap_or(200);
+            let qtype = it.next().unwrap_or("COUNT");
+            let col = it.next().unwrap_or("SKU_LIST");
+            let count = it.next().and_then(|s| s.parse::<u32>().ok()).unwrap_or(65);
+            let (approved, rows, reason) = unsafe {
+                rbc_vcr_enclave::VCR_ENGINE.execute_custodian_query(partner, qtype, col, count)
+            };
+            if approved {
+                kprintln_emerald!("[VCR CUSTODIAN] Approved! Rows Matched: {} (RAM wiped)", rows);
+            } else {
+                kprintln_amber!("[VCR CUSTODIAN] Blocked: {}", reason);
+            }
+        }
+        let (att_str, wipes, appr, rej) = unsafe {
+            let att = match rbc_vcr_enclave::VCR_ENGINE.attestation {
+                rbc_vcr_enclave::EnclaveAttestationState::AttestationVerified => "Verified (SVN >= 2)",
+                rbc_vcr_enclave::EnclaveAttestationState::QuoteGenerated => "Quote Generated",
+                rbc_vcr_enclave::EnclaveAttestationState::AttestationFailed => "Failed",
+                rbc_vcr_enclave::EnclaveAttestationState::Uninitialized => "Uninitialized",
+            };
+            (
+                att,
+                rbc_vcr_enclave::VCR_ENGINE.memory_wipe_counter.load(Ordering::Relaxed),
+                rbc_vcr_enclave::VCR_ENGINE.queries_approved.load(Ordering::Relaxed),
+                rbc_vcr_enclave::VCR_ENGINE.queries_rejected.load(Ordering::Relaxed),
+            )
+        };
+        kprintln_amber!("=== RBC VIRTUAL CLEAN ROOM MULTIPARTY ENCLAVE (US 12,210,636 B2) ===");
+        kprintln!(
+            "Attestation State: {} | Bilateral Policy: Active (Bank #100 <-> Grocery #200)",
+            att_str
+        );
+        kprintln!(
+            "Data Custodian Columns: 8 Protected Columns | Non-Exportable (NE): CRD_NO, USER_ID, SSN_HASH"
+        );
+        kprintln!(
+            "Privacy Rules: Min Aggregate Threshold: 50 | Ephemeral Channel: ECDH+HKDF AES-256"
+        );
+        kprintln!(
+            "Execution Telemetry: Queries Approved: {} | Queries Rejected: {} | Post-Query RAM Wipes: {}",
+            appr, rej, wipes
+        );
+    } else if cmd == "fsm" || cmd.starts_with("fsm ") {
+        let arg = if cmd.len() > 3 { &cmd[4..] } else { "" };
+        let mut it = arg.split_whitespace();
+        let sub = it.next().unwrap_or("");
+        if sub == "test" {
+            let (ok, msg) = unsafe { ucf_dax_fsm::DAX_FSM_ENGINE.test_dax_fsm_subsystem() };
+            if ok {
+                kprintln_emerald!("[FSM PASS] UCF Dual FS/M DAX: {}", msg);
+            } else {
+                kprintln_amber!("[FSM FAIL] UCF Dual FS/M DAX: {}", msg);
+            }
+        } else if sub == "audit" {
+            let head = unsafe { ucf_dax_fsm::DAX_FSM_ENGINE.audit_head };
+            kprintln_amber!("=== UCF FS/M GLOBALBUFFER CIRCULAR AUDIT TRAIL (Total: {}) ===", head);
+            let limit = if head > 4 { 4 } else { head };
+            for i in 0..limit {
+                let rec = unsafe { ucf_dax_fsm::DAX_FSM_ENGINE.global_buffer[i % ucf_dax_fsm::UCF_AUDIT_BUFFER_SIZE] };
+                kprintln!(
+                    "  [Entry {}] Core: {} | PID: {} | FileID: {} | Addr: {:#x} | Type: {} | Len: {} B",
+                    i, rec.core_id, rec.pid, rec.file_id, rec.phys_addr,
+                    if rec.is_write { "WRITE" } else { "READ" },
+                    rec.byte_len
+                );
+            }
+        }
+        let (reads, writes, m_switches, ecc_rec) = unsafe {
+            (
+                ucf_dax_fsm::DAX_FSM_ENGINE.total_dax_reads.load(Ordering::Relaxed),
+                ucf_dax_fsm::DAX_FSM_ENGINE.total_dax_writes.load(Ordering::Relaxed),
+                ucf_dax_fsm::DAX_FSM_ENGINE.total_mode_switches.load(Ordering::Relaxed),
+                ucf_dax_fsm::DAX_FSM_ENGINE.total_ecc_recoveries.load(Ordering::Relaxed),
+            )
+        };
+        kprintln_amber!("=== UCF DUAL FS/M BYTE-ADDRESSABLE DAX CONTROLLER (US 11,398,894 B2) ===");
+        kprintln!(
+            "Hardware Tables: CPT: 4 Cores mapped | OTT: 8 Secure Tunnels | Pages: 16 Monotonic Blocks"
+        );
+        kprintln!(
+            "Line-Rate Crypto: Dual-Pad XOR (Ciphertext = Data ^ Pad_proc ^ Pad_file) | ECC Parity: Active"
+        );
+        kprintln!(
+            "Execution Telemetry: DAX Reads: {} | DAX Writes: {} | Mode Switches: {} | ECC Recoveries: {}",
+            reads, writes, m_switches, ecc_rec
         );
     } else if cmd == "clear" || cmd == "cls" {
         CURSOR_COL = 0;
