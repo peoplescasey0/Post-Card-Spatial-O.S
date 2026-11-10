@@ -813,6 +813,7 @@ mod platform_protection;
 mod dell_vam_profiler;
 mod hpe_multi_os_hvm;
 mod wasm_engine;
+mod nvidia_maxq_estimator;
 
 // ============================================================================
 // 5. HARDWARE VT-x (VMXON / VMCS) & MICRO-VM CAPSULE HYPERVISOR ENGINE
@@ -1716,6 +1717,10 @@ pub unsafe extern "C" fn _start(multiboot2_info_addr: usize) -> ! {
     wasm_engine::init_wasm_subsystem();
     kprintln_emerald!("[ok] Embedded WebAssembly: \\0asm v1 parser, 64 KiB linear memory & fuel metering armed");
 
+    // Initialize NVIDIA Max-Q Optimal Operating Point & Shared TDP Estimator (CN 111143174 B)
+    nvidia_maxq_estimator::init_nvidia_maxq_subsystem();
+    kprintln_emerald!("[ok] NVIDIA Max-Q: AI-driven V-F curve estimator & shared TDP dynamic power balancing armed (CN 111143174 B)");
+
     kprintln_emerald!("Spatial OS is ALIVE!");
 
     // 4. Interactive bare-metal shell (accepts input from BOTH PS/2 Keyboard and Serial COM1)
@@ -1781,7 +1786,7 @@ unsafe fn handle_shell_command(cmd_bytes: &[u8], mb2: &Multiboot2ParsedInfo) {
         return;
     }
     if cmd == "help" {
-        kprintln!("commands: help, gui, deck, mouse, routes, route [bind/free], usbc, sec, hsm [auth/lock], trust/graph, span [kick/ipi/rebalance], rootvmm [enter/exit/verify], snvme [read/write/target], hyos, dock, undock, pats [lba], shrink [mb], sva [activate/morph/dma/priv], latehv [step/trap], muse [fast/slow/mdev], coreiso [dispatch/pf], vgpu [tx/bounds], sriov [trigger/error/reset], vmsec [io/snap/bounds], ppt [ecall/aex/exit], vam [profile/bench], hvm [rma/poll/info], wasm [test/fuel/status], cxl, scibuf, ltssm/margin, hud, net, stream, flynet [slot], fly [0..3], land, cpu, vmx, vms, vmrun, spawn, exec, elf, sched, syscall, ls, echo, uptime, mem, ps, pci, disks, sandbox, avionics, radiator, install, halt, reboot");
+        kprintln!("commands: help, gui, deck, mouse, routes, route [bind/free], usbc, sec, hsm [auth/lock], trust/graph, span [kick/ipi/rebalance], rootvmm [enter/exit/verify], snvme [read/write/target], hyos, dock, undock, pats [lba], shrink [mb], sva [activate/morph/dma/priv], latehv [step/trap], muse [fast/slow/mdev], coreiso [dispatch/pf], vgpu [tx/bounds], sriov [trigger/error/reset], vmsec [io/snap/bounds], ppt [ecall/aex/exit], vam [profile/bench], hvm [rma/poll/info], wasm [test/fuel/status], maxq [opt/step/tdp], cxl, scibuf, ltssm/margin, hud, net, stream, flynet [slot], fly [0..3], land, cpu, vmx, vms, vmrun, spawn, exec, elf, sched, syscall, ls, echo, uptime, mem, ps, pci, disks, sandbox, avionics, radiator, install, halt, reboot");
         kprintln!("storage:  disks, mount [pN], umount, df, ls [dir], cat <file>, write <file> <text>, append <file> <text>, touch <file>, mkdir <dir>, rm <path>, sync, blk <dev> <lba>");
     } else if cmd == "gui" || cmd == "deck" || cmd == "desktop" {
         if let Some(ref fb) = GOP_FB {
@@ -3322,6 +3327,68 @@ unsafe fn handle_shell_command(cmd_bytes: &[u8], mb2: &Multiboot2ParsedInfo) {
             wasm_engine::WASM_RUNTIME.fuel_remaining,
             wasm_engine::WASM_RUNTIME.fuel_consumed,
             wasm_engine::WASM_RUNTIME.instructions_executed
+        );
+    } else if cmd == "maxq" || cmd.starts_with("maxq ") || cmd == "nvpow" || cmd.starts_with("nvpow ") {
+        let arg = cmd.strip_prefix("maxq ")
+            .or_else(|| cmd.strip_prefix("nvpow "))
+            .unwrap_or("")
+            .trim();
+        let mut it = arg.split_whitespace();
+        let sub = it.next().unwrap_or("");
+        if sub == "opt" || sub == "mode" {
+            let mode_str = it.next().unwrap_or("eff");
+            if mode_str == "perf" || mode_str == "fps" {
+                nvidia_maxq_estimator::NVIDIA_MAXQ_ESTIMATOR.mode = nvidia_maxq_estimator::OptimizationMode::MaximizePerformance;
+                kprintln_emerald!("[MAX-Q] Optimization Mode switched to: MAX_PERFORMANCE (Max FPS within TDP)");
+            } else if mode_str == "pow" || mode_str == "power" {
+                nvidia_maxq_estimator::NVIDIA_MAXQ_ESTIMATOR.mode = nvidia_maxq_estimator::OptimizationMode::MinimizePower;
+                kprintln_emerald!("[MAX-Q] Optimization Mode switched to: MIN_POWER (Minimize power for target FPS)");
+            } else {
+                nvidia_maxq_estimator::NVIDIA_MAXQ_ESTIMATOR.mode = nvidia_maxq_estimator::OptimizationMode::MaximizeEfficiency;
+                kprintln_emerald!("[MAX-Q] Optimization Mode switched to: MAX_EFFICIENCY (Tangent dPerf/dPower slope)");
+            }
+        } else if sub == "tdp" || sub == "power" {
+            let watts = it.next().and_then(|s| s.parse::<u32>().ok()).unwrap_or(80);
+            nvidia_maxq_estimator::NVIDIA_MAXQ_ESTIMATOR.shared_tdp_limit_w = watts;
+            kprintln_emerald!("[MAX-Q] Shared TDP constraint set to {} Watts", watts);
+        } else if sub == "step" || sub == "eval" {
+            let mem_bound = it.next().map(|s| s == "mem" || s == "dram" || s == "true").unwrap_or(false);
+            let (pt, reason) = nvidia_maxq_estimator::NVIDIA_MAXQ_ESTIMATOR.step_optimization_cycle(mem_bound);
+            kprintln_emerald!(
+                "[MAX-Q OPTIMAL POINT] GPU: {} MHz @ {} mV | DRAM: {} MHz @ {} mV",
+                pt.gpu_freq_mhz, pt.gpu_voltage_mv, pt.dram_freq_mhz, pt.dram_voltage_mv
+            );
+            kprintln!(
+                "  Predicted Output: {} FPS | Predicted Draw: {} Watts (TDP: {}W) | Reason: {}",
+                pt.predicted_fps, pt.predicted_total_power_w,
+                nvidia_maxq_estimator::NVIDIA_MAXQ_ESTIMATOR.shared_tdp_limit_w,
+                reason
+            );
+        }
+        kprintln_amber!("=== NVIDIA MAX-Q OPTIMAL OPERATING POINT ESTIMATOR (CN 111143174 B) ===");
+        kprintln!(
+            "Active Mode: {} | State: {}",
+            nvidia_maxq_estimator::opt_mode_str(nvidia_maxq_estimator::NVIDIA_MAXQ_ESTIMATOR.mode),
+            nvidia_maxq_estimator::state_str(nvidia_maxq_estimator::NVIDIA_MAXQ_ESTIMATOR.state)
+        );
+        let cur = &nvidia_maxq_estimator::NVIDIA_MAXQ_ESTIMATOR.current_point;
+        kprintln!(
+            "Current V-F State: GPU: {} MHz ({} mV) | DRAM: {} MHz ({} mV) | Est: {} FPS @ {} W",
+            cur.gpu_freq_mhz, cur.gpu_voltage_mv, cur.dram_freq_mhz, cur.dram_voltage_mv,
+            cur.predicted_fps, cur.predicted_total_power_w
+        );
+        kprintln!(
+            "Telemetry & Budget: Shared TDP: {} W | Target: {} FPS | Efficiency Slope Threshold: {}.{}x",
+            nvidia_maxq_estimator::NVIDIA_MAXQ_ESTIMATOR.shared_tdp_limit_w,
+            nvidia_maxq_estimator::NVIDIA_MAXQ_ESTIMATOR.target_fps,
+            nvidia_maxq_estimator::NVIDIA_MAXQ_ESTIMATOR.min_efficiency_slope / 100,
+            nvidia_maxq_estimator::NVIDIA_MAXQ_ESTIMATOR.min_efficiency_slope % 100
+        );
+        kprintln!(
+            "Control Counters: Total V-F Updates: {} | Power Violations Prevented: {} | Bottleneck Clock Caps: {}",
+            nvidia_maxq_estimator::NVIDIA_MAXQ_ESTIMATOR.total_vf_switches,
+            nvidia_maxq_estimator::NVIDIA_MAXQ_ESTIMATOR.power_budget_violations_prevented,
+            nvidia_maxq_estimator::NVIDIA_MAXQ_ESTIMATOR.clock_caps_applied_for_bottlenecks
         );
     } else if cmd == "clear" || cmd == "cls" {
         CURSOR_COL = 0;
