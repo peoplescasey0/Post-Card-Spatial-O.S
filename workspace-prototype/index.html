@@ -213,6 +213,10 @@
                 <span class="profile-action-icon" aria-hidden="true">💎</span>
                 <span><strong>Commercial Editions &amp; Marketplace</strong><small>Pro, Enterprise, AI Butler &amp; Add-On DLCs</small></span>
               </button>
+              <button class="profile-action" id="profile-restore-option" type="button">
+                <span class="profile-action-icon" aria-hidden="true">🔑</span>
+                <span><strong>Restore account &amp; purchases</strong><small>Recover license key, tier, profile &amp; add-ons</small></span>
+              </button>
               <button class="profile-action" id="profile-edit-option" type="button">
                 <span class="profile-action-icon" aria-hidden="true">✎</span>
                 <span><strong>Edit local profile</strong><small>Name and initials on this device</small></span>
@@ -827,10 +831,78 @@
           <p class="profile-field-hint" id="profile-initials-hint">Use one or two letters. They appear in the room header.</p>
           <p class="profile-form-error" id="profile-edit-error" role="status" aria-live="polite"></p>
           <div class="dialog-actions">
+            <button class="dialog-cancel" id="profile-edit-restore-btn" type="button" data-open-restore-account>🔑 Restore Account…</button>
             <button class="dialog-cancel" id="cancel-profile-edit" type="button">Cancel</button>
             <button class="dialog-send" type="submit">Save local profile</button>
           </div>
         </form>
+      </dialog>
+
+      <dialog class="share-dialog profile-dialog restore-account-dialog" id="restore-account-dialog" aria-labelledby="restore-account-title">
+        <div class="restore-account-panel">
+          <div class="dialog-kicker">ACCOUNT VAULT · LICENSE &amp; ENTITLEMENT RECOVERY</div>
+          <h2 id="restore-account-title">Restore Account &amp; Purchases.</h2>
+          <p class="dialog-description">Recover your Pro or Enterprise subscription tier, license key, AI Butler co-pilot, modular DLC add-ons, and local operator profile on this machine.</p>
+
+          <div class="restore-account-summary" aria-label="Current account status">
+            <div class="restore-summary-row">
+              <span class="restore-summary-label">ACTIVE PROFILE</span>
+              <strong id="restore-status-profile">Local profile (C)</strong>
+            </div>
+            <div class="restore-summary-row">
+              <span class="restore-summary-label">ACTIVE EDITION TIER</span>
+              <strong id="restore-status-tier" class="restore-tier-pill">COMMUNITY</strong>
+            </div>
+            <div class="restore-summary-row">
+              <span class="restore-summary-label">SAVED LICENSE KEY</span>
+              <span class="restore-key-group">
+                <code id="restore-current-key">No license key stored on this device</code>
+                <button class="restore-mini-btn" id="restore-copy-key-btn" type="button" title="Copy your license key to clipboard">Copy Key</button>
+              </span>
+            </div>
+          </div>
+
+          <form id="restore-license-form" class="restore-section" novalidate>
+            <label for="restore-license-input">1 · RESTORE BY LICENSE KEY OR STRIPE CHECKOUT SESSION ID</label>
+            <div class="restore-input-row">
+              <input
+                id="restore-license-input"
+                name="licenseOrSession"
+                type="text"
+                maxlength="256"
+                autocomplete="off"
+                placeholder="pcos-a1b2c3d4... or cs_live_... / cs_test_..."
+              />
+              <button class="dialog-send" id="restore-license-submit" type="submit">🔑 Restore License</button>
+            </div>
+            <p class="profile-field-hint">Enter your unguessable <code>pcos-...</code> license key or Stripe <code>cs_...</code> checkout session ID to re-activate your tier.</p>
+          </form>
+
+          <div class="restore-section">
+            <label>2 · 1-CLICK DEVICE ACCOUNT SYNC &amp; SNAPSHOT BACKUP</label>
+            <div class="restore-actions-grid">
+              <button class="dialog-cancel restore-action-card" id="restore-resync-btn" type="button">
+                <strong>↻ Re-Sync Saved Account</strong>
+                <small>Re-verify stored license key, restore DLCs &amp; recover binned cards</small>
+              </button>
+              <button class="dialog-cancel restore-action-card" id="restore-export-btn" type="button">
+                <strong>⬇ Export Account Backup (.json)</strong>
+                <small>Save profile, license key, DLC entitlements &amp; notes to a file</small>
+              </button>
+              <button class="dialog-cancel restore-action-card" id="restore-import-btn" type="button">
+                <strong>⬆ Import Account Backup (.json)</strong>
+                <small>Restore profile, license key, AI Butler &amp; add-ons from backup</small>
+              </button>
+              <input id="restore-import-input" type="file" accept=".json,application/json" hidden />
+            </div>
+          </div>
+
+          <p class="restore-account-status" id="restore-account-status" role="status" aria-live="polite"></p>
+
+          <div class="dialog-actions">
+            <button class="dialog-send" id="close-restore-account" type="button">Done / Close</button>
+          </div>
+        </div>
       </dialog>
 
       <dialog class="share-dialog profile-dialog profile-about-dialog" id="profile-about-dialog" aria-labelledby="profile-about-title">
@@ -901,9 +973,14 @@
           <h2 id="editions-title">Editions, Licensing &amp; Add-On Marketplace.</h2>
           <p class="dialog-description">Deploy Post Card Spatial OS under the developer model, an air-gapped enterprise appliance, an AI Butler co-pilot subscription, or modular micro-DLC card slots.</p>
 
-          <div class="billing-toggle" role="group" aria-label="Billing interval">
-            <button type="button" class="billing-opt active" data-interval="month">Monthly</button>
-            <button type="button" class="billing-opt" data-interval="year">Yearly <small>2 months free</small></button>
+          <div class="editions-toolbar-row">
+            <div class="billing-toggle" role="group" aria-label="Billing interval">
+              <button type="button" class="billing-opt active" data-interval="month">Monthly</button>
+              <button type="button" class="billing-opt" data-interval="year">Yearly <small>2 months free</small></button>
+            </div>
+            <button class="dialog-cancel restore-account-trigger" id="editions-restore-top-btn" type="button" data-open-restore-account>
+              🔑 Restore Account / License
+            </button>
           </div>
 
           <div class="editions-grid">
@@ -1016,7 +1093,10 @@
 
           <div class="dialog-actions editions-footer">
             <span class="active-tier-status">ACTIVE TIER: <strong id="editions-active-tier-display">COMMUNITY</strong></span>
-            <button class="dialog-send" value="close">Done / Close</button>
+            <div class="editions-footer-actions">
+              <button class="dialog-cancel restore-account-trigger" id="editions-restore-btn" type="button" data-open-restore-account>🔑 Restore Account</button>
+              <button class="dialog-send" value="close">Done / Close</button>
+            </div>
           </div>
         </form>
       </dialog>

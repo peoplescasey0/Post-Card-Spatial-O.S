@@ -187,13 +187,21 @@ try:
     print("Initial shell prompt reached.")
 
     test_commands = [
-        ("help", ["echo", "uptime", "ps", "disks"]),
+        ("help", ["echo", "uptime", "ps", "disks", "vmx", "vmrun"]),
         ("uptime", ["ticks)"]),
         ("mem", ["frames"]),
         ("ps", ["shell", "running"]),
         ("pci", ["class="]),
         ("disks", ["ramdisk:"]),
         ("sandbox", ["sandbox identity:"]),
+        ("cpu", ["CPU Vendor:", "Features: VMX="]),
+        ("vmx", ["VMX Root Active:", "VMXON Region PA:"]),
+        ("vms", ["pa-romy-vault", "radiator-rtos"]),
+        ("vmrun 0", ["[VM-EXIT] VM 0 [pa-romy-vault]"]),
+        ("elf bench", ["Magic: 7F 45 4C 46", "EM_X86_64"]),
+        ("exec telemetry", ["[CATAPULT] Loaded ELF64", "[EXEC OK]"]),
+        ("sched", ["PREEMPTIVE / ROUND-ROBIN SCHEDULER", "PID 4: [telemetry]"]),
+        ("syscall 39", ["[SYSCALL] nr=39 dispatched"]),
         ("foobar_unknown_cmd", ["unknown command: foobar_unknown_cmd"])
     ]
 

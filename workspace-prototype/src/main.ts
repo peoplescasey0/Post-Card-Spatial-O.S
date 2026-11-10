@@ -7156,22 +7156,86 @@ function initCommercialEditions(): void {
   const editionsDialog = document.getElementById("editions-dialog") as HTMLDialogElement | null;
   const editionsBtn = document.getElementById("editions-button");
   const profileEditionsOpt = document.getElementById("profile-editions-option");
+  const profileRestoreOpt = document.getElementById("profile-restore-option");
+  const restoreDialog = document.getElementById("restore-account-dialog") as HTMLDialogElement | null;
+  const restoreLicenseForm = document.getElementById("restore-license-form") as HTMLFormElement | null;
+  const restoreLicenseInput = document.getElementById("restore-license-input") as HTMLInputElement | null;
+  const restoreStatusEl = document.getElementById("restore-account-status");
+  const restoreStatusProfile = document.getElementById("restore-status-profile");
+  const restoreStatusTier = document.getElementById("restore-status-tier");
+  const restoreCurrentKey = document.getElementById("restore-current-key");
+  const restoreCopyKeyBtn = document.getElementById("restore-copy-key-btn");
+  const restoreResyncBtn = document.getElementById("restore-resync-btn");
+  const restoreExportBtn = document.getElementById("restore-export-btn");
+  const restoreImportBtn = document.getElementById("restore-import-btn");
+  const restoreImportInput = document.getElementById("restore-import-input") as HTMLInputElement | null;
+  const closeRestoreBtn = document.getElementById("close-restore-account");
   const selectedTierElement = document.getElementById("selected-tier");
   const activeTierDisplay = document.getElementById("editions-active-tier-display");
+  const aiButlerSubBtn = document.getElementById("btn-subscribe-ai");
+
+  const LICENSE_KEY_STORAGE = "postcard_license_key";
+  const AI_BUTLER_STORAGE = "postcard_ai_butler_active";
+  let currentActiveTier: MonetizationTier = "COMMUNITY";
+
+  const setRestoreStatusMessage = (message: string, tone: "info" | "ok" | "error" = "info") => {
+    if (!restoreStatusEl) return;
+    restoreStatusEl.textContent = message;
+    restoreStatusEl.dataset.tone = tone;
+  };
+
+  const refreshRestoreAccountSummary = () => {
+    if (restoreStatusProfile) {
+      restoreStatusProfile.textContent = `${localProfile.name} (${localProfile.initials})`;
+    }
+    const aiActive = localStorage.getItem(AI_BUTLER_STORAGE) === "true";
+    if (restoreStatusTier) {
+      restoreStatusTier.textContent = aiActive
+        ? `${currentActiveTier} + AI BUTLER`
+        : currentActiveTier;
+    }
+    const savedKey = localStorage.getItem(LICENSE_KEY_STORAGE) ?? "";
+    if (restoreCurrentKey) {
+      restoreCurrentKey.textContent = savedKey || "No license key stored on this device";
+    }
+    if (restoreCopyKeyBtn) {
+      (restoreCopyKeyBtn as HTMLButtonElement).disabled = !savedKey;
+    }
+  };
 
   const openEditions = () => {
     if (editionsDialog && !editionsDialog.open) editionsDialog.showModal();
     if (profilePopoverElement) profilePopoverElement.hidden = true;
   };
 
+  const openRestoreAccountDialog = () => {
+    if (profilePopoverElement) profilePopoverElement.hidden = true;
+    if (profileEditDialogElement.open) profileEditDialogElement.close();
+    if (editionsDialog?.open) editionsDialog.close();
+    refreshRestoreAccountSummary();
+    setRestoreStatusMessage("");
+    if (restoreDialog && !restoreDialog.open) {
+      restoreDialog.showModal();
+      restoreLicenseInput?.focus();
+    }
+  };
+
   editionsBtn?.addEventListener("click", openEditions);
   profileEditionsOpt?.addEventListener("click", openEditions);
   selectedTierElement?.addEventListener("click", openEditions);
+  profileRestoreOpt?.addEventListener("click", openRestoreAccountDialog);
+  document.querySelectorAll<HTMLElement>("[data-open-restore-account]").forEach((btn) => {
+    btn.addEventListener("click", openRestoreAccountDialog);
+  });
+  closeRestoreBtn?.addEventListener("click", () => restoreDialog?.close());
+  restoreDialog?.addEventListener("click", (event) => {
+    if (event.target === restoreDialog) restoreDialog.close();
+  });
 
   // The tier is never trusted from browser storage (it is user-editable). It always
   // comes from the licensing service, using the license key saved on this machine.
-  const LICENSE_KEY_STORAGE = "postcard_license_key";
   const applyTier = (tier: MonetizationTier, announce = false) => {
+    currentActiveTier = tier;
     if (selectedTierElement) {
       selectedTierElement.textContent = tier;
       selectedTierElement.className = `tier-badge tier-badge-${tier.toLowerCase()}`;
@@ -7183,7 +7247,15 @@ function initCommercialEditions(): void {
     const cardKey = tier === "PRO" ? "pro" : tier === "ENTERPRISE" ? "enterprise" : "";
     const activeCard = cardKey ? document.getElementById(`edition-card-${cardKey}`) : null;
     if (activeCard) activeCard.classList.add("active-edition");
+    refreshRestoreAccountSummary();
     if (announce) showToast(`Post Card ${tier} is active. Thank you!`);
+  };
+
+  const applyAiButlerState = (active: boolean) => {
+    if (!aiButlerSubBtn) return;
+    aiButlerSubBtn.textContent = active ? "AI BUTLER ACTIVE ✓" : "Activate AI Butler Sub";
+    aiButlerSubBtn.classList.toggle("active", active);
+    refreshRestoreAccountSummary();
   };
 
   const postLicense = async (payload: Record<string, string>) => {
@@ -7200,16 +7272,28 @@ function initCommercialEditions(): void {
       ? (data.tier.toUpperCase() as MonetizationTier)
       : "COMMUNITY";
 
-  const verifyStoredLicense = async () => {
+  const verifyStoredLicense = async (): Promise<boolean> => {
     const key = localStorage.getItem(LICENSE_KEY_STORAGE);
-    if (!key) return;
+    if (!key) {
+      refreshRestoreAccountSummary();
+      return false;
+    }
     try {
       const { status, data } = await postLicense({ licenseKey: key });
-      if (status === 404) localStorage.removeItem(LICENSE_KEY_STORAGE);
-      else if (status === 200 && data.ok) applyTier(tierFromLicense(data));
+      if (status === 404) {
+        localStorage.removeItem(LICENSE_KEY_STORAGE);
+        applyTier("COMMUNITY");
+        return false;
+      }
+      if (status === 200 && data.ok) {
+        applyTier(tierFromLicense(data));
+        return true;
+      }
     } catch {
       // Offline: stay on Community until the licensing service is reachable.
     }
+    refreshRestoreAccountSummary();
+    return false;
   };
 
   const claimCheckout = async (sessionId: string) => {
@@ -7232,7 +7316,202 @@ function initCommercialEditions(): void {
   };
 
   applyTier("COMMUNITY");
+  if (localStorage.getItem(AI_BUTLER_STORAGE) === "true") {
+    applyAiButlerState(true);
+  }
   void verifyStoredLicense();
+
+  // --- Restore Account Handlers ---
+  restoreCopyKeyBtn?.addEventListener("click", async () => {
+    const savedKey = localStorage.getItem(LICENSE_KEY_STORAGE);
+    if (!savedKey) {
+      setRestoreStatusMessage("No license key is stored on this device yet.", "info");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(savedKey);
+      setRestoreStatusMessage("✓ Copied license key to clipboard.", "ok");
+      showToast("🔑 License key copied to clipboard.");
+    } catch {
+      setRestoreStatusMessage(`License key: ${savedKey}`, "info");
+    }
+  });
+
+  restoreLicenseForm?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const raw = restoreLicenseInput?.value.trim() ?? "";
+    if (!raw) {
+      setRestoreStatusMessage("Enter a license key (pcos-...) or Stripe session ID (cs_...) to restore.", "error");
+      restoreLicenseInput?.focus();
+      return;
+    }
+    setRestoreStatusMessage("Contacting licensing service to verify and restore your account…", "info");
+    try {
+      const payload: Record<string, string> =
+        raw.startsWith("cs_") || raw.startsWith("sim_")
+          ? { sessionId: raw }
+          : { licenseKey: raw };
+      const { status, data } = await postLicense(payload);
+      if (status === 200 && data.ok) {
+        const resolvedKey = typeof data.licenseKey === "string" && data.licenseKey ? data.licenseKey : raw;
+        if (resolvedKey.startsWith("pcos-")) {
+          localStorage.setItem(LICENSE_KEY_STORAGE, resolvedKey);
+        }
+        const restoredTier = tierFromLicense(data);
+        applyTier(restoredTier, true);
+        if (restoreLicenseInput) restoreLicenseInput.value = "";
+        setRestoreStatusMessage(
+          `✓ Account restored! Active tier: ${restoredTier} (${String(data.status ?? "active").toUpperCase()}).`,
+          "ok",
+        );
+      } else if (status === 202) {
+        setRestoreStatusMessage(
+          "⏳ Purchase session found — payment confirmation is still syncing. Please retry in a few seconds.",
+          "info",
+        );
+      } else {
+        setRestoreStatusMessage(
+          data.error ?? "No active license matched that key or session ID. Check the value and try again.",
+          "error",
+        );
+      }
+    } catch (error) {
+      setRestoreStatusMessage(
+        error instanceof Error ? error.message : "Could not reach the licensing service.",
+        "error",
+      );
+    }
+  });
+
+  restoreResyncBtn?.addEventListener("click", async () => {
+    setRestoreStatusMessage("Re-syncing device profile, saved license key, DLC modules & workspace cards…", "info");
+    localProfile = readLocalProfile();
+    renderLocalProfile();
+
+    // Restore DLC toggles from storage
+    document.querySelectorAll<HTMLButtonElement>("[data-dlc]").forEach((btn) => {
+      if (btn.disabled) return;
+      const dlcKey = btn.dataset.dlc!;
+      const stored = localStorage.getItem(`postcard_dlc_${dlcKey}`);
+      const isInstalled = stored !== null ? stored === "true" : true;
+      localStorage.setItem(`postcard_dlc_${dlcKey}`, String(isInstalled));
+      btn.classList.toggle("active", isInstalled);
+      btn.textContent = isInstalled ? "ACTIVE" : "INSTALL";
+    });
+
+    // Restore AI Butler state
+    const aiSaved = localStorage.getItem(AI_BUTLER_STORAGE) === "true";
+    applyAiButlerState(aiSaved);
+
+    // Restore any binned cards back into the active room
+    let restoredCardsCount = 0;
+    for (const binnedId of [...binnedCards.keys()]) {
+      restoreCardFromBin(binnedId);
+      restoredCardsCount += 1;
+    }
+
+    const licenseVerified = await verifyStoredLicense();
+    refreshRestoreAccountSummary();
+    const summaryParts = [
+      `Profile: ${localProfile.name}`,
+      `Tier: ${currentActiveTier}`,
+      licenseVerified ? "License verified ✓" : "Community license",
+      ...(restoredCardsCount > 0 ? [`Restored ${restoredCardsCount} binned card(s)`] : []),
+    ];
+    const msg = `✓ Account re-synced (${summaryParts.join(" · ")}).`;
+    setRestoreStatusMessage(msg, "ok");
+    showToast(msg);
+  });
+
+  restoreExportBtn?.addEventListener("click", () => {
+    const dlcState: Record<string, boolean> = {};
+    document.querySelectorAll<HTMLButtonElement>("[data-dlc]").forEach((btn) => {
+      const key = btn.dataset.dlc;
+      if (key) dlcState[key] = btn.classList.contains("active");
+    });
+    const snapshot = {
+      schema: "postcard.os.account-backup.v1",
+      exportedAt: new Date().toISOString(),
+      profile: localProfile,
+      licenseKey: localStorage.getItem(LICENSE_KEY_STORAGE) || null,
+      aiButlerActive: localStorage.getItem(AI_BUTLER_STORAGE) === "true",
+      dlc: dlcState,
+      reduceMotion: reduceMotionOptIn,
+      manualNotes: manualCustomNotes?.value ?? "",
+    };
+    downloadTextFile(
+      "postcard-account-backup.json",
+      JSON.stringify(snapshot, null, 2),
+      "application/json",
+    );
+    setRestoreStatusMessage("✓ Downloaded postcard-account-backup.json.", "ok");
+    showToast("⬇ Exported portable Account Backup (postcard-account-backup.json).");
+  });
+
+  restoreImportBtn?.addEventListener("click", () => {
+    restoreImportInput?.click();
+  });
+
+  restoreImportInput?.addEventListener("change", async () => {
+    const file = restoreImportInput.files?.[0];
+    restoreImportInput.value = "";
+    if (!file) return;
+    try {
+      const rawText = await file.text();
+      const parsed = JSON.parse(rawText) as Record<string, unknown>;
+      if (!parsed || typeof parsed !== "object") {
+        throw new Error("Invalid backup file format.");
+      }
+      if (parsed.profile && typeof parsed.profile === "object") {
+        const prof = parsed.profile as { name?: unknown; initials?: unknown };
+        const name = typeof prof.name === "string" ? prof.name.trim().slice(0, 40) : "";
+        const initials = typeof prof.initials === "string" ? prof.initials.trim().toLocaleUpperCase() : "";
+        if (name) {
+          localProfile = {
+            name,
+            initials: /^\p{L}{1,2}$/u.test(initials) ? initials : localProfile.initials,
+          };
+          localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(localProfile));
+          renderLocalProfile();
+        }
+      }
+      if (typeof parsed.aiButlerActive === "boolean") {
+        localStorage.setItem(AI_BUTLER_STORAGE, String(parsed.aiButlerActive));
+        applyAiButlerState(parsed.aiButlerActive);
+      }
+      if (parsed.dlc && typeof parsed.dlc === "object") {
+        const dlcMap = parsed.dlc as Record<string, unknown>;
+        document.querySelectorAll<HTMLButtonElement>("[data-dlc]").forEach((btn) => {
+          const dlcKey = btn.dataset.dlc;
+          if (dlcKey && typeof dlcMap[dlcKey] === "boolean") {
+            const active = Boolean(dlcMap[dlcKey]);
+            localStorage.setItem(`postcard_dlc_${dlcKey}`, String(active));
+            btn.classList.toggle("active", active);
+            btn.textContent = active ? "ACTIVE" : "INSTALL";
+          }
+        });
+      }
+      if (typeof parsed.manualNotes === "string" && manualCustomNotes) {
+        manualCustomNotes.value = parsed.manualNotes;
+        localStorage.setItem(MANUAL_NOTES_STORAGE_KEY, parsed.manualNotes);
+      }
+      if (typeof parsed.licenseKey === "string" && parsed.licenseKey.trim()) {
+        localStorage.setItem(LICENSE_KEY_STORAGE, parsed.licenseKey.trim());
+        await verifyStoredLicense();
+      }
+      refreshRestoreAccountSummary();
+      setRestoreStatusMessage(
+        `✓ Restored account backup for ${localProfile.name} (${currentActiveTier}).`,
+        "ok",
+      );
+      showToast(`⬆ Account & preferences restored for ${localProfile.name}!`);
+    } catch (error) {
+      setRestoreStatusMessage(
+        error instanceof Error ? `Import failed: ${error.message}` : "Could not parse backup file.",
+        "error",
+      );
+    }
+  });
 
   const returned = new URLSearchParams(window.location.search);
   const returnedSession = returned.get("session_id");
@@ -7256,8 +7535,8 @@ function initCommercialEditions(): void {
       if (tier === "PRO" || tier === "ENTERPRISE") {
         void startStripeCheckout(tier);
       } else if (tier === "AI_BUTLER") {
-        btn.textContent = "AI BUTLER ACTIVE ✓";
-        btn.classList.add("active");
+        localStorage.setItem(AI_BUTLER_STORAGE, "true");
+        applyAiButlerState(true);
         showToast("✦ AI Butler & Automation Co-Pilot Activated with 100% Local Privacy!");
         if (butlerBubble?.hidden) butlerSay(butlerGreeting(butlerContext()), 10000);
       }
