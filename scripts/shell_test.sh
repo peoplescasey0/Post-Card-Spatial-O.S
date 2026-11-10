@@ -313,6 +313,8 @@ try:
         ("soundhound test", ["[SOUNDHOUND PASS] Differential Spatial Test: SoundHound differential spatial rendering verified"]),
         ("ericsson", ["ERICSSON SPATIALLY HETEROGENEOUS 6DoF AUDIO ENGINE (JP 2022-515910 A)", "Listener Virtual Coordinates:", "Optimization Telemetry:"]),
         ("ericsson test", ["[ERICSSON PASS] 6DoF Hetero-Audio Dynamics: Ericsson 6DoF heterogeneous audio verified"]),
+        ("astound", ["GENAUDIO ASTOUNDSOUND 4D SPATIALIZATION ENGINE (US 9,154,896 B2)", "4D Trajectory State:", "%-Center Bypass:"]),
+        ("astound test", ["[ASTOUND PASS] AstoundSound 4D Engine: AstoundSound 4D engine verified"]),
         ("sandbox", ["sandbox identity:"]),
         ("cpu", ["CPU Vendor:", "Features: VMX="]),
         ("vmx", ["VMX Root Active:", "VMXON Region PA:"]),

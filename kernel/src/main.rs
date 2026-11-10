@@ -828,6 +828,7 @@ mod cas_afxdp;
 mod langhe_mesh;
 mod soundhound_spatial;
 mod ericsson_hetero_audio;
+mod genaudio_astoundsound;
 
 // ============================================================================
 // 5. HARDWARE VT-x (VMXON / VMCS) & MICRO-VM CAPSULE HYPERVISOR ENGINE
@@ -1791,6 +1792,10 @@ pub unsafe extern "C" fn _start(multiboot2_info_addr: usize) -> ! {
     ericsson_hetero_audio::init_ericsson_subsystem();
     kprintln_emerald!("[ok] Ericsson Hetero-Audio: 6DoF M/S remix matrix, anti-collapse & symmetry armed (JP 2022-515910 A)");
 
+    // Initialize GenAudio AstoundSound 4D Spatialization & %-Center Bypass (US 9,154,896 B2)
+    genaudio_astoundsound::init_astoundsound_subsystem();
+    kprintln_emerald!("[ok] GenAudio AstoundSound: 4D trajectory, Doppler pitch & %-center bypass armed (US 9,154,896 B2)");
+
     kprintln_emerald!("Spatial OS is ALIVE!");
 
     // 4. Interactive bare-metal shell (accepts input from BOTH PS/2 Keyboard and Serial COM1)
@@ -1856,7 +1861,7 @@ unsafe fn handle_shell_command(cmd_bytes: &[u8], mb2: &Multiboot2ParsedInfo) {
         return;
     }
     if cmd == "help" {
-        kprintln!("commands: help, gui, deck, mouse, routes, route [bind/free], usbc, sec, hsm [auth/lock], trust/graph, span [kick/ipi/rebalance], rootvmm [enter/exit/verify], snvme [read/write/target], hyos, dock, undock, pats [lba], shrink [mb], sva [activate/morph/dma/priv], latehv [step/trap], muse [fast/slow/mdev], coreiso [dispatch/pf], vgpu [tx/bounds], sriov [trigger/error/reset], vmsec [io/snap/bounds], ppt [ecall/aex/exit], vam [profile/bench], hvm [rma/poll/info], wasm [test/fuel/status], maxq [opt/step/tdp], shm [pub/sub], arais [level/flush], astguard [test], kwasm [test/call], mddma [burst/5d], dtree [eval/test], panda [test/parse], fortinet [test/eos], nudt [test/rule], snic [test/rule], afxdp [test/bind], mesh [test/arp], soundhound [test/move], ericsson [test/move], cxl, scibuf, ltssm/margin, hud, net, stream, flynet [slot], fly [0..3], land, cpu, vmx, vms, vmrun, spawn, exec, elf, sched, syscall, ls, echo, uptime, mem, ps, pci, disks, sandbox, avionics, radiator, install, halt, reboot");
+        kprintln!("commands: help, gui, deck, mouse, routes, route [bind/free], usbc, sec, hsm [auth/lock], trust/graph, span [kick/ipi/rebalance], rootvmm [enter/exit/verify], snvme [read/write/target], hyos, dock, undock, pats [lba], shrink [mb], sva [activate/morph/dma/priv], latehv [step/trap], muse [fast/slow/mdev], coreiso [dispatch/pf], vgpu [tx/bounds], sriov [trigger/error/reset], vmsec [io/snap/bounds], ppt [ecall/aex/exit], vam [profile/bench], hvm [rma/poll/info], wasm [test/fuel/status], maxq [opt/step/tdp], shm [pub/sub], arais [level/flush], astguard [test], kwasm [test/call], mddma [burst/5d], dtree [eval/test], panda [test/parse], fortinet [test/eos], nudt [test/rule], snic [test/rule], afxdp [test/bind], mesh [test/arp], soundhound [test/move], ericsson [test/move], astound [test/bypass], cxl, scibuf, ltssm/margin, hud, net, stream, flynet [slot], fly [0..3], land, cpu, vmx, vms, vmrun, spawn, exec, elf, sched, syscall, ls, echo, uptime, mem, ps, pci, disks, sandbox, avionics, radiator, install, halt, reboot");
         kprintln!("storage:  disks, mount [pN], umount, df, ls [dir], cat <file>, write <file> <text>, append <file> <text>, touch <file>, mkdir <dir>, rm <path>, sync, blk <dev> <lba>");
     } else if cmd == "gui" || cmd == "deck" || cmd == "desktop" {
         if let Some(ref fb) = GOP_FB {
@@ -4106,6 +4111,62 @@ unsafe fn handle_shell_command(cmd_bytes: &[u8], mb2: &Multiboot2ParsedInfo) {
                 );
             }
         }
+    } else if cmd == "astound" || cmd.starts_with("astound ") {
+        let arg = if cmd.len() > 7 { &cmd[8..] } else { "" };
+        let mut it = arg.split_whitespace();
+        let sub = it.next().unwrap_or("");
+        if sub == "test" {
+            let (ok, msg) = genaudio_astoundsound::ASTOUNDSOUND_ENGINE.test_astoundsound_engine();
+            if ok {
+                kprintln_emerald!("[ASTOUND PASS] AstoundSound 4D Engine: {}", msg);
+            } else {
+                kprintln_amber!("[ASTOUND FAIL] AstoundSound 4D Engine: {}", msg);
+            }
+        } else if sub == "bypass" {
+            let pct = it.next().and_then(|s| s.parse::<u32>().ok()).unwrap_or(70);
+            genaudio_astoundsound::ASTOUNDSOUND_ENGINE.center_bypass.center_concentration_pct = if pct > 100 { 100 } else { pct };
+            kprintln_emerald!("[ASTOUND] Center Concentration Set: {}% (Mid-Side %-Center Bypass)", pct);
+        } else if sub == "flyby" {
+            let speed = it.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(12000);
+            genaudio_astoundsound::ASTOUNDSOUND_ENGINE.update_4d_trajectory(16, speed);
+            kprintln_emerald!(
+                "[ASTOUND] 4D Motion Fly-by Updated: Speed={} cm/s -> Doppler Pitch Shift: {}%",
+                speed,
+                genaudio_astoundsound::ASTOUNDSOUND_ENGINE.doppler_pitch_ratio_pct
+            );
+        }
+        kprintln_amber!("=== GENAUDIO ASTOUNDSOUND 4D SPATIALIZATION ENGINE (US 9,154,896 B2) ===");
+        kprintln!(
+            "4D Trajectory State: Pos=({},{},{}) cm | Timestamp: {} ms | Active Curve: {:?}",
+            genaudio_astoundsound::ASTOUNDSOUND_ENGINE.current_pos.x,
+            genaudio_astoundsound::ASTOUNDSOUND_ENGINE.current_pos.y,
+            genaudio_astoundsound::ASTOUNDSOUND_ENGINE.current_pos.z,
+            genaudio_astoundsound::ASTOUNDSOUND_ENGINE.current_pos.timestamp_ms,
+            match genaudio_astoundsound::ASTOUNDSOUND_ENGINE.active_trajectory {
+                genaudio_astoundsound::MotionTrajectoryType::FlyByLinear => "FlyByLinear",
+                genaudio_astoundsound::MotionTrajectoryType::OrbitalSpatial => "OrbitalSpatial",
+                genaudio_astoundsound::MotionTrajectoryType::ElevationSpiral => "ElevationSpiral",
+                genaudio_astoundsound::MotionTrajectoryType::StationaryDeck => "StationaryDeck",
+            }
+        );
+        kprintln!(
+            "Acoustic Dynamics: Velocity: {} cm/s | Doppler Pitch Shift: {}% | Schroeder All-Pass Lattice: {} stages",
+            genaudio_astoundsound::ASTOUNDSOUND_ENGINE.velocity_cms,
+            genaudio_astoundsound::ASTOUNDSOUND_ENGINE.doppler_pitch_ratio_pct,
+            genaudio_astoundsound::ALLPASS_STAGES
+        );
+        kprintln!(
+            "%-Center Bypass: Center Concentration: {}% | Mono Gain: {}% | Side Gain: {}%",
+            genaudio_astoundsound::ASTOUNDSOUND_ENGINE.center_bypass.center_concentration_pct,
+            genaudio_astoundsound::ASTOUNDSOUND_ENGINE.center_bypass.mono_gain_pct,
+            genaudio_astoundsound::ASTOUNDSOUND_ENGINE.center_bypass.side_gain_pct
+        );
+        kprintln!(
+            "Execution Telemetry: Total 4D Frames: {} | Doppler Steps: {} | Center-Bypass Frames: {}",
+            genaudio_astoundsound::ASTOUNDSOUND_ENGINE.total_4d_frames.load(core::sync::atomic::Ordering::Relaxed),
+            genaudio_astoundsound::ASTOUNDSOUND_ENGINE.doppler_shifts_calculated.load(core::sync::atomic::Ordering::Relaxed),
+            genaudio_astoundsound::ASTOUNDSOUND_ENGINE.center_bypass_frames.load(core::sync::atomic::Ordering::Relaxed)
+        );
     } else if cmd == "clear" || cmd == "cls" {
         CURSOR_COL = 0;
         CURSOR_ROW = 0;
