@@ -21,9 +21,18 @@ import {
   butlerCheckIn,
   butlerGreeting,
   butlerInterpretPrompt,
+  generateDeckOpml,
   type ButlerChoiceId,
   type ButlerContext,
 } from "./butler";
+import { BLUEPRINTS } from "./blueprints";
+import { createFreeplaneTutorialMindMap, stringifyFreeplaneMap } from "./freeplane-engine";
+import {
+  DEFAULT_KERNEL_TELEMETRY,
+  applyTelemetryToDom,
+  renderNativeHudToCanvas,
+  type KernelTelemetryPacket,
+} from "./native-hud";
 
 /**
  * Windows "Animation effects: off" makes browsers report prefers-reduced-motion,
@@ -55,6 +64,7 @@ type GuestStatus = {
   status: GuestRuntimeStatus;
   bootMode?: GuestBootMode;
   error?: string;
+  stderr?: string;
   websocketPort: number | null;
   qmpPort: number | null;
   serialPort?: number | null;
@@ -115,7 +125,10 @@ type GuestServiceStatus = {
   aiResult?: AiCommandResult;
   swarmResult?: { sourceCardId: string; os: string; createdCardIds: string[] };
   serialExecResult?: { cardId: string; os: string; command: string; output: string };
+  telemetry?: KernelTelemetryPacket;
 };
+
+let latestKernelTelemetry: KernelTelemetryPacket = { ...DEFAULT_KERNEL_TELEMETRY };
 
 type SystemCard = {
   id: string;
@@ -249,7 +262,9 @@ const benchToggle = document.querySelector<HTMLButtonElement>("#bench-toggle");
 const secopsToggle = document.querySelector<HTMLButtonElement>("#secops-toggle");
 const omniForm = document.querySelector<HTMLFormElement>("#omni-form");
 const omniInput = document.querySelector<HTMLInputElement>("#omni-input");
-const omniChips = document.querySelector<HTMLDivElement>("#omni-chips");
+const secopsChips = document.querySelector<HTMLDivElement>("#secops-chips");
+const horizonChips = document.querySelector<HTMLDivElement>("#horizon-chips");
+const omniChips = document.querySelector<HTMLDivElement>("#omni-chips") ?? horizonChips;
 const quickFileInput = document.querySelector<HTMLInputElement>("#quick-file-input");
 const flipCompass = document.querySelector<HTMLElement>("#flip-compass");
 const compassCycleButton = document.querySelector<HTMLButtonElement>("#compass-cycle");
@@ -1676,19 +1691,26 @@ for (const type of ["pointerdown", "keydown", "wheel"]) {
   window.addEventListener(type, () => { lastUserActivity = performance.now(); }, { passive: true });
 }
 
+const butlerModelSelect = document.querySelector<HTMLSelectElement>("#butler-model-select");
+
 function butlerContext(): ButlerContext {
   const errorText = guestErrorElement.hidden ? undefined : guestErrorElement.textContent?.trim() || undefined;
   const serviceUnavailable = Boolean(errorText && /unavailable|failed to fetch/i.test(errorText));
   const card = selectedCard;
   const os = card ? cardToGuestOs(card) : undefined;
+  const model = (butlerModelSelect?.value as ButlerContext["model"]) || "auto";
+  const guestRecord = card && os ? guestServiceStatus?.guests.find((g) => g.os === os && g.cardId === card.id) : undefined;
   return {
     idleSeconds: (performance.now() - lastUserActivity) / 1000,
     guestError: serviceUnavailable ? undefined : errorText,
+    guestStderr: guestRecord?.stderr?.trim() || undefined,
     cardName: card?.name,
     guestRunning: Boolean(card && os && guestServiceStatus?.guests.some((g) => g.os === os && g.cardId === card.id && g.status === "running")),
     serviceUnavailable,
     displayOpen: guestDialogElement.open,
     needsInstall: card ? cardButtonStates(card).guest.label === "Install" : false,
+    cardsList: cards.map((c) => c.name),
+    model,
   };
 }
 
@@ -1710,18 +1732,104 @@ function butlerSay(note: { message: string; choices: ButlerChoiceId[] }, autoHid
   if (autoHideMs > 0) butlerHideTimer = window.setTimeout(() => { butlerBubble.hidden = true; }, autoHideMs);
 }
 
+// ---- Architectural Blueprints Modal Controller ----
+const blueprintDialog = document.querySelector<HTMLDialogElement>("#blueprint-dialog");
+const blueprintNav = document.querySelector<HTMLElement>("#blueprint-nav");
+const blueprintCloseBtn = document.querySelector<HTMLButtonElement>("#close-blueprint");
+const blueprintDoneBtn = document.querySelector<HTMLButtonElement>("#btn-blueprint-done");
+const blueprintSourceBtn = document.querySelector<HTMLButtonElement>("#btn-open-blueprint-source");
+const bpActiveImg = document.querySelector<HTMLImageElement>("#blueprint-active-img");
+const bpMetaKicker = document.querySelector<HTMLElement>("#bp-meta-kicker");
+const bpMetaTitle = document.querySelector<HTMLElement>("#bp-meta-title");
+const bpMetaDesc = document.querySelector<HTMLElement>("#bp-meta-desc");
+const bpMetaHighlights = document.querySelector<HTMLUListElement>("#bp-meta-highlights");
+let currentBlueprintId = "system-mindmap";
+
+function openBlueprintHUD(blueprintId?: string): void {
+  if (!blueprintDialog) return;
+  const targetId = blueprintId || currentBlueprintId;
+  selectBlueprintTab(targetId);
+  if (!blueprintDialog.open) {
+    blueprintDialog.showModal();
+  }
+}
+
+function selectBlueprintTab(id: string): void {
+  const item = BLUEPRINTS.find((b) => b.id === id) || BLUEPRINTS[0];
+  currentBlueprintId = item.id;
+
+  if (blueprintNav) {
+    const tabs = blueprintNav.querySelectorAll<HTMLButtonElement>(".blueprint-tab");
+    tabs.forEach((tab) => {
+      tab.classList.toggle("active", tab.dataset.bp === item.id);
+    });
+  }
+
+  if (bpActiveImg) bpActiveImg.src = item.svgPath;
+  if (bpMetaKicker) bpMetaKicker.textContent = item.kicker;
+  if (bpMetaTitle) bpMetaTitle.textContent = item.title;
+  if (bpMetaDesc) bpMetaDesc.textContent = item.description;
+
+  if (bpMetaHighlights) {
+    bpMetaHighlights.replaceChildren();
+    for (const hl of item.highlights) {
+      const li = document.createElement("li");
+      li.textContent = hl;
+      bpMetaHighlights.appendChild(li);
+    }
+  }
+}
+
+blueprintNav?.addEventListener("click", (e) => {
+  const target = (e.target as HTMLElement)?.closest<HTMLButtonElement>(".blueprint-tab");
+  if (target?.dataset.bp) {
+    selectBlueprintTab(target.dataset.bp);
+  }
+});
+
+blueprintCloseBtn?.addEventListener("click", () => blueprintDialog?.close());
+blueprintDoneBtn?.addEventListener("click", () => blueprintDialog?.close());
+blueprintSourceBtn?.addEventListener("click", () => {
+  const item = BLUEPRINTS.find((b) => b.id === currentBlueprintId);
+  if (item) window.open(item.svgPath, "_blank");
+});
+
+function downloadTextFile(filename: string, content: string, mimeType = "application/xml"): void {
+  const blob = new Blob([content], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 function butlerChoose(id: ButlerChoiceId): void {
   const context = butlerContext();
   const card = selectedCard;
   if (id === "display" && card) runCardExtra("display", card);
   if (id === "settings" && card) flipCardTo(card, "back");
   if (id === "tour") toggleCardZoom(false);
+  if (id === "blueprints") {
+    openBlueprintHUD();
+  }
+  if (id === "opml") {
+    const xml = generateDeckOpml(context.cardsList);
+    downloadTextFile("postcard-deck-outline.opml", xml);
+  }
+  if (id === "freeplane") {
+    const map = createFreeplaneTutorialMindMap();
+    const xml = stringifyFreeplaneMap(map);
+    downloadTextFile("basic-freeplane-functions.mm", xml, "application/x-freemind");
+  }
   if (id === "snooze") butlerQuietUntil = performance.now() + SNOOZE_SECONDS * 1000;
   if (id === "dismiss") {
     if (butlerBubble) butlerBubble.hidden = true;
     return;
   }
-  butlerSay({ message: butlerAnswer(id, context), choices: id === "stuck" ? ["tour", "dismiss"] : ["dismiss"] }, 20000);
+  butlerSay({ message: butlerAnswer(id, context), choices: id === "stuck" ? ["blueprints", "tour", "dismiss"] : ["dismiss"] }, 20000);
 }
 
 function openButlerOnHover(): void {
@@ -2018,6 +2126,17 @@ omniFormElement.addEventListener("submit", (event) => {
   omniInputElement.value = "";
   const context = butlerContext();
   const interpreted = butlerInterpretPrompt(prompt, context);
+  if (interpreted.actionPayload) {
+    if (interpreted.actionPayload.type === "open-blueprint") {
+      openBlueprintHUD(interpreted.actionPayload.blueprintId);
+    } else if (interpreted.actionPayload.type === "download-opml" && interpreted.actionPayload.data) {
+      downloadTextFile("postcard-deck-outline.opml", interpreted.actionPayload.data);
+    } else if (interpreted.actionPayload.type === "download-freeplane") {
+      const map = createFreeplaneTutorialMindMap();
+      const xml = stringifyFreeplaneMap(map);
+      downloadTextFile("basic-freeplane-functions.mm", xml, "application/x-freemind");
+    }
+  }
   if (interpreted.choice) {
     butlerChoose(interpreted.choice);
     return;
@@ -2034,7 +2153,7 @@ omniFormElement.addEventListener("submit", (event) => {
   void runAiOrSecOpsCommand(prompt, selectedCard ?? undefined);
 });
 
-omniChipsElement.addEventListener("click", (event) => {
+function handleChipAction(event: MouseEvent): void {
   const button = (event.target as HTMLElement | null)?.closest<HTMLButtonElement>(
     "[data-omni-action]",
   );
@@ -2070,7 +2189,13 @@ omniChipsElement.addEventListener("click", (event) => {
     return;
   }
   void runAiOrSecOpsCommand(action, selectedCard ?? undefined);
-});
+}
+
+secopsChips?.addEventListener("click", handleChipAction);
+horizonChips?.addEventListener("click", handleChipAction);
+if (omniChipsElement && omniChipsElement !== secopsChips && omniChipsElement !== horizonChips) {
+  omniChipsElement.addEventListener("click", handleChipAction);
+}
 
 quickFileInput?.addEventListener("change", () => {
   const file = quickFileInput.files?.[0];
@@ -3414,6 +3539,16 @@ function drawMockDisplay(context: CanvasRenderingContext2D, card: SystemCard): v
       context.fillText("% uname -sr && sysctl machdep.cpu.brand_string", x + 78, y + 118);
       context.fillStyle = accent;
       context.fillText("Darwin 24.1.0 · QEMU Virtual AppleSMC (Eco 2 GiB)", x + 78, y + 146);
+    } else if (card.id === "postcard-os" || card.os === "RUST KERNEL") {
+      // Bare-Metal Rust Immediate-Mode HUD ("Post Card OS // Mission Control") + v1.0.4 Boot Console
+      renderNativeHudToCanvas(
+        context,
+        x + 20,
+        y + 46,
+        dispW - 40,
+        246,
+        latestKernelTelemetry,
+      );
     }
   }
 
@@ -3837,8 +3972,8 @@ function drawCardTelemetry(context: CanvasRenderingContext2D, card: SystemCard):
     ["RUNTIME PHASE", guest ? `${guest.status.toUpperCase()} (${guest.bootMode ?? "disk"})` : card.status],
     ["VIRTUAL CPU & STUDIO GPU", `${cpuProfile.toUpperCase()} (${allocatedVcpus} / ${hostCap} vCPU) · 3D: ${studioGraphicsProfile.toUpperCase()}`],
     ["NOVNC & QMP SOCKETS", `${wsPort} · ${qmpPort}`],
-    ["NEURAL SERIAL BRIDGE", serialPort],
-    ["STREAMLINED GUEST POOL", `${activeCount} / 6 VMs active · ${usedRamMb} / 8192 MiB RAM`],
+    ["PA-ROMY COPROCESSOR VAULT", `${latestKernelTelemetry.romy_coprocessor_state} · HEAP: ${latestKernelTelemetry.heap_pressure}% (${latestKernelTelemetry.heap_usage_kb} KB)`],
+    ["STREAMLINED GUEST POOL", `${activeCount} / 6 VMs active · ${usedRamMb} / 8192 MiB RAM · ${serialPort}`],
   ];
 
   drawKeyValueRows(context, rows, 286, 88);
@@ -4330,6 +4465,10 @@ async function requestGuestApi(
 function updateGuestCardStatus(status: GuestServiceStatus): void {
   const binnedCountBefore = binnedCards.size;
   guestServiceStatus = status;
+  if (status.telemetry) {
+    latestKernelTelemetry = status.telemetry;
+    applyTelemetryToDom(latestKernelTelemetry);
+  }
   cardIdRegistryReady = true;
   for (const id of status.deletedCardIds) {
     legacyDeletedCardIds.delete(id);
@@ -4525,6 +4664,8 @@ function computeCardContentKey(card: SystemCard): string {
     guestServiceStatus?.customIsos?.[card.id] ?? "",
     studioGraphicsProfile,
     activeCount,
+    latestKernelTelemetry.romy_coprocessor_state,
+    latestKernelTelemetry.heap_pressure,
   ].join("|");
 }
 
@@ -4652,7 +4793,7 @@ function updateGuestDialogCopy(): void {
       : isWindows
         ? "Windows uses a persistent 64 GiB disk, UEFI firmware, a per-card software TPM 2.0, and a virtio-balloon device."
         : isAndroid
-          ? "Android cards include a virtio-balloon device (1 GiB Eco default). Multiple Android, Windows, macOS, and Linux cards can run side-by-side."
+          ? "Android cards boot the official Android-x86 Live/Install system with private persistent virtual disk and virtio-balloon."
           : isMacOs
             ? "macOS / Darwin cards use a q35 + OpenCore UEFI + AppleSMC profile with 2 GiB Eco RAM and a virtio-balloon device on a private QCOW2 overlay."
             : "Install Debian once as the golden base, shut it down, then finish the base. Up to six cards can run at once with virtio-balloon devices and independent QCOW2 overlays.";
@@ -4667,14 +4808,14 @@ function updateGuestDialogCopy(): void {
     : isWindows
       ? (targetRunning ? "⟳ Reboot Windows" : "Install Windows (your ISO)")
       : isAndroid
-        ? (targetRunning ? "⟳ Reboot Android base" : "Install Android base")
+        ? (targetRunning ? "⟳ Reboot Android Live/ISO" : "Boot Android Live / Install")
         : isMacOs
           ? (targetRunning ? "⟳ Reboot macOS / Darwin" : "Install macOS / Darwin")
           : (targetRunning ? "⟳ Reboot Debian base" : "Install Debian base");
   guestBootDiskButtonElement.textContent = isWindows
     ? (targetRunning ? "⟳ Reboot Windows" : "Boot Windows")
     : isAndroid
-      ? (targetRunning ? "⟳ Reboot Android" : "Boot Android")
+      ? (targetRunning ? "⟳ Reboot Android" : "Boot Android (Disk)")
       : isMacOs
         ? (targetRunning ? "⟳ Reboot macOS" : "Boot macOS")
         : (targetRunning ? "⟳ Reboot Linux" : "Boot this card");
@@ -7015,22 +7156,86 @@ function initCommercialEditions(): void {
   const editionsDialog = document.getElementById("editions-dialog") as HTMLDialogElement | null;
   const editionsBtn = document.getElementById("editions-button");
   const profileEditionsOpt = document.getElementById("profile-editions-option");
+  const profileRestoreOpt = document.getElementById("profile-restore-option");
+  const restoreDialog = document.getElementById("restore-account-dialog") as HTMLDialogElement | null;
+  const restoreLicenseForm = document.getElementById("restore-license-form") as HTMLFormElement | null;
+  const restoreLicenseInput = document.getElementById("restore-license-input") as HTMLInputElement | null;
+  const restoreStatusEl = document.getElementById("restore-account-status");
+  const restoreStatusProfile = document.getElementById("restore-status-profile");
+  const restoreStatusTier = document.getElementById("restore-status-tier");
+  const restoreCurrentKey = document.getElementById("restore-current-key");
+  const restoreCopyKeyBtn = document.getElementById("restore-copy-key-btn");
+  const restoreResyncBtn = document.getElementById("restore-resync-btn");
+  const restoreExportBtn = document.getElementById("restore-export-btn");
+  const restoreImportBtn = document.getElementById("restore-import-btn");
+  const restoreImportInput = document.getElementById("restore-import-input") as HTMLInputElement | null;
+  const closeRestoreBtn = document.getElementById("close-restore-account");
   const selectedTierElement = document.getElementById("selected-tier");
   const activeTierDisplay = document.getElementById("editions-active-tier-display");
+  const aiButlerSubBtn = document.getElementById("btn-subscribe-ai");
+
+  const LICENSE_KEY_STORAGE = "postcard_license_key";
+  const AI_BUTLER_STORAGE = "postcard_ai_butler_active";
+  let currentActiveTier: MonetizationTier = "COMMUNITY";
+
+  const setRestoreStatusMessage = (message: string, tone: "info" | "ok" | "error" = "info") => {
+    if (!restoreStatusEl) return;
+    restoreStatusEl.textContent = message;
+    restoreStatusEl.dataset.tone = tone;
+  };
+
+  const refreshRestoreAccountSummary = () => {
+    if (restoreStatusProfile) {
+      restoreStatusProfile.textContent = `${localProfile.name} (${localProfile.initials})`;
+    }
+    const aiActive = localStorage.getItem(AI_BUTLER_STORAGE) === "true";
+    if (restoreStatusTier) {
+      restoreStatusTier.textContent = aiActive
+        ? `${currentActiveTier} + AI BUTLER`
+        : currentActiveTier;
+    }
+    const savedKey = localStorage.getItem(LICENSE_KEY_STORAGE) ?? "";
+    if (restoreCurrentKey) {
+      restoreCurrentKey.textContent = savedKey || "No license key stored on this device";
+    }
+    if (restoreCopyKeyBtn) {
+      (restoreCopyKeyBtn as HTMLButtonElement).disabled = !savedKey;
+    }
+  };
 
   const openEditions = () => {
     if (editionsDialog && !editionsDialog.open) editionsDialog.showModal();
     if (profilePopoverElement) profilePopoverElement.hidden = true;
   };
 
+  const openRestoreAccountDialog = () => {
+    if (profilePopoverElement) profilePopoverElement.hidden = true;
+    if (profileEditDialogElement.open) profileEditDialogElement.close();
+    if (editionsDialog?.open) editionsDialog.close();
+    refreshRestoreAccountSummary();
+    setRestoreStatusMessage("");
+    if (restoreDialog && !restoreDialog.open) {
+      restoreDialog.showModal();
+      restoreLicenseInput?.focus();
+    }
+  };
+
   editionsBtn?.addEventListener("click", openEditions);
   profileEditionsOpt?.addEventListener("click", openEditions);
   selectedTierElement?.addEventListener("click", openEditions);
+  profileRestoreOpt?.addEventListener("click", openRestoreAccountDialog);
+  document.querySelectorAll<HTMLElement>("[data-open-restore-account]").forEach((btn) => {
+    btn.addEventListener("click", openRestoreAccountDialog);
+  });
+  closeRestoreBtn?.addEventListener("click", () => restoreDialog?.close());
+  restoreDialog?.addEventListener("click", (event) => {
+    if (event.target === restoreDialog) restoreDialog.close();
+  });
 
   // The tier is never trusted from browser storage (it is user-editable). It always
   // comes from the licensing service, using the license key saved on this machine.
-  const LICENSE_KEY_STORAGE = "postcard_license_key";
   const applyTier = (tier: MonetizationTier, announce = false) => {
+    currentActiveTier = tier;
     if (selectedTierElement) {
       selectedTierElement.textContent = tier;
       selectedTierElement.className = `tier-badge tier-badge-${tier.toLowerCase()}`;
@@ -7042,7 +7247,15 @@ function initCommercialEditions(): void {
     const cardKey = tier === "PRO" ? "pro" : tier === "ENTERPRISE" ? "enterprise" : "";
     const activeCard = cardKey ? document.getElementById(`edition-card-${cardKey}`) : null;
     if (activeCard) activeCard.classList.add("active-edition");
+    refreshRestoreAccountSummary();
     if (announce) showToast(`Post Card ${tier} is active. Thank you!`);
+  };
+
+  const applyAiButlerState = (active: boolean) => {
+    if (!aiButlerSubBtn) return;
+    aiButlerSubBtn.textContent = active ? "AI BUTLER ACTIVE ✓" : "Activate AI Butler Sub";
+    aiButlerSubBtn.classList.toggle("active", active);
+    refreshRestoreAccountSummary();
   };
 
   const postLicense = async (payload: Record<string, string>) => {
@@ -7059,16 +7272,28 @@ function initCommercialEditions(): void {
       ? (data.tier.toUpperCase() as MonetizationTier)
       : "COMMUNITY";
 
-  const verifyStoredLicense = async () => {
+  const verifyStoredLicense = async (): Promise<boolean> => {
     const key = localStorage.getItem(LICENSE_KEY_STORAGE);
-    if (!key) return;
+    if (!key) {
+      refreshRestoreAccountSummary();
+      return false;
+    }
     try {
       const { status, data } = await postLicense({ licenseKey: key });
-      if (status === 404) localStorage.removeItem(LICENSE_KEY_STORAGE);
-      else if (status === 200 && data.ok) applyTier(tierFromLicense(data));
+      if (status === 404) {
+        localStorage.removeItem(LICENSE_KEY_STORAGE);
+        applyTier("COMMUNITY");
+        return false;
+      }
+      if (status === 200 && data.ok) {
+        applyTier(tierFromLicense(data));
+        return true;
+      }
     } catch {
       // Offline: stay on Community until the licensing service is reachable.
     }
+    refreshRestoreAccountSummary();
+    return false;
   };
 
   const claimCheckout = async (sessionId: string) => {
@@ -7091,7 +7316,202 @@ function initCommercialEditions(): void {
   };
 
   applyTier("COMMUNITY");
+  if (localStorage.getItem(AI_BUTLER_STORAGE) === "true") {
+    applyAiButlerState(true);
+  }
   void verifyStoredLicense();
+
+  // --- Restore Account Handlers ---
+  restoreCopyKeyBtn?.addEventListener("click", async () => {
+    const savedKey = localStorage.getItem(LICENSE_KEY_STORAGE);
+    if (!savedKey) {
+      setRestoreStatusMessage("No license key is stored on this device yet.", "info");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(savedKey);
+      setRestoreStatusMessage("✓ Copied license key to clipboard.", "ok");
+      showToast("🔑 License key copied to clipboard.");
+    } catch {
+      setRestoreStatusMessage(`License key: ${savedKey}`, "info");
+    }
+  });
+
+  restoreLicenseForm?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const raw = restoreLicenseInput?.value.trim() ?? "";
+    if (!raw) {
+      setRestoreStatusMessage("Enter a license key (pcos-...) or Stripe session ID (cs_...) to restore.", "error");
+      restoreLicenseInput?.focus();
+      return;
+    }
+    setRestoreStatusMessage("Contacting licensing service to verify and restore your account…", "info");
+    try {
+      const payload: Record<string, string> =
+        raw.startsWith("cs_") || raw.startsWith("sim_")
+          ? { sessionId: raw }
+          : { licenseKey: raw };
+      const { status, data } = await postLicense(payload);
+      if (status === 200 && data.ok) {
+        const resolvedKey = typeof data.licenseKey === "string" && data.licenseKey ? data.licenseKey : raw;
+        if (resolvedKey.startsWith("pcos-")) {
+          localStorage.setItem(LICENSE_KEY_STORAGE, resolvedKey);
+        }
+        const restoredTier = tierFromLicense(data);
+        applyTier(restoredTier, true);
+        if (restoreLicenseInput) restoreLicenseInput.value = "";
+        setRestoreStatusMessage(
+          `✓ Account restored! Active tier: ${restoredTier} (${String(data.status ?? "active").toUpperCase()}).`,
+          "ok",
+        );
+      } else if (status === 202) {
+        setRestoreStatusMessage(
+          "⏳ Purchase session found — payment confirmation is still syncing. Please retry in a few seconds.",
+          "info",
+        );
+      } else {
+        setRestoreStatusMessage(
+          data.error ?? "No active license matched that key or session ID. Check the value and try again.",
+          "error",
+        );
+      }
+    } catch (error) {
+      setRestoreStatusMessage(
+        error instanceof Error ? error.message : "Could not reach the licensing service.",
+        "error",
+      );
+    }
+  });
+
+  restoreResyncBtn?.addEventListener("click", async () => {
+    setRestoreStatusMessage("Re-syncing device profile, saved license key, DLC modules & workspace cards…", "info");
+    localProfile = readLocalProfile();
+    renderLocalProfile();
+
+    // Restore DLC toggles from storage
+    document.querySelectorAll<HTMLButtonElement>("[data-dlc]").forEach((btn) => {
+      if (btn.disabled) return;
+      const dlcKey = btn.dataset.dlc!;
+      const stored = localStorage.getItem(`postcard_dlc_${dlcKey}`);
+      const isInstalled = stored !== null ? stored === "true" : true;
+      localStorage.setItem(`postcard_dlc_${dlcKey}`, String(isInstalled));
+      btn.classList.toggle("active", isInstalled);
+      btn.textContent = isInstalled ? "ACTIVE" : "INSTALL";
+    });
+
+    // Restore AI Butler state
+    const aiSaved = localStorage.getItem(AI_BUTLER_STORAGE) === "true";
+    applyAiButlerState(aiSaved);
+
+    // Restore any binned cards back into the active room
+    let restoredCardsCount = 0;
+    for (const binnedId of [...binnedCards.keys()]) {
+      restoreCardFromBin(binnedId);
+      restoredCardsCount += 1;
+    }
+
+    const licenseVerified = await verifyStoredLicense();
+    refreshRestoreAccountSummary();
+    const summaryParts = [
+      `Profile: ${localProfile.name}`,
+      `Tier: ${currentActiveTier}`,
+      licenseVerified ? "License verified ✓" : "Community license",
+      ...(restoredCardsCount > 0 ? [`Restored ${restoredCardsCount} binned card(s)`] : []),
+    ];
+    const msg = `✓ Account re-synced (${summaryParts.join(" · ")}).`;
+    setRestoreStatusMessage(msg, "ok");
+    showToast(msg);
+  });
+
+  restoreExportBtn?.addEventListener("click", () => {
+    const dlcState: Record<string, boolean> = {};
+    document.querySelectorAll<HTMLButtonElement>("[data-dlc]").forEach((btn) => {
+      const key = btn.dataset.dlc;
+      if (key) dlcState[key] = btn.classList.contains("active");
+    });
+    const snapshot = {
+      schema: "postcard.os.account-backup.v1",
+      exportedAt: new Date().toISOString(),
+      profile: localProfile,
+      licenseKey: localStorage.getItem(LICENSE_KEY_STORAGE) || null,
+      aiButlerActive: localStorage.getItem(AI_BUTLER_STORAGE) === "true",
+      dlc: dlcState,
+      reduceMotion: reduceMotionOptIn,
+      manualNotes: manualCustomNotes?.value ?? "",
+    };
+    downloadTextFile(
+      "postcard-account-backup.json",
+      JSON.stringify(snapshot, null, 2),
+      "application/json",
+    );
+    setRestoreStatusMessage("✓ Downloaded postcard-account-backup.json.", "ok");
+    showToast("⬇ Exported portable Account Backup (postcard-account-backup.json).");
+  });
+
+  restoreImportBtn?.addEventListener("click", () => {
+    restoreImportInput?.click();
+  });
+
+  restoreImportInput?.addEventListener("change", async () => {
+    const file = restoreImportInput.files?.[0];
+    restoreImportInput.value = "";
+    if (!file) return;
+    try {
+      const rawText = await file.text();
+      const parsed = JSON.parse(rawText) as Record<string, unknown>;
+      if (!parsed || typeof parsed !== "object") {
+        throw new Error("Invalid backup file format.");
+      }
+      if (parsed.profile && typeof parsed.profile === "object") {
+        const prof = parsed.profile as { name?: unknown; initials?: unknown };
+        const name = typeof prof.name === "string" ? prof.name.trim().slice(0, 40) : "";
+        const initials = typeof prof.initials === "string" ? prof.initials.trim().toLocaleUpperCase() : "";
+        if (name) {
+          localProfile = {
+            name,
+            initials: /^\p{L}{1,2}$/u.test(initials) ? initials : localProfile.initials,
+          };
+          localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(localProfile));
+          renderLocalProfile();
+        }
+      }
+      if (typeof parsed.aiButlerActive === "boolean") {
+        localStorage.setItem(AI_BUTLER_STORAGE, String(parsed.aiButlerActive));
+        applyAiButlerState(parsed.aiButlerActive);
+      }
+      if (parsed.dlc && typeof parsed.dlc === "object") {
+        const dlcMap = parsed.dlc as Record<string, unknown>;
+        document.querySelectorAll<HTMLButtonElement>("[data-dlc]").forEach((btn) => {
+          const dlcKey = btn.dataset.dlc;
+          if (dlcKey && typeof dlcMap[dlcKey] === "boolean") {
+            const active = Boolean(dlcMap[dlcKey]);
+            localStorage.setItem(`postcard_dlc_${dlcKey}`, String(active));
+            btn.classList.toggle("active", active);
+            btn.textContent = active ? "ACTIVE" : "INSTALL";
+          }
+        });
+      }
+      if (typeof parsed.manualNotes === "string" && manualCustomNotes) {
+        manualCustomNotes.value = parsed.manualNotes;
+        localStorage.setItem(MANUAL_NOTES_STORAGE_KEY, parsed.manualNotes);
+      }
+      if (typeof parsed.licenseKey === "string" && parsed.licenseKey.trim()) {
+        localStorage.setItem(LICENSE_KEY_STORAGE, parsed.licenseKey.trim());
+        await verifyStoredLicense();
+      }
+      refreshRestoreAccountSummary();
+      setRestoreStatusMessage(
+        `✓ Restored account backup for ${localProfile.name} (${currentActiveTier}).`,
+        "ok",
+      );
+      showToast(`⬆ Account & preferences restored for ${localProfile.name}!`);
+    } catch (error) {
+      setRestoreStatusMessage(
+        error instanceof Error ? `Import failed: ${error.message}` : "Could not parse backup file.",
+        "error",
+      );
+    }
+  });
 
   const returned = new URLSearchParams(window.location.search);
   const returnedSession = returned.get("session_id");
@@ -7111,8 +7531,15 @@ function initCommercialEditions(): void {
 
   document.querySelectorAll<HTMLButtonElement>("[data-select-tier]").forEach((btn) => {
     btn.addEventListener("click", () => {
-      const tier = btn.dataset.selectTier as MonetizationTier;
-      if (tier === "PRO" || tier === "ENTERPRISE") void startStripeCheckout(tier);
+      const tier = btn.dataset.selectTier as MonetizationTier | "AI_BUTLER";
+      if (tier === "PRO" || tier === "ENTERPRISE") {
+        void startStripeCheckout(tier);
+      } else if (tier === "AI_BUTLER") {
+        localStorage.setItem(AI_BUTLER_STORAGE, "true");
+        applyAiButlerState(true);
+        showToast("✦ AI Butler & Automation Co-Pilot Activated with 100% Local Privacy!");
+        if (butlerBubble?.hidden) butlerSay(butlerGreeting(butlerContext()), 10000);
+      }
     });
   });
 
@@ -7411,7 +7838,80 @@ function updateCardActionStripPosition(): void {
   cardActionStripElement.style.top = `${(-anchor.y * 0.5 + 0.5) * sceneViewportHeight}px`;
 }
 
+function initKernelTelemetryBridge(): void {
+  applyTelemetryToDom(latestKernelTelemetry);
+
+  const toggleBtn = document.getElementById("romy-vault-toggle");
+  toggleBtn?.addEventListener("click", async () => {
+    const nextActive = !latestKernelTelemetry.romy_active;
+    try {
+      const response = await fetch("/api/guest/telemetry", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ romy_active: nextActive }),
+      });
+      if (response.ok) {
+        const packet = (await response.json()) as KernelTelemetryPacket;
+        latestKernelTelemetry = packet;
+        applyTelemetryToDom(packet);
+        for (const card of cards) {
+          if (card.id === "postcard-os" || card.facet === "bottom") {
+            refreshCardTexture(card, true);
+          }
+        }
+        showToast(
+          nextActive
+            ? "PA-Romy Coprocessor Vault: ACTIVE // ENCLAVE LOCKED"
+            : "PA-Romy Coprocessor Vault: STANDBY // IDLE",
+        );
+      }
+    } catch {
+      // Fallback local toggle if offline
+      latestKernelTelemetry = {
+        ...latestKernelTelemetry,
+        romy_active: nextActive,
+        romy_coprocessor_state: nextActive ? "VAULT ACTIVE // ENCLAVE LOCKED" : "STANDBY // IDLE",
+      };
+      applyTelemetryToDom(latestKernelTelemetry);
+    }
+  });
+
+  // Connect live WebSocket listener receiving kernel telemetry packets
+  const connectTelemetryWs = (): void => {
+    try {
+      const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+      const wsHost = window.location.host || `${window.location.hostname || "127.0.0.1"}:5173`;
+      const ws = new WebSocket(`${wsProtocol}//${wsHost}/telemetry`);
+      ws.onmessage = (event) => {
+        try {
+          const telemetry = JSON.parse(String(event.data)) as KernelTelemetryPacket;
+          if (telemetry && typeof telemetry.romy_coprocessor_state === "string") {
+            latestKernelTelemetry = telemetry;
+            // Dynamically updates host-side command center view in real time
+            const romyEl = document.getElementById("romy-status");
+            if (romyEl) romyEl.innerText = telemetry.romy_coprocessor_state;
+            const heapEl = document.getElementById("heap-meter");
+            if (heapEl) heapEl.style.width = `${telemetry.heap_pressure}%`;
+            applyTelemetryToDom(telemetry);
+            for (const card of cards) {
+              if (card.id === "postcard-os" || card.facet === "bottom") {
+                refreshCardTexture(card);
+              }
+            }
+          }
+        } catch {
+          // Ignore malformed frames
+        }
+      };
+    } catch {
+      // WebSocket unavailable in headless/non-browser environments
+    }
+  };
+  connectTelemetryWs();
+}
+
 initCommercialEditions();
+initKernelTelemetryBridge();
 animate();
 
 

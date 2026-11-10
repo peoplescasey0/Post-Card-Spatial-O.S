@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { after, before, test } from "node:test";
 import { createGuestApi } from "../guest-api.mjs";
@@ -127,4 +128,52 @@ test("POST /api/stripe/webhook handles customer.subscription.deleted event by re
   assert.equal(data.type, "customer.subscription.deleted");
   assert.equal(data.handled, true);
   assert.equal(data.activeTier, "community");
+});
+
+test("POST /api/stripe/restore and /api/stripe/license recover tier and licenseKey from sessionId or licenseKey", async () => {
+  const checkoutRes = await fetch(`${baseUrl}/api/stripe/checkout-session`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ tier: "pro", interval: "year" }),
+  });
+  assert.equal(checkoutRes.status, 200);
+  const checkoutData = await checkoutRes.json();
+  assert.ok(checkoutData.sessionId);
+
+  // Restore by session ID
+  const restoreBySession = await fetch(`${baseUrl}/api/stripe/restore`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ sessionId: checkoutData.sessionId }),
+  });
+  assert.equal(restoreBySession.status, 200);
+  const sessionData = await restoreBySession.json();
+  assert.equal(sessionData.ok, true);
+  assert.equal(sessionData.tier, "pro");
+  assert.equal(sessionData.active, true);
+  assert.match(sessionData.licenseKey, /^pcos-[a-f0-9]{32}$/);
+
+  // Restore by license key
+  const restoreByKey = await fetch(`${baseUrl}/api/stripe/license`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ licenseKey: sessionData.licenseKey }),
+  });
+  assert.equal(restoreByKey.status, 200);
+  const keyData = await restoreByKey.json();
+  assert.equal(keyData.ok, true);
+  assert.equal(keyData.tier, "pro");
+  assert.equal(keyData.active, true);
+});
+
+test("index.html includes Restore Account buttons in Profile menu, Editions dialog, and Restore Account Vault dialog", () => {
+  const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
+  assert.match(html, /id="profile-restore-option"/);
+  assert.match(html, /id="editions-restore-top-btn"/);
+  assert.match(html, /id="editions-restore-btn"/);
+  assert.match(html, /id="restore-account-dialog"/);
+  assert.match(html, /id="restore-license-form"/);
+  assert.match(html, /id="restore-resync-btn"/);
+  assert.match(html, /id="restore-export-btn"/);
+  assert.match(html, /id="restore-import-btn"/);
 });

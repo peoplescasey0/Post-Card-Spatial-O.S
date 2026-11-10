@@ -3,6 +3,9 @@
 The spatial workspace: a 3D (Three.js) desktop that runs and displays guest
 operating systems (Windows, Linux, macOS, Kali, AI copilot) as cards in space.
 
+## Documentation & User Manual
+For comprehensive operating procedures, 3D navigation shortcuts, multi-OS hypervisor profiles, AI Butler orchestration, Freeplane mind mapping, and commercial editions, see the **[Official User Manual & Field Guide](USER_MANUAL.md)** or press `?` inside the running workspace.
+
 ## Layout
 - `workspace-prototype/` - Vite + TypeScript + Three.js front end, noVNC display,
   and `guest-api.mjs`, the QEMU/QMP/VNC backend that starts and manages guests.

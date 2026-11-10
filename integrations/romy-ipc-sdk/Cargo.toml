@@ -1,0 +1,7 @@
+[package]
+name = "postcard-ipc-sdk"
+version = "0.1.0"
+edition = "2021"
+description = "User-Space IPC Client SDK for Post Card OS and Romy Telemetry Daemon"
+
+[dependencies]

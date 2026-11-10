@@ -28,10 +28,60 @@ const MAX_GUEST_VCPUS = 4;
 const EXPECTED_DISK_SIZE = 32 * 1024 * 1024 * 1024;
 const START_TIMEOUT_MS = 20_000;
 const GUEST_RUNTIME_KEY = Symbol.for("post-card-os.guest-runtime");
+const TELEMETRY_SOCKETS_KEY = Symbol.for("post-card-os.telemetry-sockets");
+const KERNEL_HEAP_CAPACITY_KB = 8192;
+const WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
+const KERNEL_BOOT_LOG_LINES = [
+  "[ 0.000000 ] POST CARD OS // KERNEL CORE v1.0.4-x86_64",
+  "[ 0.001042 ] CPU: Initializing IDT, GDT, & CR3 Page Table Isolation... [ SECURE ]",
+  "[ 0.002890 ] THE FOUNDRY: Locking 16MB dynamic free-list memory arena... [ ALLOCATED ]",
+  "[ 0.004510 ] THE CATAPULT: Loading ELF64 ring 3 segment validator... [ ARMED ]",
+  "[ 0.007120 ] THE BLACK BOX: Mounting VfsStorageBridge over memory sectors... [ PERSISTENT ]",
+  "[ 0.010200 ] PA-ROMY VAULT: Isolating hardware coprocessor core & telemetry mirror... [ LOCKED ]",
+  "[ 0.014500 ] THE BEACON: Binding WebSocket telemetry stream to /telemetry... [ BROADCASTING ]",
+];
+const SPACE_PLANE_AVIONICS_LINES = [
+  ["0.000000", "POST CARD OS // SPACE PLANE AVIONICS v1.0.4", "CORE"],
+  ["0.001042", "CHASSIS: Al-Li 2195 Cryogenic Hull Frame", "SECURED"],
+  ["0.002890", "THE FOUNDRY: 16MB LockedHeap Arena", "STABLE"],
+  ["0.004510", "THE CATAPULT: ELF64 Ring 3 Spatial Loader", "ARMED"],
+  ["0.007120", "THE BLACK BOX: VfsStorageBridge Sector Mirror", "LOCKED"],
+  ["0.010200", "THE RADIATOR: Cryogenic Thermal Control Loop", "STABILIZED"],
+  ["0.014500", "PA-ROMY VAULT: Isolated Neural Coprocessor", "ACTIVE"],
+];
+const SPACE_PLANE_AVIONICS_LOG_LINES = [
+  "========================================================================",
+  ...SPACE_PLANE_AVIONICS_LINES.map(
+    ([ts, subsystem, status]) => `[ ${ts} ] ${subsystem}... [ ${status} ]`,
+  ),
+  "========================================================================",
+];
 const WINDOWS_OS = "windows";
 const LINUX_OS = "linux";
 const ANDROID_OS = "android";
 const MACOS_OS = "macos";
+
+function encodeWebSocketTextFrame(text) {
+  const payload = Buffer.from(text, "utf8");
+  const len = payload.length;
+  let header;
+  if (len < 126) {
+    header = Buffer.alloc(2);
+    header[0] = 0x81;
+    header[1] = len;
+  } else if (len < 65536) {
+    header = Buffer.alloc(4);
+    header[0] = 0x81;
+    header[1] = 126;
+    header.writeUInt16BE(len, 2);
+  } else {
+    header = Buffer.alloc(10);
+    header[0] = 0x81;
+    header[1] = 127;
+    header.writeBigUInt64BE(BigInt(len), 2);
+  }
+  return Buffer.concat([header, payload]);
+}
 
 function resolveCardMemoryMb(os, profile = "eco") {
   if (os === WINDOWS_OS || os === MACOS_OS) {
@@ -238,7 +288,7 @@ function buildNetworkArgs(networkMode = "nat", deviceModel = "virtio-net-pci") {
   ];
 }
 
-function qemuArguments({ bootMode, cardId, diskPath, isoPath, ports, networkMode = "nat", dropDir, memoryMb = 1024, vcpus = 2, isMacOs = false, openCorePath = "", macOvmfCode = "", macOvmfVars = "", kernelPath = "", initrdPath = "" }) {
+function qemuArguments({ bootMode, cardId, diskPath, isoPath, ports, networkMode = "nat", dropDir, memoryMb = 1024, vcpus = 2, isMacOs = false, isAndroid = false, openCorePath = "", macOvmfCode = "", macOvmfVars = "", kernelPath = "", initrdPath = "" }) {
   if (isMacOs) {
     const args = [
       "-name", `Post Card ${cardId} macOS guest`,
@@ -290,13 +340,16 @@ function qemuArguments({ bootMode, cardId, diskPath, isoPath, ports, networkMode
     ];
     return args;
   }
+  const guestLabel = isAndroid ? "Android" : "Linux";
+  const cpuModel = isAndroid ? "host" : "max";
+  const displayDevice = isAndroid ? ["-device", "VGA,vgamem_mb=64"] : ["-device", "virtio-vga"];
   const args = [
-    "-name", `Post Card ${cardId} Linux guest`,
+    "-name", `Post Card ${cardId} ${guestLabel} guest`,
     "-machine", "q35",
     // WHPX's in-kernel IRQ chip hangs SeaBIOS at "Booting from Hard Disk...";
     // the userspace IRQ chip boots reliably.
     "-accel", process.platform === "win32" ? "whpx,kernel-irqchip=off" : "tcg",
-    "-cpu", "max",
+    "-cpu", cpuModel,
     "-smp", String(vcpus),
     "-m", String(memoryMb),
     "-device", "virtio-balloon",
@@ -304,10 +357,12 @@ function qemuArguments({ bootMode, cardId, diskPath, isoPath, ports, networkMode
     // drive over the virtio OS disk and hangs at "Booting from Hard Disk...".
     "-drive", `file=${diskPath},if=none,id=osdisk,format=qcow2`,
     "-device", `virtio-blk-pci,drive=osdisk${bootMode === "installer" ? "" : ",bootindex=0"}`,
-    "-device", "virtio-vga",
+    ...displayDevice,
     "-device", "qemu-xhci",
     "-device", "usb-kbd",
     "-device", "usb-tablet",
+    "-device", "intel-hda",
+    "-device", "hda-duplex",
     ...(dropDir ? ["-drive", `file=fat:rw:${dropDir},if=ide,index=2,format=raw`] : []),
     ...buildNetworkArgs(networkMode, "e1000"),
     ...(ports.serialPort
@@ -324,10 +379,15 @@ function qemuArguments({ bootMode, cardId, diskPath, isoPath, ports, networkMode
   ];
 
   if (kernelPath && existsSync(kernelPath)) {
-    args.push("-kernel", kernelPath);
+    args.push("-kernel", kernelPath, "-append", "console=ttyS0,115200 root=/dev/nvme0n1p2");
     if (initrdPath && existsSync(initrdPath)) {
       args.push("-initrd", initrdPath);
     }
+  } else if (isAndroid) {
+    if (isoPath && existsSync(isoPath)) {
+      args.push("-cdrom", isoPath);
+    }
+    args.push("-boot", bootMode === "installer" ? "order=d,menu=on" : "order=c,menu=on");
   } else if (bootMode === "installer") {
     args.push("-cdrom", isoPath, "-boot", "order=d");
   } else {
@@ -670,6 +730,10 @@ export function createGuestApi(options = {}) {
     ? path.resolve(process.env.POSTCARD_LINUX_BASE)
     : path.join(dataDirectory, "master-images", "debian-golden.qcow2");
   const overlayDirectory = path.join(dataDirectory, "overlays");
+  const androidDirectory = path.join(dataDirectory, "android");
+  const androidGoldenPath = process.env.POSTCARD_ANDROID_BASE
+    ? path.resolve(process.env.POSTCARD_ANDROID_BASE)
+    : path.join(dataDirectory, "master-images", "android-golden.qcow2");
   const readyMarkerPath = path.join(dataDirectory, "debian-golden.ready.json");
   const paperPlanesPath = path.join(dataDirectory, "paper-planes.json");
   const paperPlanesDropDir = path.join(dataDirectory, "paper-planes");
@@ -854,6 +918,172 @@ export function createGuestApi(options = {}) {
     });
   }
   runtimeStore[GUEST_RUNTIME_KEY] = guests;
+  const telemetrySockets = runtimeStore[TELEMETRY_SOCKETS_KEY] instanceof Set
+    ? runtimeStore[TELEMETRY_SOCKETS_KEY]
+    : new Set();
+  runtimeStore[TELEMETRY_SOCKETS_KEY] = telemetrySockets;
+  let romyCoprocessorActive = true;
+  let customHeapUsageKb = null;
+
+  function buildTelemetryPacket() {
+    const active = activeGuests();
+    const baseHeapKb = 1536;
+    const guestHeapKb = active.reduce((acc, g) => acc + Math.round((g.memoryMb ?? 1024) * 0.42), 0);
+    const effectiveHeapKb = customHeapUsageKb !== null
+      ? Math.max(256, Math.min(KERNEL_HEAP_CAPACITY_KB, Number(customHeapUsageKb)))
+      : Math.min(KERNEL_HEAP_CAPACITY_KB, baseHeapKb + guestHeapKb);
+    const heapPressure = Math.min(100, Math.max(0, Math.round((effectiveHeapKb * 100) / KERNEL_HEAP_CAPACITY_KB)));
+    const romyState = romyCoprocessorActive
+      ? "VAULT ACTIVE // ENCLAVE LOCKED"
+      : "STANDBY // IDLE";
+
+    return {
+      kernel_version: "v1.0.4-x86_64",
+      avionics_version: "v1.0.4",
+      chassis_alloy: "Al-Li 2195 Cryogenic Hull Frame",
+      panel_title: "Post Card OS // Mission Control",
+      romy_active: romyCoprocessorActive,
+      romy_coprocessor_state: romyState,
+      heap_allocator: "linked_list_allocator::LockedHeap",
+      heap_start: "0x444444440000",
+      heap_usage_kb: effectiveHeapKb,
+      heap_free_kb: Math.max(0, KERNEL_HEAP_CAPACITY_KB - effectiveHeapKb),
+      heap_pressure: heapPressure,
+      elf_loader: {
+        entry_point: "0x400000",
+        cr3_frame_address: "0x100000",
+      },
+      bootloader: {
+        kernel: "/boot/postcard-kernel-v1.0.4-x86_64",
+        cmdline: "console=ttyS0,115200 root=/dev/nvme0n1p2",
+        initrd: "/boot/initrd.img",
+      },
+      boot_log: KERNEL_BOOT_LOG_LINES,
+      avionics_stages: SPACE_PLANE_AVIONICS_LINES,
+      avionics_log: SPACE_PLANE_AVIONICS_LOG_LINES,
+      active_guests: active.length,
+      patent_engines: {
+        nvidia_maxq: {
+          mode: "MAX_EFFICIENCY",
+          gpu_freq_mhz: 1500,
+          dram_freq_mhz: 7000,
+          power_draw_w: 66,
+          tdp_limit_w: 80,
+          efficiency_slope: 1.41,
+          state: "READY_IDLE",
+        },
+        voyager_shm: {
+          active_topics: 3,
+          buffer_capacity_bytes: 4096,
+          dual_offset_sync: true,
+          overwrites_recovered: 0,
+          latest_topic: "hud_telemetry",
+        },
+        arais_vector: {
+          level: "SourceCodeHook (SKIA/Cairo)",
+          bandwidth_savings_pct: 99.9,
+          draw_commands_queued: 3,
+          remoting_protocol: "WebRTC/WASM",
+        },
+        kwasm: {
+          runtime: "wasm64 In-Kernel",
+          fpu_policy: "STRICTLY_DISABLED",
+          exported_symbols: 4,
+          memory_pool_bytes: 65536,
+        },
+        tala_ast_guard: {
+          policy: "GAST",
+          max_tree_edit_distance: 3,
+          enforcement: "ACTIVE",
+          last_verdict: "BENIGN_PASS",
+        },
+        wave_mddma: {
+          tensor_dimensions: 5,
+          descriptor_bits: 256,
+          burst_4k_aligned: true,
+          pe_quad_state: ["SLEEP", "AWAKE", "SLEEP", "SLEEP"],
+        },
+      },
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  function broadcastTelemetry(packet = buildTelemetryPacket()) {
+    if (telemetrySockets.size === 0) return packet;
+    const frame = encodeWebSocketTextFrame(JSON.stringify(packet));
+    for (const sock of telemetrySockets) {
+      if (sock.destroyed || !sock.writable) {
+        telemetrySockets.delete(sock);
+        continue;
+      }
+      try {
+        sock.write(frame);
+      } catch {
+        telemetrySockets.delete(sock);
+      }
+    }
+    return packet;
+  }
+
+  function handleTelemetryUpgrade(request, socket) {
+    let pathname = "/";
+    try {
+      pathname = new URL(request.url ?? "/", "http://localhost").pathname;
+    } catch {
+      return false;
+    }
+    if (pathname !== "/telemetry" && pathname !== "/api/guest/telemetry") {
+      return false;
+    }
+    const key = request.headers["sec-websocket-key"];
+    if (!key || typeof key !== "string") {
+      socket.write("HTTP/1.1 400 Bad Request\r\n\r\n");
+      socket.destroy();
+      return true;
+    }
+    const accept = createHash("sha1").update(key + WS_GUID).digest("base64");
+    socket.write(
+      [
+        "HTTP/1.1 101 Switching Protocols",
+        "Upgrade: websocket",
+        "Connection: Upgrade",
+        `Sec-WebSocket-Accept: ${accept}`,
+        "\r\n",
+      ].join("\r\n"),
+    );
+    telemetrySockets.add(socket);
+    // Send initial telemetry frame immediately on connect
+    try {
+      socket.write(encodeWebSocketTextFrame(JSON.stringify(buildTelemetryPacket())));
+    } catch {
+      telemetrySockets.delete(socket);
+    }
+
+    const heartbeat = setInterval(() => {
+      if (socket.destroyed || !socket.writable) {
+        clearInterval(heartbeat);
+        telemetrySockets.delete(socket);
+        return;
+      }
+      try {
+        socket.write(encodeWebSocketTextFrame(JSON.stringify(buildTelemetryPacket())));
+      } catch {
+        clearInterval(heartbeat);
+        telemetrySockets.delete(socket);
+      }
+    }, 3000);
+    if (typeof heartbeat.unref === "function") heartbeat.unref();
+
+    socket.on("close", () => {
+      clearInterval(heartbeat);
+      telemetrySockets.delete(socket);
+    });
+    socket.on("error", () => {
+      clearInterval(heartbeat);
+      telemetrySockets.delete(socket);
+    });
+    return true;
+  }
 
   function resolveDataChild(parent, entryName) {
     const dataRoot = path.resolve(dataDirectory);
@@ -948,17 +1178,24 @@ export function createGuestApi(options = {}) {
   }
 
   async function preparedCardIds() {
-    let entries;
+    let overlayEntries = [];
     try {
-      entries = await readdir(overlayDirectory, { withFileTypes: true });
+      overlayEntries = await readdir(overlayDirectory, { withFileTypes: true });
     } catch (error) {
-      if (error.code === "ENOENT") return [];
-      throw new GuestApiError(500, `Could not list Linux card overlays: ${error.message}`);
+      if (error.code !== "ENOENT") throw new GuestApiError(500, `Could not list Linux card overlays: ${error.message}`);
+    }
+    let androidEntries = [];
+    try {
+      androidEntries = await readdir(androidDirectory, { withFileTypes: true });
+    } catch (error) {
+      if (error.code !== "ENOENT") throw new GuestApiError(500, `Could not list Android card disks: ${error.message}`);
     }
 
-    return entries
-      .filter((entry) => entry.isFile() && /^[a-z0-9][a-z0-9_-]{0,63}\.qcow2$/.test(entry.name))
-      .map((entry) => entry.name.slice(0, -".qcow2".length));
+    const ids = [
+      ...overlayEntries.filter((entry) => entry.isFile() && /^[a-z0-9][a-z0-9_-]{0,63}\.qcow2$/.test(entry.name)).map((entry) => entry.name.slice(0, -".qcow2".length)),
+      ...androidEntries.filter((entry) => entry.isFile() && /^[a-z0-9][a-z0-9_-]{0,63}\.qcow2$/.test(entry.name)).map((entry) => entry.name.slice(0, -".qcow2".length)),
+    ];
+    return [...new Set(ids)];
   }
 
   async function preparedWindowsCardIds() {
@@ -1150,6 +1387,7 @@ export function createGuestApi(options = {}) {
       customIsos: await readCustomIsos(),
       cpuCapacity: availableParallelism(),
       maxConcurrentGuests: MAX_CONCURRENT_GUESTS,
+      telemetry: broadcastTelemetry(),
       guests: [...guests.values()].map((guest) => {
         normalizeGuestState(guest);
         return {
@@ -1158,6 +1396,7 @@ export function createGuestApi(options = {}) {
           status: guest.phase,
           bootMode: guest.bootMode,
           error: guest.error,
+          stderr: guest.stderr ?? "",
           websocketPort: guest.ports?.websocketPort ?? null,
           qmpPort: guest.ports?.qmpPort ?? null,
           serialPort: guest.ports?.serialPort ?? null,
@@ -1166,9 +1405,11 @@ export function createGuestApi(options = {}) {
           vcpus: guest.vcpus ?? resolveCardVcpus("balanced"),
           diskPath: guest.os === WINDOWS_OS
             ? path.join(windowsDiskDirectory, `${guest.cardId}.qcow2`)
-            : guest.bootMode === "installer"
-              ? baseDiskPath
-              : path.join(overlayDirectory, `${guest.cardId}.qcow2`),
+            : guest.os === ANDROID_OS
+              ? path.join(androidDirectory, `${guest.cardId}.qcow2`)
+              : guest.bootMode === "installer"
+                ? baseDiskPath
+                : path.join(overlayDirectory, `${guest.cardId}.qcow2`),
         };
       }),
     };
@@ -1428,6 +1669,37 @@ export function createGuestApi(options = {}) {
           macOvmfCode: macOvmfCodeMaster,
           macOvmfVars,
         });
+      } else if (os === ANDROID_OS) {
+        if (!(await executableExists(qemuPath))) {
+          throw new GuestApiError(503, `QEMU was not found at ${qemuPath}. Set POSTCARD_QEMU to its path.`);
+        }
+        await mkdir(androidDirectory, { recursive: true });
+        diskPath = path.join(androidDirectory, `${cardId}.qcow2`);
+        if (existsSync(androidGoldenPath) && !existsSync(diskPath)) {
+          await createOverlayIfNeeded(androidGoldenPath, diskPath, qemuImgPath);
+        } else {
+          await createEmptyDiskIfNeeded(diskPath, qemuImgPath, "16G");
+        }
+        const effectiveIso = cardCustomIso && existsSync(cardCustomIso) ? cardCustomIso : androidIsoPath;
+        if ((bootMode === "installer" || !existsSync(diskPath)) && !existsSync(effectiveIso) && !existsSync(androidGoldenPath)) {
+          throw new GuestApiError(503, `Android installer ISO was not found at ${effectiveIso}. Set POSTCARD_ANDROID_ISO to its path.`);
+        }
+        const ports = await reservePorts(guest);
+        const cardDropDir = path.join(paperPlanesDropDir, cardId);
+        await mkdir(cardDropDir, { recursive: true });
+        const networkMode = (await readNetworkModes())[cardId] ?? "nat";
+        args = qemuArguments({
+          bootMode,
+          cardId,
+          diskPath,
+          isoPath: effectiveIso,
+          ports,
+          networkMode,
+          dropDir: cardDropDir,
+          memoryMb: Math.max(memoryMb, 1536),
+          vcpus,
+          isAndroid: true,
+        });
       } else {
         if (!(await executableExists(qemuPath))) {
           throw new GuestApiError(503, `QEMU was not found at ${qemuPath}. Set POSTCARD_QEMU to its path.`);
@@ -1460,11 +1732,10 @@ export function createGuestApi(options = {}) {
         const cardDropDir = path.join(paperPlanesDropDir, cardId);
         await mkdir(cardDropDir, { recursive: true });
         const networkMode = (await readNetworkModes())[cardId] ?? "nat";
-        const targetIso = os === ANDROID_OS && existsSync(androidIsoPath) ? androidIsoPath : isoPath;
-        const isKernelGuest = cardId === "postcard-os" || os === "kernel";
+        const isKernelGuest = os === "kernel";
         const kernelPath = isKernelGuest && existsSync(postcardKernelPath) ? postcardKernelPath : "";
         const initrdPath = isKernelGuest && existsSync(postcardRamdiskPath) ? postcardRamdiskPath : "";
-        args = qemuArguments({ bootMode, cardId, diskPath, isoPath: targetIso, ports, networkMode, dropDir: cardDropDir, memoryMb, vcpus, kernelPath, initrdPath });
+        args = qemuArguments({ bootMode, cardId, diskPath, isoPath, ports, networkMode, dropDir: cardDropDir, memoryMb, vcpus, kernelPath, initrdPath });
       }
 
       let child;
@@ -1762,6 +2033,11 @@ export function createGuestApi(options = {}) {
         { parent: windowsFirmwareDirectory, name: `${cardId}-VARS.fd`, type: "file" },
         { parent: windowsTpmDirectory, name: cardId, type: "directory" },
       ]
+      : os === ANDROID_OS
+      ? [
+        { parent: androidDirectory, name: `${cardId}.qcow2`, type: "file", disk: true },
+        { parent: androidDirectory, name: `${cardId}.qcow2.checkpoint`, type: "file" },
+      ]
       : [
         { parent: overlayDirectory, name: `${cardId}.qcow2`, type: "file", disk: true },
         { parent: overlayDirectory, name: `${cardId}.qcow2.checkpoint`, type: "file" },
@@ -1893,6 +2169,8 @@ export function createGuestApi(options = {}) {
       await rm(path.join(windowsDiskDirectory, `${cardId}.qcow2`), { force: true });
       await rm(path.join(windowsFirmwareDirectory, `${cardId}-VARS.fd`), { force: true });
       await rm(path.join(windowsTpmDirectory, cardId), { recursive: true, force: true });
+    } else if (os === ANDROID_OS) {
+      await rm(path.join(androidDirectory, `${cardId}.qcow2`), { force: true });
     } else {
       await rm(path.join(overlayDirectory, `${cardId}.qcow2`), { force: true });
     }
@@ -1931,6 +2209,16 @@ export function createGuestApi(options = {}) {
       }
       if (existsSync(srcDisk)) {
         await mkdir(windowsDiskDirectory, { recursive: true });
+        await copyFile(srcDisk, dstDisk, fsConstants.COPYFILE_EXCL);
+      }
+    } else if (os === ANDROID_OS) {
+      const srcDisk = path.join(androidDirectory, `${sourceCardId}.qcow2`);
+      const dstDisk = path.join(androidDirectory, `${targetCardId}.qcow2`);
+      if (existsSync(dstDisk)) {
+        throw new GuestApiError(409, "Target Android card already has a disk.");
+      }
+      if (existsSync(srcDisk)) {
+        await mkdir(androidDirectory, { recursive: true });
         await copyFile(srcDisk, dstDisk, fsConstants.COPYFILE_EXCL);
       }
     } else {
@@ -2229,7 +2517,9 @@ export function createGuestApi(options = {}) {
     const diskPath =
       os === WINDOWS_OS
         ? path.join(windowsDiskDirectory, `${cardId}.qcow2`)
-        : path.join(overlayDirectory, `${cardId}.qcow2`);
+        : os === ANDROID_OS
+          ? path.join(androidDirectory, `${cardId}.qcow2`)
+          : path.join(overlayDirectory, `${cardId}.qcow2`);
     const checkpointDiskPath = `${diskPath}.checkpoint`;
 
     if (targetGuest && targetGuest.phase === "running" && targetGuest.ports?.qmpPort) {
@@ -2677,9 +2967,13 @@ export function createGuestApi(options = {}) {
     };
   }
 
-  return async (request, response, next) => {
+  const middleware = async (request, response, next) => {
     if (await handleStripeRequest(request, response)) return;
     const url = new URL(request.url ?? "/", "http://localhost");
+    if (request.method === "GET" && url.pathname === "/telemetry") {
+      sendJson(response, 200, broadcastTelemetry());
+      return;
+    }
     if (!url.pathname.startsWith("/api/guest/")) {
       next();
       return;
@@ -2696,6 +2990,18 @@ export function createGuestApi(options = {}) {
     try {
       if (request.method === "GET" && url.pathname === "/api/guest/status") {
         sendJson(response, 200, await status());
+        return;
+      }
+      if (request.method === "GET" && url.pathname === "/api/guest/stderr") {
+        const targetCardId = url.searchParams.get("cardId") ?? "";
+        const targetGuest = guests.get(targetCardId);
+        sendJson(response, 200, {
+          cardId: targetCardId,
+          stderr: targetGuest?.stderr ?? "",
+          serialOutput: targetGuest?.serialOutput ?? "",
+          error: targetGuest?.error ?? null,
+          phase: targetGuest?.phase ?? "offline",
+        });
         return;
       }
       if (request.method === "POST" && url.pathname === "/api/guest/allocate-card-id") {
@@ -2981,6 +3287,23 @@ export function createGuestApi(options = {}) {
         );
         return;
       }
+      if (request.method === "GET" && url.pathname === "/api/guest/telemetry") {
+        sendJson(response, 200, broadcastTelemetry());
+        return;
+      }
+      if (request.method === "POST" && url.pathname === "/api/guest/telemetry") {
+        const body = await readJson(request);
+        if (typeof body?.romy_active === "boolean") {
+          romyCoprocessorActive = body.romy_active;
+        }
+        if (typeof body?.heap_usage_kb === "number" && Number.isFinite(body.heap_usage_kb)) {
+          customHeapUsageKb = Math.max(256, Math.min(KERNEL_HEAP_CAPACITY_KB, Math.round(body.heap_usage_kb)));
+        } else if (body?.heap_usage_kb === null) {
+          customHeapUsageKb = null;
+        }
+        sendJson(response, 200, broadcastTelemetry());
+        return;
+      }
       sendJson(response, 404, { error: "Unknown guest API endpoint." });
     } catch (error) {
       const statusCode = error instanceof GuestApiError ? error.status : 500;
@@ -2988,4 +3311,9 @@ export function createGuestApi(options = {}) {
       sendJson(response, statusCode, { error: message });
     }
   };
+  return Object.assign(middleware, {
+    handleUpgrade: handleTelemetryUpgrade,
+    broadcastTelemetry,
+    buildTelemetryPacket,
+  });
 }
