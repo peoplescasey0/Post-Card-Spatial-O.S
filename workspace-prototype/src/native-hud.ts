@@ -116,6 +116,48 @@ export interface KernelTelemetryPacket {
   boot_log?: readonly string[];
   avionics_log?: readonly string[];
   active_guests?: number;
+  patent_engines?: {
+    nvidia_maxq?: {
+      mode: string;
+      gpu_freq_mhz: number;
+      dram_freq_mhz: number;
+      power_draw_w: number;
+      tdp_limit_w: number;
+      efficiency_slope: number;
+      state: string;
+    };
+    voyager_shm?: {
+      active_topics: number;
+      buffer_capacity_bytes: number;
+      dual_offset_sync: boolean;
+      overwrites_recovered: number;
+      latest_topic: string;
+    };
+    arais_vector?: {
+      level: string;
+      bandwidth_savings_pct: number;
+      draw_commands_queued: number;
+      remoting_protocol: string;
+    };
+    kwasm?: {
+      runtime: string;
+      fpu_policy: string;
+      exported_symbols: number;
+      memory_pool_bytes: number;
+    };
+    tala_ast_guard?: {
+      policy: string;
+      max_tree_edit_distance: number;
+      enforcement: string;
+      last_verdict: string;
+    };
+    wave_mddma?: {
+      tensor_dimensions: number;
+      descriptor_bits: number;
+      burst_4k_aligned: boolean;
+      pe_quad_state: string[];
+    };
+  };
   timestamp?: string;
 }
 
@@ -331,5 +373,26 @@ export function applyTelemetryToDom(
   const heapLabelEl = doc.getElementById("heap-pressure-label");
   if (heapLabelEl) {
     heapLabelEl.textContent = `${telemetry.heap_pressure}% (${telemetry.heap_usage_kb} KB)`;
+  }
+
+  // Update Patent Engine Telemetry Badges
+  if (telemetry.patent_engines) {
+    const maxqEl = doc.getElementById("maxq-hud-label");
+    if (maxqEl && telemetry.patent_engines.nvidia_maxq) {
+      const q = telemetry.patent_engines.nvidia_maxq;
+      maxqEl.textContent = `${q.gpu_freq_mhz} MHz @ ${q.power_draw_w}W (${q.mode})`;
+    }
+
+    const shmEl = doc.getElementById("shm-hud-label");
+    if (shmEl && telemetry.patent_engines.voyager_shm) {
+      const s = telemetry.patent_engines.voyager_shm;
+      shmEl.textContent = `${s.active_topics} Topics (${s.overwrites_recovered} Lossless Drops)`;
+    }
+
+    const araisEl = doc.getElementById("arais-hud-label");
+    if (araisEl && telemetry.patent_engines.arais_vector) {
+      const a = telemetry.patent_engines.arais_vector;
+      araisEl.textContent = `${a.bandwidth_savings_pct}% Vector Opt`;
+    }
   }
 }

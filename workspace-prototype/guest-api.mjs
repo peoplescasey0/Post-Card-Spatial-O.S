@@ -962,6 +962,48 @@ export function createGuestApi(options = {}) {
       avionics_stages: SPACE_PLANE_AVIONICS_LINES,
       avionics_log: SPACE_PLANE_AVIONICS_LOG_LINES,
       active_guests: active.length,
+      patent_engines: {
+        nvidia_maxq: {
+          mode: "MAX_EFFICIENCY",
+          gpu_freq_mhz: 1500,
+          dram_freq_mhz: 7000,
+          power_draw_w: 66,
+          tdp_limit_w: 80,
+          efficiency_slope: 1.41,
+          state: "READY_IDLE",
+        },
+        voyager_shm: {
+          active_topics: 3,
+          buffer_capacity_bytes: 4096,
+          dual_offset_sync: true,
+          overwrites_recovered: 0,
+          latest_topic: "hud_telemetry",
+        },
+        arais_vector: {
+          level: "SourceCodeHook (SKIA/Cairo)",
+          bandwidth_savings_pct: 99.9,
+          draw_commands_queued: 3,
+          remoting_protocol: "WebRTC/WASM",
+        },
+        kwasm: {
+          runtime: "wasm64 In-Kernel",
+          fpu_policy: "STRICTLY_DISABLED",
+          exported_symbols: 4,
+          memory_pool_bytes: 65536,
+        },
+        tala_ast_guard: {
+          policy: "GAST",
+          max_tree_edit_distance: 3,
+          enforcement: "ACTIVE",
+          last_verdict: "BENIGN_PASS",
+        },
+        wave_mddma: {
+          tensor_dimensions: 5,
+          descriptor_bits: 256,
+          burst_4k_aligned: true,
+          pe_quad_state: ["SLEEP", "AWAKE", "SLEEP", "SLEEP"],
+        },
+      },
       timestamp: new Date().toISOString(),
     };
   }

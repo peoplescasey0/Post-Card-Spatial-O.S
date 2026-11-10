@@ -18,6 +18,8 @@ use crate::blockdev;
 use crate::fat32;
 use crate::glyph_8x8;
 use crate::mouse::{self, MouseState};
+use crate::nvidia_maxq_estimator::{self, OptimizationMode, NVIDIA_MAXQ_ESTIMATOR};
+use crate::shm_ipc::VOYAGER_SHM_IPC;
 use crate::GopFramebufferInfo;
 use crate::CAPSULES;
 use crate::PROCS;
@@ -223,7 +225,9 @@ pub struct SpatialCard {
     pub status: &'static str,
 }
 
-static mut CARDS: [SpatialCard; 4] = [
+pub const NUM_CARDS: usize = 5;
+
+static mut CARDS: [SpatialCard; NUM_CARDS] = [
     SpatialCard {
         id: 0,
         title: "AVIONICS // SPACE PLANE HUD",
@@ -264,9 +268,19 @@ static mut CARDS: [SpatialCard; 4] = [
         accent: COLOR_VIOLET,
         status: "LOCKED",
     },
+    SpatialCard {
+        id: 4,
+        title: "PATENT ENGINE // MAX-Q & SHM",
+        x: 696,
+        y: 96,
+        w: 304,
+        h: 606,
+        accent: COLOR_CYAN,
+        status: "ONLINE",
+    },
 ];
 
-static mut Z_ORDER: [usize; 4] = [0, 1, 2, 3];
+static mut Z_ORDER: [usize; NUM_CARDS] = [0, 1, 2, 3, 4];
 static mut ACTIVE_DRAG_CARD: Option<usize> = None;
 static mut DRAG_OFFSET_X: i32 = 0;
 static mut DRAG_OFFSET_Y: i32 = 0;
@@ -427,6 +441,64 @@ unsafe fn render_card_content(fb: &GopFramebufferInfo, card: &SpatialCard) {
 
             draw_str(fb, bx, by, "Isolation: Ring 0/VMX Root", COLOR_VIOLET, None);
         }
+        4 => {
+            // Card 4: Patent Engine (Max-Q Dynamic Boost & Voyager SHM)
+            draw_str(fb, bx, by, "NVIDIA MAX-Q Dynamic Boost:", COLOR_TEXT_LIGHT, None);
+            by += 16;
+
+            let cur = &NVIDIA_MAXQ_ESTIMATOR.current_point;
+            let mode_str = nvidia_maxq_estimator::opt_mode_str(NVIDIA_MAXQ_ESTIMATOR.mode);
+            draw_str(fb, bx, by, "Mode:", COLOR_TEXT_MUTED, None);
+            draw_str(fb, bx + 48, by, mode_str, COLOR_CYAN, None);
+            by += 16;
+
+            draw_str(fb, bx, by, "GPU Clock:", COLOR_TEXT_MUTED, None);
+            let mut buf_g = [0u8; 32];
+            let g_str = format_num(cur.gpu_freq_mhz as u64, &mut buf_g);
+            draw_str(fb, bx + 84, by, g_str, COLOR_EMERALD, None);
+            draw_str(fb, bx + 128, by, "MHz", COLOR_TEXT_MUTED, None);
+            by += 16;
+
+            draw_str(fb, bx, by, "V-F Draw:", COLOR_TEXT_MUTED, None);
+            let mut buf_p = [0u8; 32];
+            let p_str = format_num(cur.predicted_total_power_w as u64, &mut buf_p);
+            draw_str(fb, bx + 76, by, p_str, COLOR_AMBER, None);
+            draw_str(fb, bx + 100, by, "W / 80W TDP", COLOR_TEXT_MUTED, None);
+            by += 14;
+
+            // Power Gauge Bar
+            fill_rect(fb, bx, by, card.w - 24, 10, 0x000F172A);
+            let fill_w = ((card.w - 28) * (cur.predicted_total_power_w as i32)).min(card.w - 28) / 80;
+            fill_rect(fb, bx + 2, by + 2, fill_w.max(2), 6, COLOR_AMBER);
+            by += 18;
+
+            draw_button(fb, bx, by, 130, 22, "[CYCLE MODE]", COLOR_CYAN);
+            draw_button(fb, bx + 138, by, 130, 22, "[STEP MAX-Q]", COLOR_EMERALD);
+            by += 32;
+
+            // Voyager SHM Section
+            draw_str(fb, bx, by, "Voyager SHM Ring Bus:", COLOR_TEXT_LIGHT, None);
+            by += 16;
+            draw_str(fb, bx, by, "Topics: 3 Registered", COLOR_TEXT_MUTED, None);
+            by += 14;
+            draw_str(fb, bx, by, "Sync: tail & pending_tail", COLOR_EMERALD, None);
+            by += 14;
+            draw_str(fb, bx, by, "Overwrites: 0 (Lossless)", COLOR_CYAN, None);
+            by += 18;
+            draw_button(fb, bx, by, 268, 22, "[PUBLISH TELEMETRY SHM]", COLOR_AMBER);
+            by += 32;
+
+            // Subsystem Status Matrix
+            draw_str(fb, bx, by, "Kwasm: wasm64 Kernel-Safe", COLOR_EMERALD, None);
+            by += 14;
+            draw_str(fb, bx, by, "FPU: STRICTLY DISABLED", COLOR_TEXT_MUTED, None);
+            by += 14;
+            draw_str(fb, bx, by, "ARAIS: >99.9% Vector Bandwidth", COLOR_CYAN, None);
+            by += 14;
+            draw_str(fb, bx, by, "Tala Guard: GAST Enforced", COLOR_EMERALD, None);
+            by += 14;
+            draw_str(fb, bx, by, "Wave MD-DMA: 5-D Tensor PE Quad", COLOR_AMBER, None);
+        }
         _ => {}
     }
 }
@@ -469,7 +541,7 @@ pub unsafe fn render_desktop(fb: &GopFramebufferInfo) {
 
     // 4. Render Spatial Cards according to Z-order
     for &idx in Z_ORDER.iter() {
-        let is_top = idx == Z_ORDER[3];
+        let is_top = idx == Z_ORDER[NUM_CARDS - 1];
         let card = CARDS[idx];
         render_card_frame(fb, &card, is_top);
         render_card_content(fb, &card);
@@ -502,6 +574,8 @@ pub unsafe fn handle_click(fb: &GopFramebufferInfo, m: &MouseState) -> Option<&'
         CARDS[2].y = 402;
         CARDS[3].x = 360;
         CARDS[3].y = 402;
+        CARDS[4].x = 696;
+        CARDS[4].y = 96;
         LAST_ACTION_MSG = "Card positions reset to default grid.";
         render_desktop(fb);
         return None;
@@ -513,7 +587,7 @@ pub unsafe fn handle_click(fb: &GopFramebufferInfo, m: &MouseState) -> Option<&'
     }
 
     // 2. Check Cards in Reverse Z-Order (topmost card receives clicks first)
-    for i in (0..4).rev() {
+    for i in (0..NUM_CARDS).rev() {
         let card_idx = Z_ORDER[i];
         let card = &mut CARDS[card_idx];
 
@@ -617,6 +691,34 @@ pub unsafe fn handle_click(fb: &GopFramebufferInfo, m: &MouseState) -> Option<&'
                         return None;
                     }
                 }
+                4 => {
+                    // Card 4: Patent Engine Buttons
+                    // Cycle Mode Button: (rel_x in 12..142, rel_y in 108..132)
+                    if rel_x >= 12 && rel_x <= 142 && rel_y >= 108 && rel_y <= 132 {
+                        NVIDIA_MAXQ_ESTIMATOR.mode = match NVIDIA_MAXQ_ESTIMATOR.mode {
+                            OptimizationMode::MaximizePerformance => OptimizationMode::MinimizePower,
+                            OptimizationMode::MinimizePower => OptimizationMode::MaximizeEfficiency,
+                            OptimizationMode::MaximizeEfficiency => OptimizationMode::MaximizePerformance,
+                        };
+                        LAST_ACTION_MSG = "Max-Q: Switched Optimization Mode!";
+                        render_desktop(fb);
+                        return None;
+                    }
+                    // Step Max-Q Button: (rel_x in 150..280, rel_y in 108..132)
+                    if rel_x >= 150 && rel_x <= 280 && rel_y >= 108 && rel_y <= 132 {
+                        let _ = NVIDIA_MAXQ_ESTIMATOR.step_optimization_cycle(false);
+                        LAST_ACTION_MSG = "Max-Q: Stepped telemetry & recalculated optimal V-F point!";
+                        render_desktop(fb);
+                        return None;
+                    }
+                    // Publish SHM Button: (rel_x in 12..280, rel_y in 196..220)
+                    if rel_x >= 12 && rel_x <= 280 && rel_y >= 196 && rel_y <= 220 {
+                        let _ = VOYAGER_SHM_IPC.publish_message(1, b"SPATIAL_GUI_TELEMETRY_SAMPLE");
+                        LAST_ACTION_MSG = "Voyager SHM: Published zero-copy telemetry packet!";
+                        render_desktop(fb);
+                        return None;
+                    }
+                }
                 _ => {}
             }
 
@@ -636,10 +738,10 @@ unsafe fn bring_to_front(card_idx: usize) {
             break;
         }
     }
-    for pos in found_pos..3 {
+    for pos in found_pos..(NUM_CARDS - 1) {
         Z_ORDER[pos] = Z_ORDER[pos + 1];
     }
-    Z_ORDER[3] = card_idx;
+    Z_ORDER[NUM_CARDS - 1] = card_idx;
 }
 
 pub unsafe fn handle_drag(fb: &GopFramebufferInfo, m: &MouseState) {
@@ -701,10 +803,10 @@ pub unsafe fn run_gui_desktop(fb: &GopFramebufferInfo) {
                 b'\t' => {
                     // TAB -> Cycle Z-order
                     let top = Z_ORDER[0];
-                    for i in 0..3 {
+                    for i in 0..(NUM_CARDS - 1) {
                         Z_ORDER[i] = Z_ORDER[i + 1];
                     }
-                    Z_ORDER[3] = top;
+                    Z_ORDER[NUM_CARDS - 1] = top;
                     render_desktop(fb);
                     cursor_draw(fb, m.x, m.y);
                 }
