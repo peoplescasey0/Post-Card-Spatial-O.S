@@ -506,6 +506,12 @@ unsafe fn render_card_content(fb: &GopFramebufferInfo, card: &SpatialCard) {
             draw_str(fb, bx, by, "Fortinet: 78B XDP/MSPSC (US'693)", COLOR_AMBER, None);
             by += 14;
             draw_str(fb, bx, by, "NUDT: Joint NetAccel -84.2% (CN'090)", COLOR_CYAN, None);
+            by += 14;
+            draw_str(fb, bx, by, "YuanNao: In-NIC SmartNIC (CN'602)", COLOR_EMERALD, None);
+            by += 14;
+            draw_str(fb, bx, by, "CAS CNIC: AF_XDP Zero-Copy (CN'679)", COLOR_AMBER, None);
+            by += 14;
+            draw_str(fb, bx, by, "Langhe Mesh: Sockops Bypass (CN'370)", COLOR_CYAN, None);
         }
         _ => {}
     }

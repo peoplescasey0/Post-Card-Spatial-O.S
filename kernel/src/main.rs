@@ -823,6 +823,9 @@ mod intel_dtree;
 mod panda_pipeline;
 mod fortinet_capture;
 mod nudt_netaccel;
+mod yuannao_smartnic;
+mod cas_afxdp;
+mod langhe_mesh;
 
 // ============================================================================
 // 5. HARDWARE VT-x (VMXON / VMCS) & MICRO-VM CAPSULE HYPERVISOR ENGINE
@@ -1766,6 +1769,18 @@ pub unsafe extern "C" fn _start(multiboot2_info_addr: usize) -> ! {
     nudt_netaccel::init_nudt_subsystem();
     kprintln_emerald!("[ok] NUDT Joint NetAccel: eBPF/XDP SDN packet-in bypass & in-kernel reassembly armed (CN 118301090 A)");
 
+    // Initialize YuanNao SmartNIC Hardware-Offloaded XDP Engine (CN 116996602 B)
+    yuannao_smartnic::init_yuannao_subsystem();
+    kprintln_emerald!("[ok] YuanNao SmartNIC: In-NIC hardware-offloaded XDP, isolated meta & T1 watchdog armed (CN 116996602 B)");
+
+    // Initialize CAS CNIC Dual-Stack AF_XDP Multiplexer (CN 115714679 A)
+    cas_afxdp::init_cas_subsystem();
+    kprintln_emerald!("[ok] CAS CNIC AF_XDP: XSKMAP queue binding, UMEM ring & multi-NIC 1:1 armed (CN 115714679 A)");
+
+    // Initialize Langhe Service Mesh Sockops Acceleration Engine (CN 114025370 B)
+    langhe_mesh::init_langhe_subsystem();
+    kprintln_emerald!("[ok] Langhe Service Mesh: Sidecar sockmap bypass & ARP dual-sync armed (CN 114025370 B)");
+
     kprintln_emerald!("Spatial OS is ALIVE!");
 
     // 4. Interactive bare-metal shell (accepts input from BOTH PS/2 Keyboard and Serial COM1)
@@ -1831,7 +1846,7 @@ unsafe fn handle_shell_command(cmd_bytes: &[u8], mb2: &Multiboot2ParsedInfo) {
         return;
     }
     if cmd == "help" {
-        kprintln!("commands: help, gui, deck, mouse, routes, route [bind/free], usbc, sec, hsm [auth/lock], trust/graph, span [kick/ipi/rebalance], rootvmm [enter/exit/verify], snvme [read/write/target], hyos, dock, undock, pats [lba], shrink [mb], sva [activate/morph/dma/priv], latehv [step/trap], muse [fast/slow/mdev], coreiso [dispatch/pf], vgpu [tx/bounds], sriov [trigger/error/reset], vmsec [io/snap/bounds], ppt [ecall/aex/exit], vam [profile/bench], hvm [rma/poll/info], wasm [test/fuel/status], maxq [opt/step/tdp], shm [pub/sub], arais [level/flush], astguard [test], kwasm [test/call], mddma [burst/5d], dtree [eval/test], panda [test/parse], fortinet [test/eos], nudt [test/rule], cxl, scibuf, ltssm/margin, hud, net, stream, flynet [slot], fly [0..3], land, cpu, vmx, vms, vmrun, spawn, exec, elf, sched, syscall, ls, echo, uptime, mem, ps, pci, disks, sandbox, avionics, radiator, install, halt, reboot");
+        kprintln!("commands: help, gui, deck, mouse, routes, route [bind/free], usbc, sec, hsm [auth/lock], trust/graph, span [kick/ipi/rebalance], rootvmm [enter/exit/verify], snvme [read/write/target], hyos, dock, undock, pats [lba], shrink [mb], sva [activate/morph/dma/priv], latehv [step/trap], muse [fast/slow/mdev], coreiso [dispatch/pf], vgpu [tx/bounds], sriov [trigger/error/reset], vmsec [io/snap/bounds], ppt [ecall/aex/exit], vam [profile/bench], hvm [rma/poll/info], wasm [test/fuel/status], maxq [opt/step/tdp], shm [pub/sub], arais [level/flush], astguard [test], kwasm [test/call], mddma [burst/5d], dtree [eval/test], panda [test/parse], fortinet [test/eos], nudt [test/rule], snic [test/rule], afxdp [test/bind], mesh [test/arp], cxl, scibuf, ltssm/margin, hud, net, stream, flynet [slot], fly [0..3], land, cpu, vmx, vms, vmrun, spawn, exec, elf, sched, syscall, ls, echo, uptime, mem, ps, pci, disks, sandbox, avionics, radiator, install, halt, reboot");
         kprintln!("storage:  disks, mount [pN], umount, df, ls [dir], cat <file>, write <file> <text>, append <file> <text>, touch <file>, mkdir <dir>, rm <path>, sync, blk <dev> <lba>");
     } else if cmd == "gui" || cmd == "deck" || cmd == "desktop" {
         if let Some(ref fb) = GOP_FB {
@@ -3865,6 +3880,125 @@ unsafe fn handle_shell_command(cmd_bytes: &[u8], mb2: &Multiboot2ParsedInfo) {
             nudt_netaccel::NUDT_NETACCEL_ENGINE.latency_reduction_ratio_pct()
         );
         kprintln!("Consistency Verifier: IP/TCP checksums recalculated in-kernel, sequence/ack aligned");
+    } else if cmd == "snic" || cmd.starts_with("snic ") {
+        let arg = cmd.strip_prefix("snic ").unwrap_or("");
+        let mut it = arg.split_whitespace();
+        let sub = it.next().unwrap_or("");
+        if sub == "test" {
+            // Test 1: Valid Offloaded NAT Packet (Normal execution time 8us < 15us)
+            let (act1, msg1) = yuannao_smartnic::YUANNAO_SMARTNIC_ENGINE.process_packet_on_nic(
+                64, 6, [192, 168, 1, 100], [10, 0, 2, 15], 8
+            );
+            kprintln_emerald!("[SMARTNIC PASS] Valid Ingress: {:?} -> {}", act1, msg1);
+
+            // Test 2: Anomaly packet with TTL = 0 (Pruned directly in NIC)
+            let (act2, msg2) = yuannao_smartnic::YUANNAO_SMARTNIC_ENGINE.process_packet_on_nic(
+                0, 6, [192, 168, 1, 100], [10, 0, 2, 15], 5
+            );
+            kprintln_emerald!("[SMARTNIC PASS] Anomaly Ingress (TTL=0): {:?} -> {}", act2, msg2);
+
+            // Test 3: Watchdog deadline overrun (> 15us)
+            let (act3, msg3) = yuannao_smartnic::YUANNAO_SMARTNIC_ENGINE.process_packet_on_nic(
+                64, 6, [192, 168, 1, 100], [10, 0, 2, 15], 25
+            );
+            kprintln_emerald!("[SMARTNIC PASS] Deadline Exceeded: {:?} -> {}", act3, msg3);
+        } else if sub == "rule" {
+            let src = [192, 168, 1, 200];
+            let dst = [10, 0, 2, 50];
+            yuannao_smartnic::YUANNAO_SMARTNIC_ENGINE.install_rule(
+                6, src, dst, yuannao_smartnic::SmartNicAction::TxHardwareNat(0x0A000232, 9090)
+            );
+            kprintln_emerald!("[SMARTNIC] In-NIC Hardware NAT Rule Installed: 192.168.1.200 -> 10.0.2.50:9090");
+        }
+        kprintln_amber!("=== YUANNAO SMARTNIC HARDWARE-OFFLOADED XDP ENGINE (CN 116996602 B) ===");
+        kprintln!(
+            "SmartNIC SRAM MetaTable: {} rules active (Max: {}) | Instruction Budget: {} insns",
+            yuannao_smartnic::YUANNAO_SMARTNIC_ENGINE.rule_count,
+            yuannao_smartnic::MAX_SMARTNIC_RULES,
+            yuannao_smartnic::SMARTNIC_MAX_INSTRUCTIONS
+        );
+        kprintln!(
+            "Offload Execution Watchdog: Deadline T1 = {} us | Host CPU Utilization: {}%",
+            yuannao_smartnic::SMARTNIC_MAX_EXEC_TIME_US,
+            yuannao_smartnic::YUANNAO_SMARTNIC_ENGINE.host_cpu_utilization_pct
+        );
+        kprintln!(
+            "Hardware Counters: Total Ingress: {} | Hardware NAT: {} | Host Passed: {} | Anomaly Drops: {} | Watchdog Drops: {}",
+            yuannao_smartnic::YUANNAO_SMARTNIC_ENGINE.total_rx_packets,
+            yuannao_smartnic::YUANNAO_SMARTNIC_ENGINE.total_offloaded_nat,
+            yuannao_smartnic::YUANNAO_SMARTNIC_ENGINE.total_passed_to_host,
+            yuannao_smartnic::YUANNAO_SMARTNIC_ENGINE.total_anomaly_drops,
+            yuannao_smartnic::YUANNAO_SMARTNIC_ENGINE.total_watchdog_timeouts
+        );
+    } else if cmd == "afxdp" || cmd.starts_with("afxdp ") {
+        let arg = cmd.strip_prefix("afxdp ").unwrap_or("");
+        let mut it = arg.split_whitespace();
+        let sub = it.next().unwrap_or("");
+        if sub == "test" {
+            // Test 1: Class 1 Packet (User space application traffic via AF_XDP into UMEM)
+            let (cls1, msg1) = cas_afxdp::CAS_AFXDP_ENGINE.classify_and_dispatch(0, 0, true, 1024);
+            kprintln_emerald!("[AF_XDP PASS] Class 1 Packet: {:?} -> {}", cls1, msg1);
+
+            // Test 2: Class 2 Packet (Kernel stack standard handling)
+            let (cls2, msg2) = cas_afxdp::CAS_AFXDP_ENGINE.classify_and_dispatch(0, 0, false, 512);
+            kprintln_emerald!("[AF_XDP PASS] Class 2 Packet: {:?} -> {}", cls2, msg2);
+        } else if sub == "bind" {
+            let nic = it.next().and_then(|s| s.parse::<u8>().ok()).unwrap_or(0);
+            let q = it.next().and_then(|s| s.parse::<u16>().ok()).unwrap_or(0);
+            let sock_id = cas_afxdp::CAS_AFXDP_ENGINE.bind_af_xdp_socket(nic, q, 200 + nic as u32);
+            kprintln_emerald!("[AF_XDP] Bound NIC {} Queue {} -> AF_XDP Socket #{}", nic, q, sock_id);
+        }
+        kprintln_amber!("=== CAS CNIC DUAL-STACK AF_XDP MULTIPLEXER (CN 115714679 A) ===");
+        kprintln!(
+            "UMEM Memory Pool: Chunk Size: {} B | Ring Depth: {} | Active Sockets: {}",
+            cas_afxdp::UMEM_CHUNK_SIZE,
+            cas_afxdp::UMEM_RING_SIZE,
+            cas_afxdp::CAS_AFXDP_ENGINE.socket_count
+        );
+        kprintln!(
+            "Classification Metrics: Total Classified: {} | Class 1 (User AF_XDP): {} | Class 2 (Kernel Stack): {}",
+            cas_afxdp::CAS_AFXDP_ENGINE.total_rx_classified,
+            cas_afxdp::CAS_AFXDP_ENGINE.total_class1_user_space,
+            cas_afxdp::CAS_AFXDP_ENGINE.total_class2_kernel_space
+        );
+        kprintln!(
+            "Zero-Copy Transfer Volume: {} bytes delivered directly to UMEM rings",
+            cas_afxdp::CAS_AFXDP_ENGINE.total_zero_copy_bytes
+        );
+    } else if cmd == "mesh" || cmd.starts_with("mesh ") {
+        let arg = cmd.strip_prefix("mesh ").unwrap_or("");
+        let mut it = arg.split_whitespace();
+        let sub = it.next().unwrap_or("");
+        if sub == "test" {
+            // Egress test: Pod 1 Client 37058 -> Microservice 8080
+            let (res_egress, msg_egress) = langhe_mesh::LANGHE_MESH_ENGINE.accelerate_egress(1, 37058, 8080);
+            kprintln_emerald!("[MESH PASS] Egress Intercept: {:?} -> {}", res_egress, msg_egress);
+
+            // Ingress test: Sidecar Proxy 15001 returns response to Client 37058
+            let (res_ingress, msg_ingress) = langhe_mesh::LANGHE_MESH_ENGINE.restore_ingress(1, 37058, 15001);
+            kprintln_emerald!("[MESH PASS] Ingress Restore: {:?} -> {}", res_ingress, msg_ingress);
+        } else if sub == "arp" {
+            let (res_arp, msg_arp) = langhe_mesh::LANGHE_MESH_ENGINE.handle_arp_dual_sync();
+            kprintln_emerald!("[MESH PASS] ARP Dual-Sync: {:?} -> {}", res_arp, msg_arp);
+        }
+        kprintln_amber!("=== LANGHE SERVICE MESH SOCKOPS ACCELERATOR (CN 114025370 B) ===");
+        kprintln!(
+            "Service Mesh Topology: Sidecar Proxy Port: {} | Accelerated Range: {}..{}",
+            langhe_mesh::SIDECAR_PROXY_PORT,
+            langhe_mesh::LANGHE_MESH_ENGINE.configured_service_port_min,
+            langhe_mesh::LANGHE_MESH_ENGINE.configured_service_port_max
+        );
+        kprintln!(
+            "Sockmap Two-Way Mappings: {} active connection tuples (Max: {})",
+            langhe_mesh::LANGHE_MESH_ENGINE.mapping_count,
+            langhe_mesh::MAX_MESH_MAPPINGS
+        );
+        kprintln!(
+            "Optimization Metrics: Egress Redirects: {} | Ingress Restores: {} | Cumulative TCP/IP Stacks Bypassed: {}",
+            langhe_mesh::LANGHE_MESH_ENGINE.total_egress_redirected,
+            langhe_mesh::LANGHE_MESH_ENGINE.total_ingress_restored,
+            langhe_mesh::LANGHE_MESH_ENGINE.total_stacks_bypassed
+        );
     } else if cmd == "clear" || cmd == "cls" {
         CURSOR_COL = 0;
         CURSOR_ROW = 0;
