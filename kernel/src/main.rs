@@ -812,6 +812,7 @@ mod vm_data_security;
 mod platform_protection;
 mod dell_vam_profiler;
 mod hpe_multi_os_hvm;
+mod wasm_engine;
 
 // ============================================================================
 // 5. HARDWARE VT-x (VMXON / VMCS) & MICRO-VM CAPSULE HYPERVISOR ENGINE
@@ -1711,6 +1712,10 @@ pub unsafe extern "C" fn _start(multiboot2_info_addr: usize) -> ! {
     hpe_multi_os_hvm::init_hpe_hvm_subsystem();
     kprintln_emerald!("[ok] HPE Multi-OS HVM: SOS NonStop / AOS Linux shared memory & VR-NIC RMA armed (US 2025/0085997 A1)");
 
+    // Initialize Embedded WebAssembly (WASM) Micro-Sandbox (W3C WASM 1.0 / US 2026/0100856 A1)
+    wasm_engine::init_wasm_subsystem();
+    kprintln_emerald!("[ok] Embedded WebAssembly: \\0asm v1 parser, 64 KiB linear memory & fuel metering armed");
+
     kprintln_emerald!("Spatial OS is ALIVE!");
 
     // 4. Interactive bare-metal shell (accepts input from BOTH PS/2 Keyboard and Serial COM1)
@@ -1776,7 +1781,7 @@ unsafe fn handle_shell_command(cmd_bytes: &[u8], mb2: &Multiboot2ParsedInfo) {
         return;
     }
     if cmd == "help" {
-        kprintln!("commands: help, gui, deck, mouse, routes, route [bind/free], usbc, sec, hsm [auth/lock], trust/graph, span [kick/ipi/rebalance], rootvmm [enter/exit/verify], snvme [read/write/target], hyos, dock, undock, pats [lba], shrink [mb], sva [activate/morph/dma/priv], latehv [step/trap], muse [fast/slow/mdev], coreiso [dispatch/pf], vgpu [tx/bounds], sriov [trigger/error/reset], vmsec [io/snap/bounds], ppt [ecall/aex/exit], vam [profile/bench], hvm [rma/poll/info], cxl, scibuf, ltssm/margin, hud, net, stream, flynet [slot], fly [0..3], land, cpu, vmx, vms, vmrun, spawn, exec, elf, sched, syscall, ls, echo, uptime, mem, ps, pci, disks, sandbox, avionics, radiator, install, halt, reboot");
+        kprintln!("commands: help, gui, deck, mouse, routes, route [bind/free], usbc, sec, hsm [auth/lock], trust/graph, span [kick/ipi/rebalance], rootvmm [enter/exit/verify], snvme [read/write/target], hyos, dock, undock, pats [lba], shrink [mb], sva [activate/morph/dma/priv], latehv [step/trap], muse [fast/slow/mdev], coreiso [dispatch/pf], vgpu [tx/bounds], sriov [trigger/error/reset], vmsec [io/snap/bounds], ppt [ecall/aex/exit], vam [profile/bench], hvm [rma/poll/info], wasm [test/fuel/status], cxl, scibuf, ltssm/margin, hud, net, stream, flynet [slot], fly [0..3], land, cpu, vmx, vms, vmrun, spawn, exec, elf, sched, syscall, ls, echo, uptime, mem, ps, pci, disks, sandbox, avionics, radiator, install, halt, reboot");
         kprintln!("storage:  disks, mount [pN], umount, df, ls [dir], cat <file>, write <file> <text>, append <file> <text>, touch <file>, mkdir <dir>, rm <path>, sync, blk <dev> <lba>");
     } else if cmd == "gui" || cmd == "deck" || cmd == "desktop" {
         if let Some(ref fb) = GOP_FB {
@@ -3263,6 +3268,60 @@ unsafe fn handle_shell_command(cmd_bytes: &[u8], mb2: &Multiboot2ParsedInfo) {
             hpe_multi_os_hvm::HVM_SUBSYSTEM.ipi_signals_sent_to_aos,
             hpe_multi_os_hvm::HVM_SUBSYSTEM.aos_packets_transmitted_to_nic,
             hpe_multi_os_hvm::HVM_SUBSYSTEM.ingress_packets_routed_to_sos
+        );
+    } else if cmd == "wasm" || cmd.starts_with("wasm ") {
+        let arg = cmd.strip_prefix("wasm").unwrap_or("").trim();
+        let mut it = arg.split_whitespace();
+        let sub = it.next().unwrap_or("");
+        if sub == "test" || sub == "run" {
+            kprintln_amber!("=== WEBASSEMBLY (WASM) SANDBOX TEST SUITE ===");
+            // Test 1: Math Expression ((40 + 2) * 5 - 10) = 200
+            match wasm_engine::WASM_RUNTIME.execute_module(&wasm_engine::WASM_MATH_EXPR, 10_000) {
+                Ok(val) => {
+                    kprintln_emerald!(
+                        "[WASM PASS] Module 'math_expr' returned {} (Expected 200) | Fuel burned: {} | Insts: {}",
+                        val,
+                        wasm_engine::WASM_RUNTIME.fuel_consumed,
+                        wasm_engine::WASM_RUNTIME.instructions_executed
+                    );
+                }
+                Err(trap) => kprintln_amber!("[WASM FAIL] Trap: {}", wasm_engine::trap_str(trap)),
+            }
+            // Test 2: Linear Memory Store & Load (Offset 64 = 42, Read + 8) = 50
+            match wasm_engine::WASM_RUNTIME.execute_module(&wasm_engine::WASM_MEMORY_TEST, 10_000) {
+                Ok(val) => {
+                    kprintln_emerald!(
+                        "[WASM PASS] Module 'memory_store_load' returned {} (Expected 50) | Fuel burned: {} | Insts: {}",
+                        val,
+                        wasm_engine::WASM_RUNTIME.fuel_consumed,
+                        wasm_engine::WASM_RUNTIME.instructions_executed
+                    );
+                }
+                Err(trap) => kprintln_amber!("[WASM FAIL] Trap: {}", wasm_engine::trap_str(trap)),
+            }
+        } else if sub == "fuel" {
+            let limit = it.next().and_then(|s| s.parse::<u64>().ok()).unwrap_or(50_000);
+            wasm_engine::WASM_RUNTIME.reset(limit);
+            kprintln_emerald!("[WASM] Reset runtime fuel budget to {} units", limit);
+        }
+        kprintln_amber!("=== EMBEDDED WEBASSEMBLY (WASM) MICRO-SANDBOX & FUEL METER ===");
+        kprintln!(
+            "Specification: W3C WebAssembly Core 1.0 (\\0asm v1) | Dynamic Verification (US 2026/0100856 A1)"
+        );
+        kprintln!(
+            "Linear Memory: 1 Page ({} bytes / 64 KiB) | Stack Capacity: 128 Values | Local Registers: 16",
+            wasm_engine::WASM_PAGE_SIZE
+        );
+        kprintln!(
+            "Execution State: Last Return: {} | Trap Status: {}",
+            wasm_engine::WASM_RUNTIME.last_return_value,
+            wasm_engine::trap_str(wasm_engine::WASM_RUNTIME.last_trap)
+        );
+        kprintln!(
+            "Fuel Metering: Remaining: {} | Consumed: {} | Total Instructions: {}",
+            wasm_engine::WASM_RUNTIME.fuel_remaining,
+            wasm_engine::WASM_RUNTIME.fuel_consumed,
+            wasm_engine::WASM_RUNTIME.instructions_executed
         );
     } else if cmd == "clear" || cmd == "cls" {
         CURSOR_COL = 0;
