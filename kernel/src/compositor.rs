@@ -512,6 +512,10 @@ unsafe fn render_card_content(fb: &GopFramebufferInfo, card: &SpatialCard) {
             draw_str(fb, bx, by, "CAS CNIC: AF_XDP Zero-Copy (CN'679)", COLOR_AMBER, None);
             by += 14;
             draw_str(fb, bx, by, "Langhe Mesh: Sockops Bypass (CN'370)", COLOR_CYAN, None);
+            by += 14;
+            draw_str(fb, bx, by, "SoundHound: Diff Spatial Audio (US'184)", COLOR_EMERALD, None);
+            by += 14;
+            draw_str(fb, bx, by, "Ericsson: 6DoF Hetero-Audio (JP'910)", COLOR_AMBER, None);
         }
         _ => {}
     }

@@ -826,6 +826,8 @@ mod nudt_netaccel;
 mod yuannao_smartnic;
 mod cas_afxdp;
 mod langhe_mesh;
+mod soundhound_spatial;
+mod ericsson_hetero_audio;
 
 // ============================================================================
 // 5. HARDWARE VT-x (VMXON / VMCS) & MICRO-VM CAPSULE HYPERVISOR ENGINE
@@ -1781,6 +1783,14 @@ pub unsafe extern "C" fn _start(multiboot2_info_addr: usize) -> ! {
     langhe_mesh::init_langhe_subsystem();
     kprintln_emerald!("[ok] Langhe Service Mesh: Sidecar sockmap bypass & ARP dual-sync armed (CN 114025370 B)");
 
+    // Initialize SoundHound Differential Spatial Audio Subsystem (US 11,589,184 B1)
+    soundhound_spatial::init_soundhound_subsystem();
+    kprintln_emerald!("[ok] SoundHound Spatial: Differential ITD/ILD & dynamic drag-relocation armed (US 11,589,184 B1)");
+
+    // Initialize Ericsson Spatially Heterogeneous 6DoF Audio Subsystem (JP 2022-515910 A / WO 2020/144062)
+    ericsson_hetero_audio::init_ericsson_subsystem();
+    kprintln_emerald!("[ok] Ericsson Hetero-Audio: 6DoF M/S remix matrix, anti-collapse & symmetry armed (JP 2022-515910 A)");
+
     kprintln_emerald!("Spatial OS is ALIVE!");
 
     // 4. Interactive bare-metal shell (accepts input from BOTH PS/2 Keyboard and Serial COM1)
@@ -1846,7 +1856,7 @@ unsafe fn handle_shell_command(cmd_bytes: &[u8], mb2: &Multiboot2ParsedInfo) {
         return;
     }
     if cmd == "help" {
-        kprintln!("commands: help, gui, deck, mouse, routes, route [bind/free], usbc, sec, hsm [auth/lock], trust/graph, span [kick/ipi/rebalance], rootvmm [enter/exit/verify], snvme [read/write/target], hyos, dock, undock, pats [lba], shrink [mb], sva [activate/morph/dma/priv], latehv [step/trap], muse [fast/slow/mdev], coreiso [dispatch/pf], vgpu [tx/bounds], sriov [trigger/error/reset], vmsec [io/snap/bounds], ppt [ecall/aex/exit], vam [profile/bench], hvm [rma/poll/info], wasm [test/fuel/status], maxq [opt/step/tdp], shm [pub/sub], arais [level/flush], astguard [test], kwasm [test/call], mddma [burst/5d], dtree [eval/test], panda [test/parse], fortinet [test/eos], nudt [test/rule], snic [test/rule], afxdp [test/bind], mesh [test/arp], cxl, scibuf, ltssm/margin, hud, net, stream, flynet [slot], fly [0..3], land, cpu, vmx, vms, vmrun, spawn, exec, elf, sched, syscall, ls, echo, uptime, mem, ps, pci, disks, sandbox, avionics, radiator, install, halt, reboot");
+        kprintln!("commands: help, gui, deck, mouse, routes, route [bind/free], usbc, sec, hsm [auth/lock], trust/graph, span [kick/ipi/rebalance], rootvmm [enter/exit/verify], snvme [read/write/target], hyos, dock, undock, pats [lba], shrink [mb], sva [activate/morph/dma/priv], latehv [step/trap], muse [fast/slow/mdev], coreiso [dispatch/pf], vgpu [tx/bounds], sriov [trigger/error/reset], vmsec [io/snap/bounds], ppt [ecall/aex/exit], vam [profile/bench], hvm [rma/poll/info], wasm [test/fuel/status], maxq [opt/step/tdp], shm [pub/sub], arais [level/flush], astguard [test], kwasm [test/call], mddma [burst/5d], dtree [eval/test], panda [test/parse], fortinet [test/eos], nudt [test/rule], snic [test/rule], afxdp [test/bind], mesh [test/arp], soundhound [test/move], ericsson [test/move], cxl, scibuf, ltssm/margin, hud, net, stream, flynet [slot], fly [0..3], land, cpu, vmx, vms, vmrun, spawn, exec, elf, sched, syscall, ls, echo, uptime, mem, ps, pci, disks, sandbox, avionics, radiator, install, halt, reboot");
         kprintln!("storage:  disks, mount [pN], umount, df, ls [dir], cat <file>, write <file> <text>, append <file> <text>, touch <file>, mkdir <dir>, rm <path>, sync, blk <dev> <lba>");
     } else if cmd == "gui" || cmd == "deck" || cmd == "desktop" {
         if let Some(ref fb) = GOP_FB {
@@ -3999,6 +4009,103 @@ unsafe fn handle_shell_command(cmd_bytes: &[u8], mb2: &Multiboot2ParsedInfo) {
             langhe_mesh::LANGHE_MESH_ENGINE.total_ingress_restored,
             langhe_mesh::LANGHE_MESH_ENGINE.total_stacks_bypassed
         );
+    } else if cmd == "soundhound" || cmd.starts_with("soundhound ") {
+        let arg = if cmd.len() > 10 { &cmd[11..] } else { "" };
+        let mut it = arg.split_whitespace();
+        let sub = it.next().unwrap_or("");
+        if sub == "test" {
+            let (ok, msg) = soundhound_spatial::SOUNDHOUND_ENGINE.test_differential_rendering();
+            if ok {
+                kprintln_emerald!("[SOUNDHOUND PASS] Differential Spatial Test: {}", msg);
+            } else {
+                kprintln_amber!("[SOUNDHOUND FAIL] Differential Spatial Test: {}", msg);
+            }
+        } else if sub == "move" {
+            // move <id> <x> <y> <z>
+            let id = it.next().and_then(|s| s.parse::<u32>().ok()).unwrap_or(1);
+            let x = it.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(0);
+            let y = it.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(0);
+            let z = it.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(150);
+            let (ok, cues) = soundhound_spatial::SOUNDHOUND_ENGINE.relocate_source(id, x, y, z);
+            if ok {
+                kprintln_emerald!(
+                    "[SOUNDHOUND] Relocated Source {}: Pos=({},{},{}) -> Azimuth={}deg, Elevation={}deg, ITD={}us, ILD(L/R)={}/{}%, Reverb={}%",
+                    id, x, y, z, cues.azimuth_deg, cues.elevation_deg, cues.itd_us, cues.left_gain_pct, cues.right_gain_pct, cues.reverb_ratio_pct
+                );
+            } else {
+                kprintln_amber!("[SOUNDHOUND] Source {} not found", id);
+            }
+        }
+        kprintln_amber!("=== SOUNDHOUND DIFFERENTIAL SPATIAL RENDERING ENGINE (US 11,589,184 B1) ===");
+        kprintln!(
+            "Listener Head Pose: Pos=({},{},{}) | Orientation: Yaw={} deg, Pitch={} deg",
+            soundhound_spatial::SOUNDHOUND_ENGINE.listener.position.x,
+            soundhound_spatial::SOUNDHOUND_ENGINE.listener.position.y,
+            soundhound_spatial::SOUNDHOUND_ENGINE.listener.position.z,
+            soundhound_spatial::SOUNDHOUND_ENGINE.listener.yaw_deg,
+            soundhound_spatial::SOUNDHOUND_ENGINE.listener.pitch_deg
+        );
+        kprintln!(
+            "Spatial Sources: {} registered (Max: {}) | Relocation Events: {}",
+            soundhound_spatial::SOUNDHOUND_ENGINE.active_sources_count,
+            soundhound_spatial::MAX_SPATIAL_SOURCES,
+            soundhound_spatial::SOUNDHOUND_ENGINE.total_relocations.load(core::sync::atomic::Ordering::Relaxed)
+        );
+        for i in 0..soundhound_spatial::MAX_SPATIAL_SOURCES {
+            let s = &soundhound_spatial::SOUNDHOUND_ENGINE.sources[i];
+            if s.state != soundhound_spatial::SourceState::Unused {
+                let name = trimmed_ascii(&s.name);
+                kprintln!(
+                    "  [Source {}] \"{}\" Pos=({},{},{}) -> Az={}deg El={}deg Dist={}cm ITD={}us ILD={}/{}% Rev={}%",
+                    s.source_id, name, s.virtual_pos.x, s.virtual_pos.y, s.virtual_pos.z,
+                    s.cues.azimuth_deg, s.cues.elevation_deg, s.cues.distance_cm,
+                    s.cues.itd_us, s.cues.left_gain_pct, s.cues.right_gain_pct, s.cues.reverb_ratio_pct
+                );
+            }
+        }
+    } else if cmd == "ericsson" || cmd.starts_with("ericsson ") {
+        let arg = if cmd.len() > 8 { &cmd[9..] } else { "" };
+        let mut it = arg.split_whitespace();
+        let sub = it.next().unwrap_or("");
+        if sub == "test" {
+            let (ok, msg) = ericsson_hetero_audio::ERICSSON_HETERO_ENGINE.test_hetero_audio_dynamics();
+            if ok {
+                kprintln_emerald!("[ERICSSON PASS] 6DoF Hetero-Audio Dynamics: {}", msg);
+            } else {
+                kprintln_amber!("[ERICSSON FAIL] 6DoF Hetero-Audio Dynamics: {}", msg);
+            }
+        } else if sub == "move" {
+            let x = it.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(0);
+            let y = it.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(0);
+            let z = it.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(0);
+            ericsson_hetero_audio::ERICSSON_HETERO_ENGINE.update_listener_pos(x, y, z);
+            kprintln_emerald!("[ERICSSON] Listener 6DoF Position Updated to ({}, {}, {})", x, y, z);
+        }
+        kprintln_amber!("=== ERICSSON SPATIALLY HETEROGENEOUS 6DoF AUDIO ENGINE (JP 2022-515910 A) ===");
+        kprintln!(
+            "Listener Virtual Coordinates: ({}, {}, {}) cm",
+            ericsson_hetero_audio::ERICSSON_HETERO_ENGINE.listener_x,
+            ericsson_hetero_audio::ERICSSON_HETERO_ENGINE.listener_y,
+            ericsson_hetero_audio::ERICSSON_HETERO_ENGINE.listener_z
+        );
+        kprintln!(
+            "Optimization Telemetry: Matrix Updates: {} | Anti-Collapse Triggers: {} | Axis Inversions: {}",
+            ericsson_hetero_audio::ERICSSON_HETERO_ENGINE.total_matrix_updates.load(core::sync::atomic::Ordering::Relaxed),
+            ericsson_hetero_audio::ERICSSON_HETERO_ENGINE.anti_collapse_triggers.load(core::sync::atomic::Ordering::Relaxed),
+            ericsson_hetero_audio::ERICSSON_HETERO_ENGINE.axis_inversion_count.load(core::sync::atomic::Ordering::Relaxed)
+        );
+        for i in 0..ericsson_hetero_audio::MAX_HETERO_ELEMENTS {
+            let e = &ericsson_hetero_audio::ERICSSON_HETERO_ENGINE.elements[i];
+            if e.active {
+                let name = trimmed_ascii(&e.name);
+                kprintln!(
+                    "  [Elem {}] \"{}\" Center=({},{},{}) RefD={}cm RefW={}cm -> Matrix H: w_M={}% w_S={}% Width={}% Inverted={}",
+                    e.element_id, name, e.metadata.center_x, e.metadata.center_y, e.metadata.center_z,
+                    e.metadata.ref_distance_d, e.metadata.ref_width_cm,
+                    e.matrix_h.mid_gain_pct, e.matrix_h.side_gain_pct, e.matrix_h.effective_width_pct, e.matrix_h.channels_inverted
+                );
+            }
+        }
     } else if cmd == "clear" || cmd == "cls" {
         CURSOR_COL = 0;
         CURSOR_ROW = 0;
