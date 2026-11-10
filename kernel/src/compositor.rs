@@ -500,6 +500,12 @@ unsafe fn render_card_content(fb: &GopFramebufferInfo, card: &SpatialCard) {
             draw_str(fb, bx, by, "Wave MD-DMA: 5-D Tensor PE Quad", COLOR_AMBER, None);
             by += 14;
             draw_str(fb, bx, by, "Intel DTree: Flat Node Array (US'449)", COLOR_CYAN, None);
+            by += 14;
+            draw_str(fb, bx, by, "PANDA: Parallel Pipeline (US'546)", COLOR_EMERALD, None);
+            by += 14;
+            draw_str(fb, bx, by, "Fortinet: 78B XDP/MSPSC (US'693)", COLOR_AMBER, None);
+            by += 14;
+            draw_str(fb, bx, by, "NUDT: Joint NetAccel -84.2% (CN'090)", COLOR_CYAN, None);
         }
         _ => {}
     }
