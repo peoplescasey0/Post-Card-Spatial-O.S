@@ -522,6 +522,10 @@ unsafe fn render_card_content(fb: &GopFramebufferInfo, card: &SpatialCard) {
             draw_str(fb, bx, by, "RBC VCR: Clean Room Enclave (US'636)", COLOR_EMERALD, None);
             by += 14;
             draw_str(fb, bx, by, "UCF FS/M: DAX Dual-Pad/Audit (US'894)", COLOR_AMBER, None);
+            by += 14;
+            draw_str(fb, bx, by, "MongoDB: Pluggable Format/KMIP (US'411)", COLOR_CYAN, None);
+            by += 14;
+            draw_str(fb, bx, by, "Microsoft: Cross-Enclave Identity (EP'435)", COLOR_EMERALD, None);
         }
         _ => {}
     }

@@ -831,6 +831,8 @@ mod ericsson_hetero_audio;
 mod genaudio_astoundsound;
 mod rbc_vcr_enclave;
 mod ucf_dax_fsm;
+mod mongodb_enc_engine;
+mod microsoft_cross_enclave;
 
 // ============================================================================
 // 5. HARDWARE VT-x (VMXON / VMCS) & MICRO-VM CAPSULE HYPERVISOR ENGINE
@@ -1806,6 +1808,14 @@ pub unsafe extern "C" fn _start(multiboot2_info_addr: usize) -> ! {
     unsafe { ucf_dax_fsm::init_dax_fsm_subsystem(); }
     kprintln_emerald!("[ok] UCF Dual FS/M: DAX Dual-Pad XOR Encryption & GlobalBuffer Audit armed (US 11,398,894 B2)");
 
+    // Initialize MongoDB Pluggable Encrypted Storage Engine (US 10,846,411 B2)
+    unsafe { mongodb_enc_engine::init_mongodb_subsystem(); }
+    kprintln_emerald!("[ok] MongoDB Storage: Pluggable format prediction & KMIP dual-tier encryption armed (US 10,846,411 B2)");
+
+    // Initialize Microsoft Cross-Platform Enclave Identity & Distributed Sealing (EP 3 574 435 B1)
+    unsafe { microsoft_cross_enclave::init_cross_platform_enclave_subsystem(); }
+    kprintln_emerald!("[ok] Microsoft Enclaves: 5-tier abstract identity & distributed sealing armed (EP 3 574 435 B1)");
+
     kprintln_emerald!("Spatial OS is ALIVE!");
 
     // 4. Interactive bare-metal shell (accepts input from BOTH PS/2 Keyboard and Serial COM1)
@@ -1871,7 +1881,7 @@ unsafe fn handle_shell_command(cmd_bytes: &[u8], mb2: &Multiboot2ParsedInfo) {
         return;
     }
     if cmd == "help" {
-        kprintln!("commands: help, gui, deck, mouse, routes, route [bind/free], usbc, sec, hsm [auth/lock], trust/graph, span [kick/ipi/rebalance], rootvmm [enter/exit/verify], snvme [read/write/target], hyos, dock, undock, pats [lba], shrink [mb], sva [activate/morph/dma/priv], latehv [step/trap], muse [fast/slow/mdev], coreiso [dispatch/pf], vgpu [tx/bounds], sriov [trigger/error/reset], vmsec [io/snap/bounds], ppt [ecall/aex/exit], vam [profile/bench], hvm [rma/poll/info], wasm [test/fuel/status], maxq [opt/step/tdp], shm [pub/sub], arais [level/flush], astguard [test], kwasm [test/call], mddma [burst/5d], dtree [eval/test], panda [test/parse], fortinet [test/eos], nudt [test/rule], snic [test/rule], afxdp [test/bind], mesh [test/arp], soundhound [test/move], ericsson [test/move], astound [test/bypass], vcr [test/query], fsm [test/audit], cxl, scibuf, ltssm/margin, hud, net, stream, flynet [slot], fly [0..3], land, cpu, vmx, vms, vmrun, spawn, exec, elf, sched, syscall, ls, echo, uptime, mem, ps, pci, disks, sandbox, avionics, radiator, install, halt, reboot");
+        kprintln!("commands: help, gui, deck, mouse, routes, route [bind/free], usbc, sec, hsm [auth/lock], trust/graph, span [kick/ipi/rebalance], rootvmm [enter/exit/verify], snvme [read/write/target], hyos, dock, undock, pats [lba], shrink [mb], sva [activate/morph/dma/priv], latehv [step/trap], muse [fast/slow/mdev], coreiso [dispatch/pf], vgpu [tx/bounds], sriov [trigger/error/reset], vmsec [io/snap/bounds], ppt [ecall/aex/exit], vam [profile/bench], hvm [rma/poll/info], wasm [test/fuel/status], maxq [opt/step/tdp], shm [pub/sub], arais [level/flush], astguard [test], kwasm [test/call], mddma [burst/5d], dtree [eval/test], panda [test/parse], fortinet [test/eos], nudt [test/rule], snic [test/rule], afxdp [test/bind], mesh [test/arp], soundhound [test/move], ericsson [test/move], astound [test/bypass], vcr [test/query], fsm [test/audit], mongo [test/workload], enclave [test/seal], cxl, scibuf, ltssm/margin, hud, net, stream, flynet [slot], fly [0..3], land, cpu, vmx, vms, vmrun, spawn, exec, elf, sched, syscall, ls, echo, uptime, mem, ps, pci, disks, sandbox, avionics, radiator, install, halt, reboot");
         kprintln!("storage:  disks, mount [pN], umount, df, ls [dir], cat <file>, write <file> <text>, append <file> <text>, touch <file>, mkdir <dir>, rm <path>, sync, blk <dev> <lba>");
     } else if cmd == "gui" || cmd == "deck" || cmd == "desktop" {
         if let Some(ref fb) = GOP_FB {
@@ -4274,6 +4284,116 @@ unsafe fn handle_shell_command(cmd_bytes: &[u8], mb2: &Multiboot2ParsedInfo) {
         kprintln!(
             "Execution Telemetry: DAX Reads: {} | DAX Writes: {} | Mode Switches: {} | ECC Recoveries: {}",
             reads, writes, m_switches, ecc_rec
+        );
+    } else if cmd == "mongo" || cmd.starts_with("mongo ") {
+        let arg = if cmd.len() > 5 { &cmd[6..] } else { "" };
+        let mut it = arg.split_whitespace();
+        let sub = it.next().unwrap_or("");
+        if sub == "test" {
+            let (ok, msg) = unsafe { mongodb_enc_engine::MONGODB_ENGINE.test_mongodb_encryption_engine() };
+            if ok {
+                kprintln_emerald!("[MONGO PASS] MongoDB Pluggable Storage: {}", msg);
+            } else {
+                kprintln_amber!("[MONGO FAIL] MongoDB Pluggable Storage: {}", msg);
+            }
+        } else if sub == "workload" {
+            let r = it.next().and_then(|s| s.parse::<u32>().ok()).unwrap_or(15);
+            let w = it.next().and_then(|s| s.parse::<u32>().ok()).unwrap_or(85);
+            let (fmt, mig) = unsafe {
+                mongodb_enc_engine::MONGODB_ENGINE.record_workload_activity(r, w, 0, 0)
+            };
+            kprintln_emerald!(
+                "[MONGO WORKLOAD] Recorded R={} W={} -> Format: {:?} (Migrated={})",
+                r, w, fmt, mig
+            );
+        }
+        let (fmt_str, enc_b, dec_b, migs, bad_k) = unsafe {
+            let f = match mongodb_enc_engine::MONGODB_ENGINE.active_format {
+                mongodb_enc_engine::StorageFormat::RowStoreBTree => "Row-Store (B+ Tree)",
+                mongodb_enc_engine::StorageFormat::LsmTreeMerge => "LSM-Tree (Log-Structured Merge)",
+                mongodb_enc_engine::StorageFormat::ColumnStoreVector => "Column-Store (Vector Analytics)",
+            };
+            (
+                f,
+                mongodb_enc_engine::MONGODB_ENGINE.total_encrypted_bytes.load(Ordering::Relaxed),
+                mongodb_enc_engine::MONGODB_ENGINE.total_decrypted_bytes.load(Ordering::Relaxed),
+                mongodb_enc_engine::MONGODB_ENGINE.total_format_migrations.load(Ordering::Relaxed),
+                mongodb_enc_engine::MONGODB_ENGINE.bad_key_detections.load(Ordering::Relaxed),
+            )
+        };
+        kprintln_amber!("=== MONGODB PLUGGABLE ENCRYPTED STORAGE ENGINE (US 10,846,411 B2) ===");
+        kprintln!(
+            "Active Storage Format: {} | Key Management: KMIP/KeyFile Online",
+            fmt_str
+        );
+        kprintln!(
+            "Key Hierarchy: System Master Key (256-bit) -> 2 Database Keys Active (System, Spatial_DB)"
+        );
+        kprintln!(
+            "WT_ENCRYPTOR Callbacks: 20-Byte Header Expansion (16B IV + 4B Checksum) | Sizing: Active"
+        );
+        kprintln!(
+            "Execution Telemetry: Encrypted: {} B | Decrypted: {} B | Migrations: {} | Bad-Keys: {}",
+            enc_b, dec_b, migs, bad_k
+        );
+    } else if cmd == "enclave" || cmd.starts_with("enclave ") {
+        let arg = if cmd.len() > 7 { &cmd[8..] } else { "" };
+        let mut it = arg.split_whitespace();
+        let sub = it.next().unwrap_or("");
+        if sub == "test" {
+            let (ok, msg) = unsafe {
+                microsoft_cross_enclave::MS_CROSS_ENCLAVE_ENGINE.test_cross_platform_enclave_engine()
+            };
+            if ok {
+                kprintln_emerald!("[ENCLAVE PASS] Microsoft Cross-Platform: {}", msg);
+            } else {
+                kprintln_amber!("[ENCLAVE FAIL] Microsoft Cross-Platform: {}", msg);
+            }
+        } else if sub == "seal" {
+            let payload = *b"SPATIAL_OS_CROSS_ENCLAVE_STATE_PAYLOAD\0";
+            let res = unsafe {
+                microsoft_cross_enclave::MS_CROSS_ENCLAVE_ENGINE.distributed_seal(
+                    0,
+                    microsoft_cross_enclave::AbstractIdentityType::FamilyId,
+                    &payload,
+                )
+            };
+            match res {
+                Ok(nonce) => kprintln_emerald!("[ENCLAVE SEAL] Sealed 39 bytes under FamilyID policy (Nonce: {:#x})", nonce),
+                Err(e) => kprintln_amber!("[ENCLAVE SEAL FAIL] {}", e),
+            }
+        } else if sub == "unseal" {
+            let mut buf = [0u8; 64];
+            let res = unsafe {
+                microsoft_cross_enclave::MS_CROSS_ENCLAVE_ENGINE.distributed_unseal(1, &mut buf)
+            };
+            match res {
+                Ok(len) => kprintln_emerald!("[ENCLAVE UNSEAL] Unsealed {} bytes into VSM Enclave #1", len),
+                Err(e) => kprintln_amber!("[ENCLAVE UNSEAL FAIL] {}", e),
+            }
+        }
+        let (att, equiv, seals, unseals, vault_ops) = unsafe {
+            (
+                microsoft_cross_enclave::MS_CROSS_ENCLAVE_ENGINE.total_attestations.load(Ordering::Relaxed),
+                microsoft_cross_enclave::MS_CROSS_ENCLAVE_ENGINE.total_equivalence_verifications.load(Ordering::Relaxed),
+                microsoft_cross_enclave::MS_CROSS_ENCLAVE_ENGINE.total_distributed_seals.load(Ordering::Relaxed),
+                microsoft_cross_enclave::MS_CROSS_ENCLAVE_ENGINE.total_distributed_unseals.load(Ordering::Relaxed),
+                microsoft_cross_enclave::MS_CROSS_ENCLAVE_ENGINE.total_vault_operations.load(Ordering::Relaxed),
+            )
+        };
+        kprintln_amber!("=== MICROSOFT CROSS-PLATFORM ENCLAVE IDENTITY ENGINE (EP 3 574 435 B1) ===");
+        kprintln!(
+            "Abstraction Model: SGX & VSM Unified ABI | Slots: 2 Instantiated (Slot 0: SGX, Slot 1: VSM)"
+        );
+        kprintln!(
+            "5-Tier Identity: ExactHash | InstanceHash | ImageID | FamilyID | AuthorID"
+        );
+        kprintln!(
+            "Distributed Sealing: SetOfTargetEnclaves Policy | Key Vault: Vault-Locked Roots Active"
+        );
+        kprintln!(
+            "Execution Telemetry: Attestations: {} | Equivalence Matches: {} | Seals: {} | Unseals: {} | Vault Ops: {}",
+            att, equiv, seals, unseals, vault_ops
         );
     } else if cmd == "clear" || cmd == "cls" {
         CURSOR_COL = 0;
