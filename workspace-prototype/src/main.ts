@@ -27,6 +27,12 @@ import {
 } from "./butler";
 import { BLUEPRINTS } from "./blueprints";
 import { createFreeplaneTutorialMindMap, stringifyFreeplaneMap } from "./freeplane-engine";
+import {
+  DEFAULT_KERNEL_TELEMETRY,
+  applyTelemetryToDom,
+  renderNativeHudToCanvas,
+  type KernelTelemetryPacket,
+} from "./native-hud";
 
 /**
  * Windows "Animation effects: off" makes browsers report prefers-reduced-motion,
@@ -58,6 +64,7 @@ type GuestStatus = {
   status: GuestRuntimeStatus;
   bootMode?: GuestBootMode;
   error?: string;
+  stderr?: string;
   websocketPort: number | null;
   qmpPort: number | null;
   serialPort?: number | null;
@@ -118,7 +125,10 @@ type GuestServiceStatus = {
   aiResult?: AiCommandResult;
   swarmResult?: { sourceCardId: string; os: string; createdCardIds: string[] };
   serialExecResult?: { cardId: string; os: string; command: string; output: string };
+  telemetry?: KernelTelemetryPacket;
 };
+
+let latestKernelTelemetry: KernelTelemetryPacket = { ...DEFAULT_KERNEL_TELEMETRY };
 
 type SystemCard = {
   id: string;
@@ -1689,9 +1699,11 @@ function butlerContext(): ButlerContext {
   const card = selectedCard;
   const os = card ? cardToGuestOs(card) : undefined;
   const model = (butlerModelSelect?.value as ButlerContext["model"]) || "auto";
+  const guestRecord = card && os ? guestServiceStatus?.guests.find((g) => g.os === os && g.cardId === card.id) : undefined;
   return {
     idleSeconds: (performance.now() - lastUserActivity) / 1000,
     guestError: serviceUnavailable ? undefined : errorText,
+    guestStderr: guestRecord?.stderr?.trim() || undefined,
     cardName: card?.name,
     guestRunning: Boolean(card && os && guestServiceStatus?.guests.some((g) => g.os === os && g.cardId === card.id && g.status === "running")),
     serviceUnavailable,
@@ -3527,6 +3539,16 @@ function drawMockDisplay(context: CanvasRenderingContext2D, card: SystemCard): v
       context.fillText("% uname -sr && sysctl machdep.cpu.brand_string", x + 78, y + 118);
       context.fillStyle = accent;
       context.fillText("Darwin 24.1.0 · QEMU Virtual AppleSMC (Eco 2 GiB)", x + 78, y + 146);
+    } else if (card.id === "postcard-os" || card.os === "RUST KERNEL") {
+      // Bare-Metal Rust Immediate-Mode HUD ("Post Card OS // Mission Control") + v1.0.4 Boot Console
+      renderNativeHudToCanvas(
+        context,
+        x + 20,
+        y + 46,
+        dispW - 40,
+        246,
+        latestKernelTelemetry,
+      );
     }
   }
 
@@ -3950,8 +3972,8 @@ function drawCardTelemetry(context: CanvasRenderingContext2D, card: SystemCard):
     ["RUNTIME PHASE", guest ? `${guest.status.toUpperCase()} (${guest.bootMode ?? "disk"})` : card.status],
     ["VIRTUAL CPU & STUDIO GPU", `${cpuProfile.toUpperCase()} (${allocatedVcpus} / ${hostCap} vCPU) · 3D: ${studioGraphicsProfile.toUpperCase()}`],
     ["NOVNC & QMP SOCKETS", `${wsPort} · ${qmpPort}`],
-    ["NEURAL SERIAL BRIDGE", serialPort],
-    ["STREAMLINED GUEST POOL", `${activeCount} / 6 VMs active · ${usedRamMb} / 8192 MiB RAM`],
+    ["PA-ROMY COPROCESSOR VAULT", `${latestKernelTelemetry.romy_coprocessor_state} · HEAP: ${latestKernelTelemetry.heap_pressure}% (${latestKernelTelemetry.heap_usage_kb} KB)`],
+    ["STREAMLINED GUEST POOL", `${activeCount} / 6 VMs active · ${usedRamMb} / 8192 MiB RAM · ${serialPort}`],
   ];
 
   drawKeyValueRows(context, rows, 286, 88);
@@ -4443,6 +4465,10 @@ async function requestGuestApi(
 function updateGuestCardStatus(status: GuestServiceStatus): void {
   const binnedCountBefore = binnedCards.size;
   guestServiceStatus = status;
+  if (status.telemetry) {
+    latestKernelTelemetry = status.telemetry;
+    applyTelemetryToDom(latestKernelTelemetry);
+  }
   cardIdRegistryReady = true;
   for (const id of status.deletedCardIds) {
     legacyDeletedCardIds.delete(id);
@@ -4638,6 +4664,8 @@ function computeCardContentKey(card: SystemCard): string {
     guestServiceStatus?.customIsos?.[card.id] ?? "",
     studioGraphicsProfile,
     activeCount,
+    latestKernelTelemetry.romy_coprocessor_state,
+    latestKernelTelemetry.heap_pressure,
   ].join("|");
 }
 
@@ -7531,7 +7559,80 @@ function updateCardActionStripPosition(): void {
   cardActionStripElement.style.top = `${(-anchor.y * 0.5 + 0.5) * sceneViewportHeight}px`;
 }
 
+function initKernelTelemetryBridge(): void {
+  applyTelemetryToDom(latestKernelTelemetry);
+
+  const toggleBtn = document.getElementById("romy-vault-toggle");
+  toggleBtn?.addEventListener("click", async () => {
+    const nextActive = !latestKernelTelemetry.romy_active;
+    try {
+      const response = await fetch("/api/guest/telemetry", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ romy_active: nextActive }),
+      });
+      if (response.ok) {
+        const packet = (await response.json()) as KernelTelemetryPacket;
+        latestKernelTelemetry = packet;
+        applyTelemetryToDom(packet);
+        for (const card of cards) {
+          if (card.id === "postcard-os" || card.facet === "bottom") {
+            refreshCardTexture(card, true);
+          }
+        }
+        showToast(
+          nextActive
+            ? "PA-Romy Coprocessor Vault: ACTIVE // ENCLAVE LOCKED"
+            : "PA-Romy Coprocessor Vault: STANDBY // IDLE",
+        );
+      }
+    } catch {
+      // Fallback local toggle if offline
+      latestKernelTelemetry = {
+        ...latestKernelTelemetry,
+        romy_active: nextActive,
+        romy_coprocessor_state: nextActive ? "VAULT ACTIVE // ENCLAVE LOCKED" : "STANDBY // IDLE",
+      };
+      applyTelemetryToDom(latestKernelTelemetry);
+    }
+  });
+
+  // Connect live WebSocket listener receiving kernel telemetry packets
+  const connectTelemetryWs = (): void => {
+    try {
+      const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+      const wsHost = window.location.host || `${window.location.hostname || "127.0.0.1"}:5173`;
+      const ws = new WebSocket(`${wsProtocol}//${wsHost}/telemetry`);
+      ws.onmessage = (event) => {
+        try {
+          const telemetry = JSON.parse(String(event.data)) as KernelTelemetryPacket;
+          if (telemetry && typeof telemetry.romy_coprocessor_state === "string") {
+            latestKernelTelemetry = telemetry;
+            // Dynamically updates host-side command center view in real time
+            const romyEl = document.getElementById("romy-status");
+            if (romyEl) romyEl.innerText = telemetry.romy_coprocessor_state;
+            const heapEl = document.getElementById("heap-meter");
+            if (heapEl) heapEl.style.width = `${telemetry.heap_pressure}%`;
+            applyTelemetryToDom(telemetry);
+            for (const card of cards) {
+              if (card.id === "postcard-os" || card.facet === "bottom") {
+                refreshCardTexture(card);
+              }
+            }
+          }
+        } catch {
+          // Ignore malformed frames
+        }
+      };
+    } catch {
+      // WebSocket unavailable in headless/non-browser environments
+    }
+  };
+  connectTelemetryWs();
+}
+
 initCommercialEditions();
+initKernelTelemetryBridge();
 animate();
 
 

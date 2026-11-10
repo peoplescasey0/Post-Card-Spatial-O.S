@@ -21,10 +21,18 @@ export default defineConfig(({ mode }) => {
       {
         name: "post-card-guest-api",
         configureServer(server) {
-          server.middlewares.use(createGuestApi());
+          const guestApi = createGuestApi();
+          server.middlewares.use(guestApi);
+          server.httpServer?.on("upgrade", (req, socket) => {
+            guestApi.handleUpgrade?.(req, socket);
+          });
         },
         configurePreviewServer(server) {
-          server.middlewares.use(createGuestApi());
+          const guestApi = createGuestApi();
+          server.middlewares.use(guestApi);
+          server.httpServer?.on("upgrade", (req, socket) => {
+            guestApi.handleUpgrade?.(req, socket);
+          });
         },
       },
     ],

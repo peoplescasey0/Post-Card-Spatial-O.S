@@ -55,7 +55,39 @@ Use keyboard shortcuts `1` through `6` or edge handles to rotate directly to any
 * **Debian Linux**: Powered by a shared `debian-golden.qcow2` master image with per-card copy-on-write overlays (`data/overlays/<card-id>.qcow2`).
 * **macOS (DirectLink)**: Boots via OpenCore EFI with AppleSMC support, offloaded to the DirectLink workstation (`10.0.0.2`) with native `/dev/kvm` hardware acceleration.
 * **Kali Linux Cyber Range**: Security red-team card pre-configured on an isolated multicast virtual network (`230.0.0.1:4550`).
-* **Android**: Illustrated preview and sandbox container for mobile application testing.
+* **Android (AOSP / Android-x86)**: Standard open-source Android sandbox. Boots with host CPU passthrough (`-cpu host`) and high-compatibility standard VGA (`-device VGA,vgamem_mb=64`), preventing SurfaceFlinger black screens.
+
+### 4.1 Windows Guest Optimization & Debloating Playbooks (ReviOS / AME Wizard)
+> [!IMPORTANT]
+> **TARGET OS**: Exclusively for **Windows 10 and Windows 11 VM cards**. Do **not** run inside Android, Linux, or macOS guests.
+
+Standard Windows 11 virtual machines consume 3.5–4.5 GB of RAM at idle and trigger hypervisor CPU spikes from background telemetry, indexing, Defender real-time scans, and Edge/Teams bloat. You can dramatically streamline your Windows VM down to **1.2–1.5 GB idle RAM** using the playbook optimization tooling:
+
+* **`AceSetup.exe`**: The official installer for **AME Wizard** (Ameliorated / Ace Wizard), the execution engine that applies Windows optimization playbooks.
+* **`Revi-PB-26.10.apbx`**: The **ReviOS Playbook v26.10** archive, containing automated registry tweaks, service optimizations, DPC latency patches, and telemetry removal scripts.
+
+#### Step-by-Step Operator Guide:
+1. **Transfer to Guest**: Copy `AceSetup.exe` and `Revi-PB-26.10.apbx` into the Windows card drop directory:
+   ```text
+   workspace-prototype/data/paper-planes/windows/
+   ```
+   *(Or drop them via the paper airplane / VVFAT file drop interface).*
+2. **Execute Inside Windows**:
+   * Open the Windows VM card display.
+   * Access the virtual drop drive (mounted as an IDE drive in Windows).
+   * Run `AceSetup.exe` to launch AME Wizard.
+   * Drag and drop `Revi-PB-26.10.apbx` onto the wizard window, click **Next**, and let the automated playbook complete.
+3. **Reboot & Checkpoint**:
+   * Restart the Windows VM.
+   * On Face 5 (Actions) of the Windows card, create a memory checkpoint or disk snapshot. You now have an ultra-lean, responsive Windows workstation suitable for multi-card turntable swarms.
+
+#### Legal & Licensing Compliance:
+* **The Playbook Model (`.apbx`) is 100% Legal**: Playbook archives are automation scripts that execute locally on the user's existing, legitimately licensed Windows installation. They do **not** distribute Microsoft proprietary binaries.
+* **No Pre-Bundled Windows Disks**: Post Card Spatial OS never redistributes proprietary Windows OS images or pre-installed virtual disks. Users supply their own official Windows ISO, and transformations occur strictly as local, user-side modifications.
+
+### 4.2 Android-x86 Architecture & Licensing Boundaries
+* **Core OS (Apache 2.0)**: Upstream AOSP and Android-x86 are open-source software (Apache 2.0 / Linux kernel GPL). Post Card supports running standard Android-x86 live ISOs and persistent QCOW2 disks without proprietary constraints.
+* **Google Mobile Services (GMS) Boundary**: Proprietary Google apps and APIs (Play Store, Play Services) are never pre-bundled inside Post Card's base images or repository assets. Users wishing to utilize app stores can freely sideload open-source alternatives like **F-Droid**, **Aurora Store**, or **MicroG** inside their private guest virtual disk.
 
 ---
 
@@ -189,6 +221,44 @@ The top toolbar provides two dedicated operations menus:
 | `Home` / `End` | Jump to first / last card in turntable |
 | `?` | Open this User Manual & Field Guide |
 | `T` | 3D Twist expansion of viewport |
+
+---
+
+## 14. Bare-Metal Kernel Architecture & Codename Schema (`v1.0.4-x86_64`)
+
+Post Card OS maps every subsystem of its bare-metal kernel (`src-rust/`) and host telemetry bridge to precision aviation operations:
+
+* **The Foundry (`LockedHeap`):** Dynamic free-list memory allocator (`src-rust/heap.rs`) managing the 16 MB `LockedHeap` arena and recycling blocks without garbage collection staggers.
+* **The Catapult (`ELF64 Loader`):** Binary parsing engine (`src-rust/elf_loader.rs`) that validates magic bytes (`0x7F 'E' 'L' 'F'`) and spawns user-space processes into isolated Ring 3 segments (`0x400000`).
+* **The Black Box (`VfsStorageBridge`):** Persistent sector storage (`src-rust/vfs_storage.rs`) bridging modified VFS nodes and Freeplane mind-maps down to raw disk blocks via `MemoryBlockDevice`.
+* **The Glass Cockpit (`render_native_hud`):** Immediate-mode framebuffer renderer (`src-rust/native_hud.rs`) blitting crisp typography and high-contrast telemetry straight into VRAM (`#0B0C10` matte black, `#1F2833` industrial slate, `#FFB703` amber phosphor).
+* **The Beacon (`WebSocket Stream`):** Real-time `/telemetry` WebSocket stream updating the Mission Control HUD (`#romy-status` and `#heap-meter`).
+* **PA-Romy (`Coprocessor Vault`):** Hardware-isolated neural container with a read-only telemetry mirror.
+* **Flight Deck & Hangar Bay:** Queuing buffer on the sending side and persistent staging zone on reception for **Paper Planes**.
+* **Rapid Deployment Pipeline (`scripts/rapid_deploy_installer.sh`):** Automated GPT/UEFI + ext4 installer supporting SATA, NVMe (`/dev/nvme0n1p1`), and loopback devices.
+
+### Space Plane Avionics & Cold Boot Ignition Sequence
+```text
+========================================================================
+[ 0.000000 ] POST CARD OS // SPACE PLANE AVIONICS v1.0.4... [ CORE ]
+[ 0.001042 ] CHASSIS: Al-Li 2195 Cryogenic Hull Frame... [ SECURED ]
+[ 0.002890 ] THE FOUNDRY: 16MB LockedHeap Arena... [ STABLE ]
+[ 0.004510 ] THE CATAPULT: ELF64 Ring 3 Spatial Loader... [ ARMED ]
+[ 0.007120 ] THE BLACK BOX: VfsStorageBridge Sector Mirror... [ LOCKED ]
+[ 0.010200 ] THE RADIATOR: Cryogenic Thermal Control Loop... [ STABILIZED ]
+[ 0.014500 ] PA-ROMY VAULT: Isolated Neural Coprocessor... [ ACTIVE ]
+========================================================================
+```
+
+```text
+[ 0.000000 ] POST CARD OS // KERNEL CORE v1.0.4-x86_64
+[ 0.001042 ] CPU: Initializing IDT, GDT, & CR3 Page Table Isolation... [ SECURE ]
+[ 0.002890 ] THE FOUNDRY: Locking 16MB dynamic free-list memory arena... [ ALLOCATED ]
+[ 0.004510 ] THE CATAPULT: Loading ELF64 ring 3 segment validator... [ ARMED ]
+[ 0.007120 ] THE BLACK BOX: Mounting VfsStorageBridge over memory sectors... [ PERSISTENT ]
+[ 0.010200 ] PA-ROMY VAULT: Isolating hardware coprocessor core & telemetry mirror... [ LOCKED ]
+[ 0.014500 ] THE BEACON: Binding WebSocket telemetry stream to /telemetry... [ BROADCASTING ]
+```
 
 ---
 *Post Card Spatial OS — 100% Local Hypervisor & Spatial Workspace.*

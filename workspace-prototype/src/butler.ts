@@ -5,6 +5,8 @@ export type ButlerContext = {
   idleSeconds: number;
   /** Latest guest error text, if any. */
   guestError?: string;
+  /** Latest guest QEMU stderr or panic trace, if any. */
+  guestStderr?: string;
   /** Selected card name. */
   cardName?: string;
   /** Whether the selected card's guest is running. */
@@ -138,6 +140,10 @@ export function butlerAnswer(choice: ButlerChoiceId, context: ButlerContext): st
       if (context.serviceUnavailable) {
         return "Start the host service with `npm run dev` in workspace-prototype, then reload. I'll keep an eye out.";
       }
+      if (context.guestStderr) {
+        const lastStderr = context.guestStderr.trim().split(/\r?\n/).slice(-3).join(" | ");
+        return `QEMU Diagnostic Log: "${lastStderr}". Use Stop, then Launch again with the safe display profile or inspection blueprints.`;
+      }
       if (context.guestError) {
         return "Try Stop, then Launch again. If the installer ignores shutdown, use Force stop in the display. Disks and snapshots stay safe.";
       }
@@ -236,6 +242,13 @@ export function butlerInterpretPrompt(
         `${engineBadge} Windows install media is not bundled. Point POSTCARD_WINDOWS_ISO at your own ISO; keeping it inside WSL Ubuntu lets QEMU read it directly without crossing the slow Windows mount.`,
     };
   }
+  if (/\b(foundry|catapult|black\s*box|radiator|glass\s*cockpit|beacon|pa-romy|romy|hangar|flight\s*deck|lockedheap|elf64|avionics|2195|al-li|cryogenic|hull)\b/.test(q)) {
+    return {
+      reply:
+        `${engineBadge} Post Card OS // Space Plane Avionics v1.0.4: Chassis (Al-Li 2195 Cryogenic Hull Frame [SECURED]) · The Foundry (16MB LockedHeap Arena [STABLE]) · The Catapult (ELF64 Ring 3 Spatial Loader [ARMED]) · The Black Box (VfsStorageBridge Sector Mirror [LOCKED]) · The Radiator (Cryogenic Thermal Control Loop [STABILIZED]) · PA-Romy Vault (Isolated Neural Coprocessor [ACTIVE]) · The Glass Cockpit & The Beacon (/telemetry WebSocket stream).`,
+    };
+  }
+
   if (/\b(stuck|trouble|error|broken|help|slow|fix)\b/.test(q)) {
     return { choice: "stuck", reply: `${engineBadge} ${butlerAnswer("stuck", context)}` };
   }

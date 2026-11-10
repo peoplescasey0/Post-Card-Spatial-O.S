@@ -355,6 +355,25 @@
                 <span class="room-state" id="room-selected-status">DEMO · DISCONNECTED</span>
               </div>
             </div>
+            <div class="kernel-hud-pod" id="kernel-hud-pod" aria-label="Post Card OS // Mission Control Telemetry">
+              <div class="kernel-hud-header">
+                <span class="kernel-hud-title">Post Card OS // Mission Control</span>
+                <button class="kernel-romy-toggle" id="romy-vault-toggle" type="button" title="Toggle PA-Romy Coprocessor Vault Enclave">⚡ PA-ROMY</button>
+              </div>
+              <div class="kernel-romy-row">
+                <span class="kernel-romy-dot" aria-hidden="true"></span>
+                <span class="kernel-romy-state" id="romy-status" data-romy-active="true">VAULT ACTIVE // ENCLAVE LOCKED</span>
+              </div>
+              <div class="kernel-heap-row">
+                <div class="kernel-heap-meta">
+                  <span>KERNEL HEAP PRESSURE</span>
+                  <span id="heap-pressure-label">25% (2048 KB)</span>
+                </div>
+                <div class="kernel-heap-track" role="progressbar" aria-label="Kernel heap pressure" aria-valuemin="0" aria-valuemax="100">
+                  <div class="kernel-heap-fill" id="heap-meter" style="width: 25%;" aria-valuenow="25"></div>
+                </div>
+              </div>
+            </div>
           </aside>
           <nav class="room-card-nav" id="room-card-nav" aria-label="Post Cards in this room"></nav>
           <div id="scene" class="scene"></div>
@@ -644,6 +663,8 @@
               <div class="manual-chapter-body">
                 <div class="help-row"><span class="help-key">MULTI-INSTANCE</span><span>Run up to 6 concurrent Windows 11, Linux, macOS, and Android cards. Secondary Windows cards auto-clone from your base disk with isolated TPM 2.0 state.</span></div>
                 <div class="help-row"><span class="help-key">🍃 ECO RAM MODE</span><span>Streamlined default allocation: <strong>2 GiB</strong> for Windows, <strong>1 GiB</strong> for Linux &amp; Android (cycle via <em>⚡ Hypervisor Ops ▾ → 🍃 Eco RAM Thinning</em>).</span></div>
+                <div class="help-row"><span class="help-key">⚡ REVIOS PLAYBOOK</span><span><strong>Windows 11 VM Optimization Only</strong>: Drop <code>AceSetup.exe</code> and <code>Revi-PB-26.10.apbx</code> via Paper Planes to strip bloat and telemetry, reducing idle RAM to ~1.3 GiB (100% legal local script transformation; not for Android/Linux).</span></div>
+                <div class="help-row"><span class="help-key">📱 ANDROID SANDBOX</span><span>Pure open-source AOSP / Android-x86 (Apache 2.0) with <code>-cpu host</code> and standard VGA. No proprietary GMS pre-bundled; end users can sideload F-Droid / Aurora / MicroG locally.</span></div>
                 <div class="help-row"><span class="help-key">🛡️ SECOPS PLAYBOOKS</span><span>Dedicated security suite: <em>Host Isolation</em> (unplug virtual NICs), <em>RAM Sanitizer</em> (VirtIO balloon scrub), <em>SSH Lockdown</em> (drop remote sessions), and <em>C2 Decoy</em> (spool canary sockets).</span></div>
                 <div class="help-row"><span class="help-key">⚡ HYPERVISOR OPS</span><span>Dedicated infrastructure operations: <em>Emergency Crashdump</em> (core dump extraction), <em>VRAM Compact</em> (defragment host framebuffers), and <em>Cold Evacuate</em> (safe flush and power down).</span></div>
                 <div class="help-row"><span class="help-key">VIRTIO BALLOON</span><span>VMs include <code>virtio-balloon</code> for dynamic guest memory reclamation. Host page merging is disabled for hardware compatibility.</span></div>
@@ -750,6 +771,23 @@
             <details class="manual-chapter">
               <summary class="manual-chapter-summary">
                 <span class="manual-chapter-num">CH 11</span>
+                <span class="manual-chapter-title">System Architecture, Codenames &amp; Cold Boot Specification (v1.0.4)</span>
+                <span class="pulldown-chevron">▾</span>
+              </summary>
+              <div class="manual-chapter-body">
+                <div class="help-row"><span class="help-key">🛰️ SPACE PLANE CHASSIS</span><span><code>Al-Li 2195 Cryogenic Hull Frame</code> structural aerospace chassis locked under <code>SPACE PLANE AVIONICS v1.0.4</code>.</span></div>
+                <div class="help-row"><span class="help-key">🔥 THE FOUNDRY</span><span><code>LockedHeap</code> dynamic free-list memory allocator managing 16 MB RAM chunks without garbage collection staggers.</span></div>
+                <div class="help-row"><span class="help-key">🚀 THE CATAPULT</span><span><code>ELF64 Loader</code> validating magic bytes (<code>0x7F 'E' 'L' 'F'</code>) and spawning Ring 3 user-space processes at <code>0x400000</code>.</span></div>
+                <div class="help-row"><span class="help-key">⬛ THE BLACK BOX</span><span><code>VfsStorageBridge</code> flushing modified VFS nodes and Freeplane mind-maps to raw LBA sectors via <code>MemoryBlockDevice</code>.</span></div>
+                <div class="help-row"><span class="help-key">❄️ THE RADIATOR</span><span><code>Cryogenic Thermal Control Loop</code> stabilizing the Al-Li 2195 hull frame and PA-Romy neural coprocessor enclave.</span></div>
+                <div class="help-row"><span class="help-key">🎛️ GLASS COCKPIT</span><span><code>render_native_hud</code> immediate-mode framebuffer renderer blitting Obsidian &amp; Amber telemetry straight into VRAM at 60 FPS.</span></div>
+                <div class="help-row"><span class="help-key">📡 THE BEACON &amp; PA-ROMY</span><span>Real-time <code>/telemetry</code> WebSocket stream paired with the hardware-isolated <strong>PA-Romy Coprocessor Vault</strong> (<code>#romy-status</code> &amp; <code>#heap-meter</code>).</span></div>
+                <div class="help-row"><span class="help-key">✈️ FLIGHT DECK &amp; HANGAR</span><span>Queuing buffer on the sending side and persistent staging zone on reception for <strong>Paper Planes</strong>.</span></div>
+              </div>
+            </details>
+            <details class="manual-chapter">
+              <summary class="manual-chapter-summary">
+                <span class="manual-chapter-num">CH 12</span>
                 <span class="manual-chapter-title">Custom Manual Sections &amp; Operator Notes (Auto-Saved)</span>
                 <span class="pulldown-chevron">▾</span>
               </summary>
