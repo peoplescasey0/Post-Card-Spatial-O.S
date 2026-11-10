@@ -814,6 +814,11 @@ mod dell_vam_profiler;
 mod hpe_multi_os_hvm;
 mod wasm_engine;
 mod nvidia_maxq_estimator;
+mod shm_ipc;
+mod vector_remoting;
+mod script_ast_guard;
+mod kwasm_engine;
+mod wave_mddma;
 
 // ============================================================================
 // 5. HARDWARE VT-x (VMXON / VMCS) & MICRO-VM CAPSULE HYPERVISOR ENGINE
@@ -1721,6 +1726,26 @@ pub unsafe extern "C" fn _start(multiboot2_info_addr: usize) -> ! {
     nvidia_maxq_estimator::init_nvidia_maxq_subsystem();
     kprintln_emerald!("[ok] NVIDIA Max-Q: AI-driven V-F curve estimator & shared TDP dynamic power balancing armed (CN 111143174 B)");
 
+    // Initialize Voyager Shared Memory Topic Registry (US 11,080,216 B2)
+    shm_ipc::init_voyager_shm_subsystem();
+    kprintln_emerald!("[ok] Voyager Shared Memory IPC: Lock-free topic ring buffers & dual-offset sync armed (US 11,080,216 B2)");
+
+    // Initialize ARAIS Vector Remoting Engine (US 10,558,824 B1)
+    vector_remoting::init_arais_vector_subsystem();
+    kprintln_emerald!("[ok] S2 Systems ARAIS: Vector draw command remoting & compositor quad interception armed (US 10,558,824 B1)");
+
+    // Initialize Tala Security AST/GAST Script Guard (US 11,314,862 B2)
+    script_ast_guard::init_tala_ast_subsystem();
+    kprintln_emerald!("[ok] Tala Security AST Guard: Tree Edit Distance (TED) & Generalized AST policy armed (US 11,314,862 B2)");
+
+    // Initialize Black Sesame Kwasm In-Kernel WebAssembly Engine (CN 112905472 B)
+    kwasm_engine::init_kwasm_subsystem();
+    kprintln_emerald!("[ok] Black Sesame Kwasm: In-kernel wasm64 runtime, NO-FPU enforcement & symbol export armed (CN 112905472 B)");
+
+    // Initialize Wave Computing 5-D Multidimensional DMA (US 10,997,102 B2)
+    wave_mddma::init_wave_mddma_subsystem();
+    kprintln_emerald!("[ok] Wave Computing MD-DMA: 256-bit 5-D tensor address generator & PE quad circular buffer armed (US 10,997,102 B2)");
+
     kprintln_emerald!("Spatial OS is ALIVE!");
 
     // 4. Interactive bare-metal shell (accepts input from BOTH PS/2 Keyboard and Serial COM1)
@@ -1786,7 +1811,7 @@ unsafe fn handle_shell_command(cmd_bytes: &[u8], mb2: &Multiboot2ParsedInfo) {
         return;
     }
     if cmd == "help" {
-        kprintln!("commands: help, gui, deck, mouse, routes, route [bind/free], usbc, sec, hsm [auth/lock], trust/graph, span [kick/ipi/rebalance], rootvmm [enter/exit/verify], snvme [read/write/target], hyos, dock, undock, pats [lba], shrink [mb], sva [activate/morph/dma/priv], latehv [step/trap], muse [fast/slow/mdev], coreiso [dispatch/pf], vgpu [tx/bounds], sriov [trigger/error/reset], vmsec [io/snap/bounds], ppt [ecall/aex/exit], vam [profile/bench], hvm [rma/poll/info], wasm [test/fuel/status], maxq [opt/step/tdp], cxl, scibuf, ltssm/margin, hud, net, stream, flynet [slot], fly [0..3], land, cpu, vmx, vms, vmrun, spawn, exec, elf, sched, syscall, ls, echo, uptime, mem, ps, pci, disks, sandbox, avionics, radiator, install, halt, reboot");
+        kprintln!("commands: help, gui, deck, mouse, routes, route [bind/free], usbc, sec, hsm [auth/lock], trust/graph, span [kick/ipi/rebalance], rootvmm [enter/exit/verify], snvme [read/write/target], hyos, dock, undock, pats [lba], shrink [mb], sva [activate/morph/dma/priv], latehv [step/trap], muse [fast/slow/mdev], coreiso [dispatch/pf], vgpu [tx/bounds], sriov [trigger/error/reset], vmsec [io/snap/bounds], ppt [ecall/aex/exit], vam [profile/bench], hvm [rma/poll/info], wasm [test/fuel/status], maxq [opt/step/tdp], shm [pub/sub], arais [level/flush], astguard [test], kwasm [test/call], mddma [burst/5d], cxl, scibuf, ltssm/margin, hud, net, stream, flynet [slot], fly [0..3], land, cpu, vmx, vms, vmrun, spawn, exec, elf, sched, syscall, ls, echo, uptime, mem, ps, pci, disks, sandbox, avionics, radiator, install, halt, reboot");
         kprintln!("storage:  disks, mount [pN], umount, df, ls [dir], cat <file>, write <file> <text>, append <file> <text>, touch <file>, mkdir <dir>, rm <path>, sync, blk <dev> <lba>");
     } else if cmd == "gui" || cmd == "deck" || cmd == "desktop" {
         if let Some(ref fb) = GOP_FB {
@@ -3389,6 +3414,263 @@ unsafe fn handle_shell_command(cmd_bytes: &[u8], mb2: &Multiboot2ParsedInfo) {
             nvidia_maxq_estimator::NVIDIA_MAXQ_ESTIMATOR.total_vf_switches,
             nvidia_maxq_estimator::NVIDIA_MAXQ_ESTIMATOR.power_budget_violations_prevented,
             nvidia_maxq_estimator::NVIDIA_MAXQ_ESTIMATOR.clock_caps_applied_for_bottlenecks
+        );
+    } else if cmd == "shm" || cmd.starts_with("shm ") || cmd == "voy" || cmd.starts_with("voy ") {
+        let arg = cmd.strip_prefix("shm ")
+            .or_else(|| cmd.strip_prefix("voy "))
+            .unwrap_or("")
+            .trim();
+        let mut it = arg.split_whitespace();
+        let sub = it.next().unwrap_or("");
+        if sub == "pub" {
+            let topic_id = it.next().and_then(|s| s.parse::<u32>().ok()).unwrap_or(0);
+            let msg = it.next().unwrap_or("VOYAGER_TELEMETRY_SAMPLE");
+            match shm_ipc::VOYAGER_SHM_IPC.publish_message(topic_id, msg.as_bytes()) {
+                Ok(new_tail) => kprintln_emerald!("[VOYAGER SHM] Published {} bytes to Topic #{} -> new tail_offset={}", msg.len(), topic_id, new_tail),
+                Err(e) => kprintln_amber!("[VOYAGER SHM] Publish failed: {}", e),
+            }
+        } else if sub == "sub" {
+            let topic_id = it.next().and_then(|s| s.parse::<u32>().ok()).unwrap_or(0);
+            let idx = (topic_id as usize).min(shm_ipc::MAX_TOPICS - 1);
+            let mut read_buf = [0u8; 256];
+            match shm_ipc::VOYAGER_SHM_IPC.subscribe_read(topic_id, &mut shm_ipc::DEMO_SUBSCRIBER_HEADS[idx], &mut read_buf) {
+                shm_ipc::ShmReadStatus::Ok { bytes_read } => {
+                    let text = core::str::from_utf8(&read_buf[..bytes_read]).unwrap_or("<binary>");
+                    kprintln_emerald!("[VOYAGER SHM] Subscribed read: {} bytes from Topic #{}: \"{}\"", bytes_read, topic_id, text);
+                }
+                shm_ipc::ShmReadStatus::NoNewMessage => {
+                    kprintln_amber!("[VOYAGER SHM] No new messages on Topic #{} (head == tail)", topic_id);
+                }
+                shm_ipc::ShmReadStatus::OverwrittenAndReset { new_head } => {
+                    kprintln_amber!("[VOYAGER SHM] Buffer wrap detected: subscriber overwritten, reset head to {}", new_head);
+                }
+                shm_ipc::ShmReadStatus::InvalidTopic => {
+                    kprintln_amber!("[VOYAGER SHM] Invalid Topic ID {}", topic_id);
+                }
+            }
+        }
+        kprintln_amber!("=== BEIJING VOYAGER SHARED MEMORY IPC & TOPIC REGISTRY (US 11,080,216 B2) ===");
+        kprintln!(
+            "Registered Topics: {} | Buffer Capacity: {} B/topic | Overwrites Recovered: {}",
+            shm_ipc::VOYAGER_SHM_IPC.topic_count,
+            shm_ipc::BUFFER_CAPACITY,
+            shm_ipc::VOYAGER_SHM_IPC.overwrite_events_caught
+        );
+        for i in 0..shm_ipc::VOYAGER_SHM_IPC.topic_count {
+            let rec = &shm_ipc::VOYAGER_SHM_IPC.registry[i];
+            let name = core::str::from_utf8(&rec.name[..rec.name_len]).unwrap_or("unknown");
+            kprintln!(
+                "  Topic #{}: '{}' | tail_offset={} | pending_tail_offset={} | msgs={} | rate={}Hz",
+                rec.topic_id, name, rec.tail_offset, rec.pending_tail_offset, rec.total_messages_published, rec.expected_rate_hz
+            );
+        }
+    } else if cmd == "arais" || cmd.starts_with("arais ") || cmd == "remoting" || cmd.starts_with("remoting ") {
+        let arg = cmd.strip_prefix("arais ")
+            .or_else(|| cmd.strip_prefix("remoting "))
+            .unwrap_or("")
+            .trim();
+        let mut it = arg.split_whitespace();
+        let sub = it.next().unwrap_or("");
+        if sub == "level" {
+            let lvl = it.next().unwrap_or("src");
+            if lvl == "dll" {
+                vector_remoting::ARAIS_VECTOR_ENGINE.current_level = vector_remoting::InterceptionLevel::DllDetour;
+                kprintln_emerald!("[ARAIS] Interception Level set to: DllDetour (Shared library detour)");
+            } else if lvl == "gdi" {
+                vector_remoting::ARAIS_VECTOR_ENGINE.current_level = vector_remoting::InterceptionLevel::OsGdiEmulation;
+                kprintln_emerald!("[ARAIS] Interception Level set to: OsGdiEmulation (GDI / libgdiplus)");
+            } else if lvl == "obj" {
+                vector_remoting::ARAIS_VECTOR_ENGINE.current_level = vector_remoting::InterceptionLevel::ObjectCodeInjection;
+                kprintln_emerald!("[ARAIS] Interception Level set to: ObjectCodeInjection (Binary disassembly)");
+            } else if lvl == "pixel" {
+                vector_remoting::ARAIS_VECTOR_ENGINE.current_level = vector_remoting::InterceptionLevel::PixelPushFallback;
+                kprintln_emerald!("[ARAIS] Interception Level set to: PixelPushFallback (Raw bitmap push)");
+            } else {
+                vector_remoting::ARAIS_VECTOR_ENGINE.current_level = vector_remoting::InterceptionLevel::SourceCodeHook;
+                kprintln_emerald!("[ARAIS] Interception Level set to: SourceCodeHook (Direct SKIA/Cairo vector)");
+            }
+        } else if sub == "flush" {
+            let count = vector_remoting::ARAIS_VECTOR_ENGINE.flush_frame();
+            kprintln_emerald!("[ARAIS] Flushed {} vector commands to WebAssembly Canvas renderer", count);
+        }
+        kprintln_amber!("=== S2 SYSTEMS ARAIS NETWORK VECTOR RENDERING & ISOLATION (US 10,558,824 B1) ===");
+        let level_name = match vector_remoting::ARAIS_VECTOR_ENGINE.current_level {
+            vector_remoting::InterceptionLevel::SourceCodeHook => "SourceCodeHook (SKIA/Cairo)",
+            vector_remoting::InterceptionLevel::DllDetour => "DllDetour (Shared Library)",
+            vector_remoting::InterceptionLevel::OsGdiEmulation => "OsGdiEmulation (GDI)",
+            vector_remoting::InterceptionLevel::ObjectCodeInjection => "ObjectCodeInjection",
+            vector_remoting::InterceptionLevel::PixelPushFallback => "PixelPushFallback",
+        };
+        kprintln!(
+            "Interception Level: {} | Queued Commands: {}/{} | Frames Flushed: {}",
+            level_name,
+            vector_remoting::ARAIS_VECTOR_ENGINE.queue_len,
+            vector_remoting::MAX_VECTOR_CMDS,
+            vector_remoting::ARAIS_VECTOR_ENGINE.frame_counter
+        );
+        kprintln!(
+            "Bandwidth Optimization: Vector Sent: {} B | Pixel Avoided: {} B | Savings: {}%",
+            vector_remoting::ARAIS_VECTOR_ENGINE.total_vector_bytes_sent,
+            vector_remoting::ARAIS_VECTOR_ENGINE.equivalent_pixel_bytes_avoided,
+            vector_remoting::ARAIS_VECTOR_ENGINE.bandwidth_savings_percentage()
+        );
+    } else if cmd == "astguard" || cmd.starts_with("astguard ") || cmd == "tala" || cmd.starts_with("tala ") {
+        let arg = cmd.strip_prefix("astguard ")
+            .or_else(|| cmd.strip_prefix("tala "))
+            .unwrap_or("")
+            .trim();
+        let mut it = arg.split_whitespace();
+        let sub = it.next().unwrap_or("");
+        if sub == "test" {
+            // Test 1: Benign script matching telemetry loop
+            let mut test_benign = script_ast_guard::ScriptAst::empty();
+            let _ = test_benign.push_node(0, script_ast_guard::AstNodeType::Root);
+            let f1 = test_benign.push_node(0, script_ast_guard::AstNodeType::FunctionStart).unwrap_or(0);
+            let _ = test_benign.push_node(f1, script_ast_guard::AstNodeType::MathComputeLoop);
+            let _ = test_benign.push_node(f1, script_ast_guard::AstNodeType::DataTransferNetwork);
+            let v1 = script_ast_guard::TALA_AST_GUARD.inspect_and_classify(&test_benign);
+            match v1 {
+                script_ast_guard::ScriptSecurityVerdict::Benign { matched_cluster_id, tree_edit_distance } => {
+                    kprintln_emerald!("[AST GUARD PASS] Script classified as BENIGN (Cluster #{}, TED={})", matched_cluster_id, tree_edit_distance);
+                }
+                script_ast_guard::ScriptSecurityVerdict::MaliciousBlocked { min_tree_edit_distance, reason } => {
+                    kprintln_amber!("[AST GUARD FAIL] Benign script was misclassified: TED={}, reason: {}", min_tree_edit_distance, reason);
+                }
+            }
+
+            // Test 2: Malicious script with obfuscated eval and exfiltration endpoint
+            let mut test_mal = script_ast_guard::ScriptAst::empty();
+            let _ = test_mal.push_node(0, script_ast_guard::AstNodeType::Root);
+            let f2 = test_mal.push_node(0, script_ast_guard::AstNodeType::FunctionStart).unwrap_or(0);
+            let _ = test_mal.push_node(f2, script_ast_guard::AstNodeType::ObfuscatedEval);
+            let _ = test_mal.push_node(f2, script_ast_guard::AstNodeType::ExfiltrationEndpoint);
+            let v2 = script_ast_guard::TALA_AST_GUARD.inspect_and_classify(&test_mal);
+            match v2 {
+                script_ast_guard::ScriptSecurityVerdict::MaliciousBlocked { min_tree_edit_distance, reason } => {
+                    kprintln_emerald!("[AST GUARD BLOCK] Malicious script intercepted & blocked: min TED={}, reason: {}", min_tree_edit_distance, reason);
+                }
+                script_ast_guard::ScriptSecurityVerdict::Benign { matched_cluster_id, tree_edit_distance } => {
+                    kprintln_amber!("[AST GUARD FAIL] Malicious script escaped detection: matched cluster #{}, TED={}", matched_cluster_id, tree_edit_distance);
+                }
+            }
+        }
+        kprintln_amber!("=== TALA SECURITY SCRIPT AST / GAST STRUCTURE GUARD (US 11,314,862 B2) ===");
+        kprintln!(
+            "Registered GAST Clusters: {}/{} | Total Inspected: {} | Malicious Blocked: {}",
+            script_ast_guard::TALA_AST_GUARD.cluster_count,
+            script_ast_guard::MAX_GAST_CLUSTERS,
+            script_ast_guard::TALA_AST_GUARD.total_scripts_inspected,
+            script_ast_guard::TALA_AST_GUARD.malicious_scripts_blocked
+        );
+        for i in 0..script_ast_guard::TALA_AST_GUARD.cluster_count {
+            let cl = &script_ast_guard::TALA_AST_GUARD.clusters[i];
+            let name = core::str::from_utf8(&cl.name[..cl.name_len]).unwrap_or("unknown");
+            kprintln!(
+                "  GAST #{}: '{}' | Nodes: {} | Max Allowed Tree Edit Distance (TED): {}",
+                cl.cluster_id, name, cl.template.node_count, cl.max_allowed_ted
+            );
+        }
+    } else if cmd == "kwasm" || cmd.starts_with("kwasm ") {
+        let arg = cmd.strip_prefix("kwasm ").unwrap_or("").trim();
+        let mut it = arg.split_whitespace();
+        let sub = it.next().unwrap_or("");
+        if sub == "test" {
+            // Test 1: Execute sys_math_i64_add kernel symbol invocation
+            match kwasm_engine::BLACK_SESAME_KWASM.invoke_kernel_symbol("sys_math_i64_add", 500, 250) {
+                Ok(res) => kprintln_emerald!("[KWASM PASS] Invoked 'sys_math_i64_add(500, 250)' in kernel space -> result={}", res),
+                Err(e) => kprintln_amber!("[KWASM FAIL] Symbol invocation failed: {}", e),
+            }
+            // Test 2: Verify FPU rejection in kernel mode
+            match kwasm_engine::BLACK_SESAME_KWASM.verify_opcode_compliance(0x8B) { // f32.add opcode
+                Ok(_) => kprintln_amber!("[KWASM FAIL] FPU opcode 0x8B was improperly allowed!"),
+                Err(e) => kprintln_emerald!("[KWASM PASS] FPU opcode 0x8B rejected: {}", e),
+            }
+        } else if sub == "call" {
+            let sym = it.next().unwrap_or("sys_get_uptime");
+            let a0 = it.next().and_then(|s| s.parse::<i64>().ok()).unwrap_or(0);
+            let a1 = it.next().and_then(|s| s.parse::<i64>().ok()).unwrap_or(0);
+            match kwasm_engine::BLACK_SESAME_KWASM.invoke_kernel_symbol(sym, a0, a1) {
+                Ok(res) => kprintln_emerald!("[KWASM] '{}({}, {})' returned: {}", sym, a0, a1, res),
+                Err(e) => kprintln_amber!("[KWASM] Call failed: {}", e),
+            }
+        }
+        kprintln_amber!("=== BLACK SESAME IN-KERNEL WEBASSEMBLY (KWASM) ENGINE (CN 112905472 B) ===");
+        kprintln!(
+            "Architecture: 64-bit wasm64 Kernel Interpreter | FPU Policy: STRICT_DISABLED (Kernel Safe)"
+        );
+        kprintln!(
+            "Export Symbols: {}/{} | Invocations: {} | FPU Opcodes Blocked: {} | Pool: {} B",
+            kwasm_engine::BLACK_SESAME_KWASM.symbol_count,
+            kwasm_engine::MAX_EXPORT_SYMBOLS,
+            kwasm_engine::BLACK_SESAME_KWASM.wasm64_invocations_executed,
+            kwasm_engine::BLACK_SESAME_KWASM.fpu_instructions_rejected,
+            kwasm_engine::BLACK_SESAME_KWASM.kernel_memory_pool_bytes
+        );
+        for i in 0..kwasm_engine::BLACK_SESAME_KWASM.symbol_count {
+            let s = &kwasm_engine::BLACK_SESAME_KWASM.symbols[i];
+            let name = core::str::from_utf8(&s.name[..s.name_len]).unwrap_or("unknown");
+            let proto = core::str::from_utf8(&s.prototype_sig[..s.proto_len]).unwrap_or("()");
+            kprintln!(
+                "  Symbol #{}: '{}' @ 0x{:016X} | Signature: {} | Calls: {}",
+                i, name, s.mapped_addr, proto, s.call_count
+            );
+        }
+    } else if cmd == "mddma" || cmd.starts_with("mddma ") || cmd == "wave" || cmd.starts_with("wave ") {
+        let arg = cmd.strip_prefix("mddma ")
+            .or_else(|| cmd.strip_prefix("wave "))
+            .unwrap_or("")
+            .trim();
+        let mut it = arg.split_whitespace();
+        let sub = it.next().unwrap_or("");
+        if sub == "burst" {
+            let addr = it.next().and_then(|s| {
+                if s.starts_with("0x") || s.starts_with("0X") {
+                    u64::from_str_radix(&s[2..], 16).ok()
+                } else {
+                    s.parse::<u64>().ok()
+                }
+            }).unwrap_or(0x0000_0000_E000_0000);
+            let requested = it.next().and_then(|s| s.parse::<u32>().ok()).unwrap_or(4096);
+            let (burst_len, aligned) = wave_mddma::WAVE_MDDMA_ENGINE.check_burst_efficiency(addr, requested);
+            kprintln_emerald!(
+                "[MD-DMA] Burst transfer: Base 0x{:016X} -> {} bytes (4KB-Aligned: {})",
+                addr, burst_len, aligned
+            );
+        } else if sub == "5d" {
+            let desc_5d = wave_mddma::TensorWorkDescriptor::new_5d(
+                0x0000_0000_2000_0000,
+                2, // 4-byte
+                16, // d0_count
+                4,  // d0_stride
+                [64, 1024, 4096, 16384],
+                [4, 8, 2, 2],
+            );
+            let base = wave_mddma::WAVE_MDDMA_ENGINE.dispatch_work_request(desc_5d);
+            let offset = wave_mddma::WAVE_MDDMA_ENGINE.calculate_address_offset([2, 1, 2, 1, 1]);
+            kprintln_emerald!(
+                "[MD-DMA] 5-D Tensor Address Synthesized: Base 0x{:016X} -> Element [2,1,2,1,1] = 0x{:016X}",
+                base, offset
+            );
+        }
+        kprintln_amber!("=== WAVE COMPUTING MULTIDIMENSIONAL DMA & PROCESSOR CLUSTER (US 10,997,102 B2) ===");
+        let cur = &wave_mddma::WAVE_MDDMA_ENGINE.current_descriptor;
+        kprintln!(
+            "256-bit Descriptor: Base: 0x{:016X} | Dims: {}D | Elem Size: {} B | Dim0 Stride: {} B (Count: {})",
+            cur.base_address, cur.num_dimensions, 1 << cur.element_size_shift, cur.dim0_stride, cur.dim0_count
+        );
+        kprintln!(
+            "Hardware PE Quad Cluster: q0={:?} q1={:?} q2={:?} q3={:?} | Circular PC: {}",
+            wave_mddma::WAVE_MDDMA_ENGINE.cluster.pe_states[0],
+            wave_mddma::WAVE_MDDMA_ENGINE.cluster.pe_states[1],
+            wave_mddma::WAVE_MDDMA_ENGINE.cluster.pe_states[2],
+            wave_mddma::WAVE_MDDMA_ENGINE.cluster.pe_states[3],
+            wave_mddma::WAVE_MDDMA_ENGINE.cluster.pc
+        );
+        kprintln!(
+            "Transfer Counters: Synthesized Addrs: {} | 4KB Bursts: {} | Total Volume: {} B",
+            wave_mddma::WAVE_MDDMA_ENGINE.total_addresses_synthesized,
+            wave_mddma::WAVE_MDDMA_ENGINE.total_bursts_completed,
+            wave_mddma::WAVE_MDDMA_ENGINE.total_bytes_transferred
         );
     } else if cmd == "clear" || cmd == "cls" {
         CURSOR_COL = 0;
