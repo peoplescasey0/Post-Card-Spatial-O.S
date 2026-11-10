@@ -819,6 +819,7 @@ mod vector_remoting;
 mod script_ast_guard;
 mod kwasm_engine;
 mod wave_mddma;
+mod intel_dtree;
 
 // ============================================================================
 // 5. HARDWARE VT-x (VMXON / VMCS) & MICRO-VM CAPSULE HYPERVISOR ENGINE
@@ -1746,6 +1747,10 @@ pub unsafe extern "C" fn _start(multiboot2_info_addr: usize) -> ! {
     wave_mddma::init_wave_mddma_subsystem();
     kprintln_emerald!("[ok] Wave Computing MD-DMA: 256-bit 5-D tensor address generator & PE quad circular buffer armed (US 10,997,102 B2)");
 
+    // Initialize Intel Flat Decision Tree Telemetry Classifier (US 2021/0097449 A1)
+    intel_dtree::init_intel_dtree_subsystem();
+    kprintln_emerald!("[ok] Intel Decision Tree: Memory-efficient flat node array telemetry classifier armed (US 2021/0097449 A1)");
+
     kprintln_emerald!("Spatial OS is ALIVE!");
 
     // 4. Interactive bare-metal shell (accepts input from BOTH PS/2 Keyboard and Serial COM1)
@@ -1811,7 +1816,7 @@ unsafe fn handle_shell_command(cmd_bytes: &[u8], mb2: &Multiboot2ParsedInfo) {
         return;
     }
     if cmd == "help" {
-        kprintln!("commands: help, gui, deck, mouse, routes, route [bind/free], usbc, sec, hsm [auth/lock], trust/graph, span [kick/ipi/rebalance], rootvmm [enter/exit/verify], snvme [read/write/target], hyos, dock, undock, pats [lba], shrink [mb], sva [activate/morph/dma/priv], latehv [step/trap], muse [fast/slow/mdev], coreiso [dispatch/pf], vgpu [tx/bounds], sriov [trigger/error/reset], vmsec [io/snap/bounds], ppt [ecall/aex/exit], vam [profile/bench], hvm [rma/poll/info], wasm [test/fuel/status], maxq [opt/step/tdp], shm [pub/sub], arais [level/flush], astguard [test], kwasm [test/call], mddma [burst/5d], cxl, scibuf, ltssm/margin, hud, net, stream, flynet [slot], fly [0..3], land, cpu, vmx, vms, vmrun, spawn, exec, elf, sched, syscall, ls, echo, uptime, mem, ps, pci, disks, sandbox, avionics, radiator, install, halt, reboot");
+        kprintln!("commands: help, gui, deck, mouse, routes, route [bind/free], usbc, sec, hsm [auth/lock], trust/graph, span [kick/ipi/rebalance], rootvmm [enter/exit/verify], snvme [read/write/target], hyos, dock, undock, pats [lba], shrink [mb], sva [activate/morph/dma/priv], latehv [step/trap], muse [fast/slow/mdev], coreiso [dispatch/pf], vgpu [tx/bounds], sriov [trigger/error/reset], vmsec [io/snap/bounds], ppt [ecall/aex/exit], vam [profile/bench], hvm [rma/poll/info], wasm [test/fuel/status], maxq [opt/step/tdp], shm [pub/sub], arais [level/flush], astguard [test], kwasm [test/call], mddma [burst/5d], dtree [eval/test], cxl, scibuf, ltssm/margin, hud, net, stream, flynet [slot], fly [0..3], land, cpu, vmx, vms, vmrun, spawn, exec, elf, sched, syscall, ls, echo, uptime, mem, ps, pci, disks, sandbox, avionics, radiator, install, halt, reboot");
         kprintln!("storage:  disks, mount [pN], umount, df, ls [dir], cat <file>, write <file> <text>, append <file> <text>, touch <file>, mkdir <dir>, rm <path>, sync, blk <dev> <lba>");
     } else if cmd == "gui" || cmd == "deck" || cmd == "desktop" {
         if let Some(ref fb) = GOP_FB {
@@ -3671,6 +3676,50 @@ unsafe fn handle_shell_command(cmd_bytes: &[u8], mb2: &Multiboot2ParsedInfo) {
             wave_mddma::WAVE_MDDMA_ENGINE.total_addresses_synthesized,
             wave_mddma::WAVE_MDDMA_ENGINE.total_bursts_completed,
             wave_mddma::WAVE_MDDMA_ENGINE.total_bytes_transferred
+        );
+    } else if cmd == "dtree" || cmd.starts_with("dtree ") {
+        let arg = cmd.strip_prefix("dtree ").unwrap_or("");
+        let mut it = arg.split_whitespace();
+        let sub = it.next().unwrap_or("");
+        if sub == "test" {
+            let samples = [
+                ([60u32, 65, 40, 50], intel_dtree::TelemetryClass::NominalCruise, "Nominal Flight"),
+                ([80u32, 85, 50, 40], intel_dtree::TelemetryClass::ThermalThrottleRequired, "Thermal Throttle (Temp > 75C)"),
+                ([65u32, 90, 50, 40], intel_dtree::TelemetryClass::ThermalThrottleRequired, "Power Throttle (Power > 80W)"),
+                ([65u32, 70, 90, 30], intel_dtree::TelemetryClass::HeapMemoryPressure, "Heap Pressure (Heap > 85%)"),
+                ([65u32, 70, 50, 150], intel_dtree::TelemetryClass::AnomalousTelemetry, "Sensor Anomaly (Rate > 100Hz)"),
+            ];
+            for (feat, expected, desc) in samples.iter() {
+                let (pred, _reason) = intel_dtree::INTEL_DTREE_ENGINE.evaluate_telemetry(*feat);
+                if pred == *expected {
+                    kprintln_emerald!("[DTREE PASS] Telemetry {:?} -> {} [{}]", feat, intel_dtree::class_str(pred), desc);
+                } else {
+                    kprintln_amber!("[DTREE FAIL] Telemetry {:?} -> got {} expected {}", feat, intel_dtree::class_str(pred), intel_dtree::class_str(*expected));
+                }
+            }
+        } else if sub == "eval" {
+            let temp = it.next().and_then(|s| s.parse::<u32>().ok()).unwrap_or(60);
+            let power = it.next().and_then(|s| s.parse::<u32>().ok()).unwrap_or(65);
+            let heap = it.next().and_then(|s| s.parse::<u32>().ok()).unwrap_or(40);
+            let rate = it.next().and_then(|s| s.parse::<u32>().ok()).unwrap_or(50);
+            let (pred, reason) = intel_dtree::INTEL_DTREE_ENGINE.evaluate_telemetry([temp, power, heap, rate]);
+            kprintln_emerald!(
+                "[DTREE] Telemetry [T:{}C, P:{}W, Heap:{}%, Rate:{}Hz] -> Classification: {} | Reason: {}",
+                temp, power, heap, rate, intel_dtree::class_str(pred), reason
+            );
+        }
+        kprintln_amber!("=== INTEL MEMORY-EFFICIENT FLAT DECISION TREE (US 2021/0097449 A1) ===");
+        kprintln!(
+            "Flat Node Array: {} nodes active (Capacity: {}) | Training Samples: {}",
+            intel_dtree::INTEL_DTREE_ENGINE.node_count,
+            intel_dtree::MAX_TREE_NODES,
+            intel_dtree::INTEL_DTREE_ENGINE.total_samples
+        );
+        kprintln!("Partition Scheme: In-place contiguous feature splitting (Zero heap allocation)");
+        kprintln!(
+            "Inference Counters: Inferences Executed: {} | Throttles Signaled: {}",
+            intel_dtree::INTEL_DTREE_ENGINE.total_inferences_executed,
+            intel_dtree::INTEL_DTREE_ENGINE.total_throttles_signaled
         );
     } else if cmd == "clear" || cmd == "cls" {
         CURSOR_COL = 0;

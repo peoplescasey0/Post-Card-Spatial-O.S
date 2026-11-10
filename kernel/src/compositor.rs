@@ -498,6 +498,8 @@ unsafe fn render_card_content(fb: &GopFramebufferInfo, card: &SpatialCard) {
             draw_str(fb, bx, by, "Tala Guard: GAST Enforced", COLOR_EMERALD, None);
             by += 14;
             draw_str(fb, bx, by, "Wave MD-DMA: 5-D Tensor PE Quad", COLOR_AMBER, None);
+            by += 14;
+            draw_str(fb, bx, by, "Intel DTree: Flat Node Array (US'449)", COLOR_CYAN, None);
         }
         _ => {}
     }
