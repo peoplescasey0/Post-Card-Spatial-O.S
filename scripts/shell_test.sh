@@ -338,6 +338,13 @@ try:
         ("quantum test", ["[QUANTUM PASS] Complexity Router & Priority Backtracking: All Qomplx complexity orchestrator & BUPT priority backtracking tests passed"]),
         ("quantum route qubo", ["[QUANTUM ROUTE] Task 'qubo' -> Tier: QuantumAnnealingQubo", "Combinatorial NP-hard / Quadratic Hamiltonian"]),
         ("quantum solve", ["[QUANTUM SOLVE] Spins: 8", "Converged: true"]),
+        ("browse test", ["[BROWSER PASS] Web Engine & HTTP: All web browser & HTTP engine tests passed"]),
+        ("bookmarks", ["POST CARD SPATIAL OS - WEB BOOKMARKS", "Spatial OS Studio", "Linux Kernel Archives"]),
+        ("browse http://github.com", ["HTTP 200 OK", "GitHub - Post-Card-Spatial-OS"]),
+        ("email test", ["[EMAIL PASS] Mailbox & Provenance: All email client & mailbox tests passed"]),
+        ("email inbox", ["INBOX MAILBOX (SPATIAL OS CARRIER)", "avionics@postcard.os", "Welcome to Post Card Spatial OS"]),
+        ("email read 1", ["EMAIL MESSAGE #1", "From:    avionics@postcard.os", "Status:  RelayDelivered"]),
+        ("email send ground-control@satellite.org FlightStatus Nominal", ["[EMAIL SENT] Message", "queued for dispatch to <ground-control@satellite.org>"]),
         ("sandbox", ["sandbox identity:"]),
         ("cpu", ["CPU Vendor:", "Features: VMX="]),
         ("vmx", ["VMX Root Active:", "VMXON Region PA:"]),
@@ -349,6 +356,8 @@ try:
         ("exec telemetry", ["[CATAPULT] Loaded ELF64", "[EXEC OK]"]),
         ("sched", ["PREEMPTIVE / ROUND-ROBIN SCHEDULER", "PID 4: [telemetry]"]),
         ("syscall 39", ["[SYSCALL] nr=39 dispatched"]),
+        ("install", ["POST CARD SPATIAL OS - BARE-METAL DISK INSTALLER", "EFI Bootloader: /EFI/BOOT/BOOTX64.EFI [READY]"]),
+        ("install test", ["[INSTALL COMPLETE] Post Card Spatial OS successfully installed to disk", "Protective MBR with 0x55AA boot signature"]),
         ("foobar_unknown_cmd", ["unknown command: foobar_unknown_cmd"])
     ]
 
