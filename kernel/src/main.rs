@@ -860,6 +860,8 @@ mod syscall_bridge_soc;
 mod forensic_ebpf_audit;
 mod anjuna_barkly_enclave;
 mod citrix_gpu_sliding;
+mod provenance_pvm_protect;
+mod diov_streams_ehas;
 
 // ============================================================================
 // 5. HARDWARE VT-x (VMXON / VMCS) & MICRO-VM CAPSULE HYPERVISOR ENGINE
@@ -1884,6 +1886,14 @@ pub unsafe extern "C" fn _start(multiboot2_info_addr: usize) -> ! {
     citrix_gpu_sliding::init_gpu_sliding_subsystem();
     kprintln_emerald!("[ok] Citrix GPU Sliding: VT-d passthrough <-> emulator state continuity armed (US 9,406,099 B2)");
 
+    // Initialize OmegaLog Universal Provenance Graph + Point-ISA/DTAM/DataMeld PVM Protection (US 11,704,129 B2 / US 11,042,631 B2)
+    provenance_pvm_protect::init_provenance_pvm_subsystem();
+    kprintln_emerald!("[ok] OmegaLog UPG & Point-ISA PVM Guard: LMS/CFI provenance & DataMeld armed (US 11,704,129 B2 / US 11,042,631 B2)");
+
+    // Initialize Dynavisor DIOV Split-Context Polling Streams & Bidirectional EHAS (US 9,910,689 B2)
+    diov_streams_ehas::init_diov_subsystem();
+    kprintln_emerald!("[ok] Dynavisor DIOV Streams & EHAS: zero-VMEXIT mailboxes & RFO-free cache armed (US 9,910,689 B2)");
+
     kprintln_emerald!("Spatial OS is ALIVE!");
 
     // 4. Interactive bare-metal shell (accepts input from BOTH PS/2 Keyboard and Serial COM1)
@@ -1949,7 +1959,7 @@ unsafe fn handle_shell_command(cmd_bytes: &[u8], mb2: &Multiboot2ParsedInfo) {
         return;
     }
     if cmd == "help" {
-        kprintln!("commands: help, gui, deck, mouse, routes, route [bind/free], usbc, sec, hsm [auth/lock], trust/graph, span [kick/ipi/rebalance], rootvmm [enter/exit/verify], snvme [read/write/target], hyos, dock, undock, pats [lba], shrink [mb], sva [activate/morph/dma/priv], latehv [step/trap], muse [fast/slow/mdev], coreiso [dispatch/pf], vgpu [tx/bounds], sriov [trigger/error/reset], vmsec [io/snap/bounds], ppt [ecall/aex/exit], vam [profile/bench], hvm [rma/poll/info], wasm [test/fuel/status], maxq [opt/step/tdp], shm [pub/sub], arais [level/flush], astguard [test], kwasm [test/call], mddma [burst/5d], dtree [eval/test], panda [test/parse], fortinet [test/eos], nudt [test/rule], snic [test/rule], afxdp [test/bind], mesh [test/arp], soundhound [test/move], ericsson [test/move], astound [test/bypass], vcr [test/query], fsm [test/audit], mongo [test/workload], enclave [test/seal], metal [test/pipeline], kunlun [test/broadcast/drm/attest/cache/info], antmem [test/info], quantum [test/route/solve/status], socbridge [test/status], forensics [test/status/chain/ebpf], anjuna [test/status], gpuslide [test/status/slide], browse [url], bookmarks, http [get], email [inbox/read/send/outbox/test], cxl, scibuf, ltssm/margin, hud, net, stream, flynet [slot], fly [0..3], land, cpu, vmx, vms, vmrun, spawn, exec, elf, sched, syscall, ls, echo, uptime, mem, ps, pci, disks, sandbox, avionics, radiator, install, halt, reboot");
+        kprintln!("commands: help, gui, deck, mouse, routes, route [bind/free], usbc, sec, hsm [auth/lock], trust/graph, span [kick/ipi/rebalance], rootvmm [enter/exit/verify], snvme [read/write/target], hyos, dock, undock, pats [lba], shrink [mb], sva [activate/morph/dma/priv], latehv [step/trap], muse [fast/slow/mdev], coreiso [dispatch/pf], vgpu [tx/bounds], sriov [trigger/error/reset], vmsec [io/snap/bounds], ppt [ecall/aex/exit], vam [profile/bench], hvm [rma/poll/info], wasm [test/fuel/status], maxq [opt/step/tdp], shm [pub/sub], arais [level/flush], astguard [test], kwasm [test/call], mddma [burst/5d], dtree [eval/test], panda [test/parse], fortinet [test/eos], nudt [test/rule], snic [test/rule], afxdp [test/bind], mesh [test/arp], soundhound [test/move], ericsson [test/move], astound [test/bypass], vcr [test/query], fsm [test/audit], mongo [test/workload], enclave [test/seal], metal [test/pipeline], kunlun [test/broadcast/drm/attest/cache/info], antmem [test/info], quantum [test/route/solve/status], socbridge [test/status], forensics [test/status/chain/ebpf], anjuna [test/status], gpuslide [test/status/slide], provenance [test/status], diov [test/status], browse [url], bookmarks, http [get], email [inbox/read/send/outbox/test], cxl, scibuf, ltssm/margin, hud, net, stream, flynet [slot], fly [0..3], land, cpu, vmx, vms, vmrun, spawn, exec, elf, sched, syscall, ls, echo, uptime, mem, ps, pci, disks, sandbox, avionics, radiator, install, halt, reboot");
         kprintln!("storage:  disks, mount [pN], umount, df, ls [dir], cat <file>, write <file> <text>, append <file> <text>, touch <file>, mkdir <dir>, rm <path>, sync, blk <dev> <lba>");
     } else if cmd == "gui" || cmd == "deck" || cmd == "desktop" {
         if let Some(ref fb) = GOP_FB {
@@ -5028,6 +5038,62 @@ unsafe fn handle_shell_command(cmd_bytes: &[u8], mb2: &Multiboot2ParsedInfo) {
                     v.vm_id, v.has_focus, v.mode, v.vtd_iommu_domain, v.mmio_bar_addr, v.pnp_device_loss_alerts
                 );
             }
+        }
+    } else if cmd.starts_with("provenance") {
+        let arg = cmd.strip_prefix("provenance").unwrap_or("").trim();
+        if arg == "test" {
+            let (ok, msg) = provenance_pvm_protect::run_self_test();
+            if ok {
+                kprintln_emerald!("{}", msg);
+            } else {
+                kprintln_amber!("[PROVENANCE FAIL] {}", msg);
+            }
+        } else {
+            use core::sync::atomic::Ordering;
+            kprintln_cyan!("=== OMEGALOG UPG & POINT-ISA PVM GUARD (US 11,704,129 B2 / US 11,042,631 B2) ===");
+            let luni = unsafe { provenance_pvm_protect::PROVENANCE_PVM_MGR.total_luni_events.load(Ordering::Relaxed) };
+            let edges = unsafe { provenance_pvm_protect::PROVENANCE_PVM_MGR.total_upg_edges.load(Ordering::Relaxed) };
+            let pruned = unsafe { provenance_pvm_protect::PROVENANCE_PVM_MGR.pruned_explosions.load(Ordering::Relaxed) };
+            let cfi_dev = unsafe { provenance_pvm_protect::PROVENANCE_PVM_MGR.cfi_deviations.load(Ordering::Relaxed) };
+            let pts = unsafe { provenance_pvm_protect::PROVENANCE_PVM_MGR.point_isa_verifications.load(Ordering::Relaxed) };
+            let traps = unsafe { provenance_pvm_protect::PROVENANCE_PVM_MGR.foreign_pvm_traps.load(Ordering::Relaxed) };
+            let dtam = unsafe { provenance_pvm_protect::PROVENANCE_PVM_MGR.dtam_rewrites.load(Ordering::Relaxed) };
+            let meld = unsafe { provenance_pvm_protect::PROVENANCE_PVM_MGR.datameld_blends.load(Ordering::Relaxed) };
+            kprintln!(
+                "L_uni Events: {} | UPG Edges: {} | Dependency Explosions Pruned: {} | PT CFI Deviations: {}",
+                luni, edges, pruned, cfi_dev
+            );
+            kprintln!(
+                "Point-ISA Checks: {} | Foreign PVM Traps: {} | DTAM Rewrites: {} | DataMeld Stack Blends: {}",
+                pts, traps, dtam, meld
+            );
+        }
+    } else if cmd.starts_with("diov") {
+        let arg = cmd.strip_prefix("diov").unwrap_or("").trim();
+        if arg == "test" {
+            let (ok, msg) = diov_streams_ehas::run_self_test();
+            if ok {
+                kprintln_emerald!("{}", msg);
+            } else {
+                kprintln_amber!("[DIOV FAIL] {}", msg);
+            }
+        } else {
+            use core::sync::atomic::Ordering;
+            kprintln_cyan!("=== DYNAVISOR DIOV STREAMS & BIDIRECTIONAL EHAS (US 9,910,689 B2) ===");
+            let streams = unsafe { diov_streams_ehas::DIOV_STREAM_MGR.streams_processed.load(Ordering::Relaxed) };
+            let vmexits = unsafe { diov_streams_ehas::DIOV_STREAM_MGR.vmexits_avoided.load(Ordering::Relaxed) };
+            let ehas = unsafe { diov_streams_ehas::DIOV_STREAM_MGR.ehas_syncs.load(Ordering::Relaxed) };
+            let rfo = unsafe { diov_streams_ehas::DIOV_STREAM_MGR.rfo_eliminated_writes.load(Ordering::Relaxed) };
+            let wb = unsafe { diov_streams_ehas::DIOV_STREAM_MGR.active_writebacks.load(Ordering::Relaxed) };
+            let hits = unsafe { diov_streams_ehas::DIOV_STREAM_MGR.cache_hits.load(Ordering::Relaxed) };
+            kprintln!(
+                "Streams Processed: {} | VMEXITs Avoided: {} | EHAS Context Syncs: {}",
+                streams, vmexits, ehas
+            );
+            kprintln!(
+                "RFO-Free Dirty Writes: {} | Active Writebacks: {} | Set-Associative Hits: {}",
+                rfo, wb, hits
+            );
         }
     } else if cmd == "clear" || cmd == "cls" {
         CURSOR_COL = 0;
