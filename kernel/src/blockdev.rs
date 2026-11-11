@@ -93,25 +93,30 @@ pub unsafe fn udelay(us: u64) {
     if TSC_PER_US == 0 {
         calibrate_tsc();
     }
-    let end = rdtsc().wrapping_add(us.saturating_mul(TSC_PER_US));
-    while rdtsc() < end {
+    let deadline = rdtsc().wrapping_add(us.saturating_mul(TSC_PER_US));
+    let mut max_spins: u64 = us.saturating_mul(100).max(5_000_000);
+    while max_spins > 0 && rdtsc() < deadline {
+        max_spins -= 1;
         core::hint::spin_loop();
     }
 }
 
 /// Polls `cond` until it returns true or `timeout_us` elapses.
+/// Protected by both a calibrated TSC deadline and a hard upper-bound iteration counter.
 unsafe fn wait_until<F: FnMut() -> bool>(timeout_us: u64, mut cond: F) -> bool {
     if TSC_PER_US == 0 {
         calibrate_tsc();
     }
     let deadline = rdtsc().wrapping_add(timeout_us.saturating_mul(TSC_PER_US));
+    let mut max_spins: u64 = timeout_us.saturating_mul(100).max(5_000_000);
     loop {
         if cond() {
             return true;
         }
-        if rdtsc() >= deadline {
+        if max_spins == 0 || rdtsc() >= deadline {
             return cond();
         }
+        max_spins -= 1;
         core::hint::spin_loop();
     }
 }
@@ -219,17 +224,23 @@ pub fn pci_class_name(class: u8, sub: u8) -> &'static str {
     }
 }
 
-/// Reads a memory BAR (handles 64-bit BARs). Returns 0 for I/O BARs.
+/// Reads a memory BAR (handles 64-bit BARs). Returns 0 for I/O BARs or floating/unmapped lines.
 pub unsafe fn pci_mem_bar(p: &PciDevice, idx: u8) -> u64 {
     let off = 0x10 + idx * 4;
     let lo = pci_read32(p.bus, p.dev, p.func, off);
-    if lo & 1 != 0 {
+    if lo == 0xFFFF_FFFF || lo == 0 || (lo & 1) != 0 {
         return 0;
     }
     let mut addr = (lo & 0xFFFF_FFF0) as u64;
     if (lo >> 1) & 0x3 == 0x2 {
         let hi = pci_read32(p.bus, p.dev, p.func, off + 4);
+        if hi == 0xFFFF_FFFF {
+            return 0;
+        }
         addr |= (hi as u64) << 32;
+    }
+    if addr == 0 || addr >= 0xFFFF_FFFF_FFFF_0000 {
+        return 0;
     }
     addr
 }
@@ -264,7 +275,7 @@ extern "C" {
 }
 
 unsafe fn map_mmio(phys: u64, size: u64) -> Option<u64> {
-    if phys == 0 {
+    if phys == 0 || phys >= 0xFFFF_FFFF_FFFF_0000 || phys == 0xFFFF_FFF0 {
         return None;
     }
     if phys.saturating_add(size) <= 0xFE00_0000 {
@@ -446,21 +457,34 @@ fn blank_device(kind: DevKind) -> BlockDevice {
 /// Probes every supported storage controller. Safe to call once at boot.
 pub unsafe fn init() {
     calibrate_tsc();
+    kprintln_colored(0x03, 0x0006B6D4, format_args!("[probe] Initializing block storage subsystems (TSC: {} ticks/us)...", TSC_PER_US));
     pci_scan();
     DEV_COUNT = 0;
     let mut have_ide = false;
+    kprintln_colored(0x03, 0x0006B6D4, format_args!("[probe] PCI bus scan discovered {} total devices", PCI_COUNT));
     for i in 0..PCI_COUNT {
         let p = PCI_DEVICES[i];
         match (p.class, p.subclass) {
-            (0x01, 0x08) if p.prog_if == 0x02 => match nvme_init(&p) {
-                Ok(idx) => log_device(idx),
-                Err(e) => kprintln_colored(0x0E, 0x00FFB81C, format_args!("[warn] nvme {:02x}:{:02x}.{}: {}", p.bus, p.dev, p.func, e)),
-            },
-            (0x08, 0x05) => match sdhci_init(&p) {
-                Ok(idx) => log_device(idx),
-                Err(e) => kprintln_colored(0x0E, 0x00FFB81C, format_args!("[warn] sdhci {:02x}:{:02x}.{}: {}", p.bus, p.dev, p.func, e)),
-            },
-            (0x01, 0x01) => have_ide = true,
+            (0x01, 0x08) if p.prog_if == 0x02 => {
+                let bar = pci_mem_bar(&p, 0);
+                kprintln_colored(0x0B, 0x0038BDF8, format_args!("[probe] -> NVMe controller identified at {:02x}:{:02x}.{} (BAR0={:#x}). Initializing...", p.bus, p.dev, p.func, bar));
+                match nvme_init(&p) {
+                    Ok(idx) => log_device(idx),
+                    Err(e) => kprintln_colored(0x0E, 0x00FFB81C, format_args!("[warn] nvme {:02x}:{:02x}.{}: {}", p.bus, p.dev, p.func, e)),
+                }
+            }
+            (0x08, 0x05) => {
+                let bar = pci_mem_bar(&p, 0);
+                kprintln_colored(0x0B, 0x0038BDF8, format_args!("[probe] -> SDHCI eMMC/SD controller identified at {:02x}:{:02x}.{} (BAR0={:#x}). Initializing...", p.bus, p.dev, p.func, bar));
+                match sdhci_init(&p) {
+                    Ok(idx) => log_device(idx),
+                    Err(e) => kprintln_colored(0x0E, 0x00FFB81C, format_args!("[warn] sdhci {:02x}:{:02x}.{}: {}", p.bus, p.dev, p.func, e)),
+                }
+            }
+            (0x01, 0x01) => {
+                kprintln_colored(0x0B, 0x0038BDF8, format_args!("[probe] -> PCI IDE Controller identified at {:02x}:{:02x}.{}", p.bus, p.dev, p.func));
+                have_ide = true;
+            }
             _ => {}
         }
     }
@@ -469,12 +493,14 @@ pub unsafe fn init() {
     if have_ide {
         for &(io, ctrl) in &[(0x1F0u16, 0x3F6u16), (0x170u16, 0x376u16)] {
             for &slave in &[false, true] {
+                kprintln_colored(0x03, 0x0006B6D4, format_args!("[probe] -> Checking ATA channel {:#x} (ctrl={:#x}, slave={})...", io, ctrl, slave));
                 if let Some(idx) = ata_probe(io, ctrl, slave) {
                     log_device(idx);
                 }
             }
         }
     }
+    kprintln_colored(0x0A, 0x0022C55E, format_args!("[probe] Storage probe cycle finished: {} device(s) active", DEV_COUNT));
 }
 
 unsafe fn log_device(idx: usize) {
