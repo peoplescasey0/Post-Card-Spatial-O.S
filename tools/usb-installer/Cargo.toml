@@ -1,0 +1,7 @@
+[package]
+name = "postcard-usb-installer"
+version = "0.1.0"
+edition = "2021"
+description = "Native Bare-Metal USB Installer for Post Card Spatial OS"
+
+[dependencies]
