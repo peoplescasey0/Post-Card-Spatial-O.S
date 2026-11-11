@@ -12,6 +12,7 @@
     "build:ui": "powershell -ExecutionPolicy Bypass -Command \"Set-Location workspace-prototype; npm run build\"",
     "test:all": "powershell -ExecutionPolicy Bypass -File ./build-all.ps1 -RunTests",
     "boot:iso": "powershell -ExecutionPolicy Bypass -File ./boot-postcard-iso.ps1",
+    "install:usb": "powershell -ExecutionPolicy Bypass -File ./install-to-usb.ps1",
     "studio": "powershell -ExecutionPolicy Bypass -File ./launch-postcard-os.ps1"
   }
 }
