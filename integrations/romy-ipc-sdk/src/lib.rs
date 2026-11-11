@@ -2,7 +2,10 @@
 //! Provides ergonomic abstractions over our zero-copy ring buffers and /dev/custom_comm_device
 
 use std::fs::File;
+#[cfg(unix)]
 use std::os::unix::io::AsRawFd;
+#[cfg(windows)]
+use std::os::windows::io::AsRawHandle;
 use std::io::{Read, Write};
 
 pub struct IpcClientChannel {
@@ -40,9 +43,17 @@ impl IpcClientChannel {
     }
 }
 
+#[cfg(unix)]
 impl AsRawFd for IpcClientChannel {
     fn as_raw_fd(&self) -> std::os::unix::io::RawFd {
         self.device_file.as_raw_fd()
+    }
+}
+
+#[cfg(windows)]
+impl AsRawHandle for IpcClientChannel {
+    fn as_raw_handle(&self) -> std::os::windows::io::RawHandle {
+        self.device_file.as_raw_handle()
     }
 }
 
@@ -77,10 +88,10 @@ impl RomyTelemetryDaemon {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::IpcClientChannel;
 
     #[test]
     fn test_ipc_types_defined() {
-        assert_eq!(std::mem::size_of::<usize>(), 8);
+        assert_eq!(core::mem::size_of::<IpcClientChannel>(), core::mem::size_of::<usize>() * 2);
     }
 }
