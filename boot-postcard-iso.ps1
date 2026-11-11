@@ -1,8 +1,9 @@
 param(
     [string]$IsoPath = "",
-    [string]$QemuExe = "C:\Program Files\qemu\qemu-system-x86_64.exe",
+    [string]$QemuExe = "",
     [string]$Display = "sdl",
-    [switch]$Headless
+    [switch]$Headless,
+    [switch]$Detached
 )
 
 $ErrorActionPreference = "Stop"
@@ -20,10 +21,28 @@ if (-not $IsoPath) {
 }
 
 if (-not (Test-Path $IsoPath)) {
-    throw "Post Card OS ISO not found at: $IsoPath"
+    throw "Post Card OS ISO not found at: $IsoPath. Run build-all.ps1 first to build the bootable ISO."
 }
-if (-not (Test-Path $QemuExe)) {
-    throw "QEMU executable not found at: $QemuExe"
+
+if (-not $QemuExe) {
+    $candidates = @(
+        "C:\Program Files\qemu\qemu-system-x86_64.exe",
+        "C:\Program Files (x86)\qemu\qemu-system-x86_64.exe"
+    )
+    $cmdQemu = Get-Command qemu-system-x86_64 -ErrorAction SilentlyContinue
+    if ($cmdQemu) {
+        $candidates = @($cmdQemu.Source) + $candidates
+    }
+    foreach ($cand in $candidates) {
+        if ($cand -and (Test-Path $cand)) {
+            $QemuExe = $cand
+            break
+        }
+    }
+}
+
+if (-not $QemuExe -or -not (Test-Path $QemuExe)) {
+    throw "QEMU executable not found. Ensure QEMU is installed at 'C:\Program Files\qemu\qemu-system-x86_64.exe' or added to your PATH."
 }
 
 $displayArg = if ($Headless) { "none" } else { $Display }
@@ -39,7 +58,17 @@ $arguments = @(
     "-no-reboot"
 )
 
-Write-Host "Booting Post Card Spatial OS from: $IsoPath" -ForegroundColor Cyan
-Write-Host "Display: $displayArg" -ForegroundColor Yellow
+Write-Host "===============================================================================" -ForegroundColor Cyan
+Write-Host "         BOOTING POST CARD SPATIAL OS IN QEMU VIRTUAL MACHINE" -ForegroundColor Cyan
+Write-Host "===============================================================================" -ForegroundColor Cyan
+Write-Host "[*] QEMU Executable: $QemuExe" -ForegroundColor White
+Write-Host "[*] ISO Image:       $IsoPath" -ForegroundColor White
+Write-Host "[*] Display Backend: $displayArg" -ForegroundColor Yellow
+Write-Host "===============================================================================" -ForegroundColor Cyan
 
-& $QemuExe @arguments
+if ($Detached) {
+    Start-Process -FilePath $QemuExe -ArgumentList $arguments
+    Write-Host "[+] QEMU launched in background detached mode." -ForegroundColor Green
+} else {
+    & $QemuExe @arguments
+}

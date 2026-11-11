@@ -152,3 +152,9 @@ Write-Host "  2. Power on and press the Boot Menu key (F12 on Dell/Lenovo, F9 on
 Write-Host "  3. Select 'UEFI: POSTCARD_OS' or the USB drive from the menu." -ForegroundColor White
 Write-Host "  4. Post Card Spatial OS will launch directly into the 3D Glass Cockpit!" -ForegroundColor Green
 Write-Host "===============================================================================" -ForegroundColor Green
+
+Write-Host ""
+$testBoot = Read-Host "Would you like to test-boot Post Card Spatial OS in QEMU now? (Y/n)"
+if ($testBoot -eq '' -or $testBoot.ToLower() -eq 'y') {
+    & powershell -ExecutionPolicy Bypass -File (Join-Path $root "boot-postcard-iso.ps1")
+}

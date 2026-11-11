@@ -19,6 +19,12 @@ fn main() -> io::Result<()> {
     println!("         POST CARD SPATIAL OS // BARE-METAL USB INSTALLER");
     println!("===============================================================================");
 
+    // Check for CLI flags (e.g. `postcard-usb-installer --qemu`)
+    if std::env::args().any(|a| a == "--qemu" || a == "-q" || a == "qemu") {
+        let iso = locate_iso();
+        return boot_qemu(&iso);
+    }
+
     // 1. Locate kernel binary across standard release and bundle directories
     let candidates = [
         "target/x86_64-unknown-none/release/postcard-minimal-kernel",
@@ -50,11 +56,16 @@ fn main() -> io::Result<()> {
     println!("\n[1/3] Scanning available storage devices...");
     list_available_disks()?;
 
-    print!("\nEnter target device path (e.g., E:, /dev/sdb, or \\\\.\\PhysicalDrive1): ");
+    print!("\nEnter target device path (e.g., E:, /dev/sdb, or type 'qemu' to test-boot): ");
     io::stdout().flush()?;
     let mut target_device = String::new();
     io::stdin().read_line(&mut target_device)?;
     let target_device = target_device.trim();
+
+    if target_device.eq_ignore_ascii_case("qemu") {
+        let iso = locate_iso();
+        return boot_qemu(&iso);
+    }
 
     if target_device.is_empty()
         || target_device == "/dev/sda"
@@ -85,6 +96,66 @@ fn main() -> io::Result<()> {
     println!("SUCCESS: Post Card Spatial OS successfully stamped to {}.", target_device);
     println!("You can now reboot your machine, select the USB in UEFI boot menu, and launch into bare-metal spatial compute.");
 
+    print!("\nWould you like to test-boot Post Card Spatial OS in QEMU now? (Y/n): ");
+    io::stdout().flush()?;
+    let mut boot_choice = String::new();
+    io::stdin().read_line(&mut boot_choice)?;
+    if boot_choice.trim().is_empty() || boot_choice.trim().to_lowercase() == "y" {
+        let iso = locate_iso();
+        boot_qemu(&iso)?;
+    }
+
+    Ok(())
+}
+
+fn locate_iso() -> PathBuf {
+    let candidates = [
+        "target/postcard-spatial-os.iso",
+        "target/postcard-spatial-os-live-demo.iso",
+        "../target/postcard-spatial-os.iso",
+        "../../target/postcard-spatial-os.iso",
+    ];
+    for cand in &candidates {
+        let p = Path::new(cand);
+        if p.exists() {
+            return p.to_path_buf();
+        }
+    }
+    PathBuf::from("target/postcard-spatial-os.iso")
+}
+
+fn boot_qemu(iso_path: &Path) -> io::Result<()> {
+    println!("\n===============================================================================");
+    println!("         BOOTING POST CARD SPATIAL OS IN QEMU VIRTUAL MACHINE");
+    println!("===============================================================================");
+    
+    let qemu_exe = if cfg!(target_os = "windows") {
+        if Path::new(r"C:\Program Files\qemu\qemu-system-x86_64.exe").exists() {
+            r"C:\Program Files\qemu\qemu-system-x86_64.exe".to_string()
+        } else {
+            "qemu-system-x86_64".to_string()
+        }
+    } else {
+        "qemu-system-x86_64".to_string()
+    };
+
+    println!("[*] QEMU Executable: {}", qemu_exe);
+    println!("[*] Boot ISO:        {:?}", iso_path);
+    println!("[*] Launching display window (GTK / SDL)...");
+
+    let status = Command::new(&qemu_exe)
+        .args([
+            "-name", "Post Card Spatial OS",
+            "-machine", "pc",
+            "-m", "256M",
+            "-cdrom", iso_path.to_str().unwrap_or("target/postcard-spatial-os.iso"),
+            "-boot", "d",
+            "-serial", "stdio",
+            "-no-reboot",
+        ])
+        .status()?;
+
+    println!("-> QEMU process terminated with exit code: {:?}", status.code());
     Ok(())
 }
 
