@@ -834,6 +834,7 @@ mod ucf_dax_fsm;
 mod mongodb_enc_engine;
 mod microsoft_cross_enclave;
 mod apple_metal_pipeline;
+mod kunlun_accel_mesh;
 
 // ============================================================================
 // 5. HARDWARE VT-x (VMXON / VMCS) & MICRO-VM CAPSULE HYPERVISOR ENGINE
@@ -1821,6 +1822,10 @@ pub unsafe extern "C" fn _start(multiboot2_info_addr: usize) -> ! {
     unsafe { apple_metal_pipeline::init_metal_pipeline_subsystem(); }
     kprintln_emerald!("[ok] Apple Metal: Unified shader/compute AOT IR & stage_in signature matcher armed (EP 3 137 992 B1)");
 
+    // Initialize Kunlunxin Confidential AI Mesh & Attestation Engine (CN 112528244 B / CN 112953855 B)
+    kunlun_accel_mesh::init_kunlun_subsystem();
+    kprintln_emerald!("[ok] Kunlunxin AI Mesh: Ring broadcast fabric & neural DRM attestation armed (CN 112528244 B)");
+
     kprintln_emerald!("Spatial OS is ALIVE!");
 
     // 4. Interactive bare-metal shell (accepts input from BOTH PS/2 Keyboard and Serial COM1)
@@ -1886,7 +1891,7 @@ unsafe fn handle_shell_command(cmd_bytes: &[u8], mb2: &Multiboot2ParsedInfo) {
         return;
     }
     if cmd == "help" {
-        kprintln!("commands: help, gui, deck, mouse, routes, route [bind/free], usbc, sec, hsm [auth/lock], trust/graph, span [kick/ipi/rebalance], rootvmm [enter/exit/verify], snvme [read/write/target], hyos, dock, undock, pats [lba], shrink [mb], sva [activate/morph/dma/priv], latehv [step/trap], muse [fast/slow/mdev], coreiso [dispatch/pf], vgpu [tx/bounds], sriov [trigger/error/reset], vmsec [io/snap/bounds], ppt [ecall/aex/exit], vam [profile/bench], hvm [rma/poll/info], wasm [test/fuel/status], maxq [opt/step/tdp], shm [pub/sub], arais [level/flush], astguard [test], kwasm [test/call], mddma [burst/5d], dtree [eval/test], panda [test/parse], fortinet [test/eos], nudt [test/rule], snic [test/rule], afxdp [test/bind], mesh [test/arp], soundhound [test/move], ericsson [test/move], astound [test/bypass], vcr [test/query], fsm [test/audit], mongo [test/workload], enclave [test/seal], metal [test/pipeline], cxl, scibuf, ltssm/margin, hud, net, stream, flynet [slot], fly [0..3], land, cpu, vmx, vms, vmrun, spawn, exec, elf, sched, syscall, ls, echo, uptime, mem, ps, pci, disks, sandbox, avionics, radiator, install, halt, reboot");
+        kprintln!("commands: help, gui, deck, mouse, routes, route [bind/free], usbc, sec, hsm [auth/lock], trust/graph, span [kick/ipi/rebalance], rootvmm [enter/exit/verify], snvme [read/write/target], hyos, dock, undock, pats [lba], shrink [mb], sva [activate/morph/dma/priv], latehv [step/trap], muse [fast/slow/mdev], coreiso [dispatch/pf], vgpu [tx/bounds], sriov [trigger/error/reset], vmsec [io/snap/bounds], ppt [ecall/aex/exit], vam [profile/bench], hvm [rma/poll/info], wasm [test/fuel/status], maxq [opt/step/tdp], shm [pub/sub], arais [level/flush], astguard [test], kwasm [test/call], mddma [burst/5d], dtree [eval/test], panda [test/parse], fortinet [test/eos], nudt [test/rule], snic [test/rule], afxdp [test/bind], mesh [test/arp], soundhound [test/move], ericsson [test/move], astound [test/bypass], vcr [test/query], fsm [test/audit], mongo [test/workload], enclave [test/seal], metal [test/pipeline], kunlun [test/broadcast/drm/info], cxl, scibuf, ltssm/margin, hud, net, stream, flynet [slot], fly [0..3], land, cpu, vmx, vms, vmrun, spawn, exec, elf, sched, syscall, ls, echo, uptime, mem, ps, pci, disks, sandbox, avionics, radiator, install, halt, reboot");
         kprintln!("storage:  disks, mount [pN], umount, df, ls [dir], cat <file>, write <file> <text>, append <file> <text>, touch <file>, mkdir <dir>, rm <path>, sync, blk <dev> <lba>");
     } else if cmd == "gui" || cmd == "deck" || cmd == "desktop" {
         if let Some(ref fb) = GOP_FB {
@@ -4458,6 +4463,71 @@ unsafe fn handle_shell_command(cmd_bytes: &[u8], mb2: &Multiboot2ParsedInfo) {
         kprintln!(
             "Telemetry: Compiled PSOs: {} | Sig Validations: {} | Vertex Xforms: {} | Fragment Shades: {} | Compute Dispatches: {} | Barriers: {}",
             compiled, sigs, vtx, frags, compute, barriers
+        );
+    } else if cmd == "kunlun" || cmd.starts_with("kunlun ") {
+        let arg = if cmd.len() > 6 { &cmd[7..] } else { "" };
+        let mut it = arg.split_whitespace();
+        let sub = it.next().unwrap_or("");
+        if sub == "test" {
+            let (ok, msg) = unsafe {
+                kunlun_accel_mesh::KUNLUN_FABRIC.run_self_test()
+            };
+            if ok {
+                kprintln_emerald!("[KUNLUN PASS] Confidential AI Mesh & Attestation: {}", msg);
+            } else {
+                kprintln_amber!("[KUNLUN FAIL] Confidential AI Mesh & Attestation: {}", msg);
+            }
+        } else if sub == "broadcast" {
+            let (ok, hops, msg) = unsafe {
+                kunlun_accel_mesh::KUNLUN_FABRIC.dispatch_ring_broadcast(0, b"POST_CARD_SPATIAL_OS_TENSOR_CHUNK_77")
+            };
+            if ok {
+                kprintln_emerald!("[KUNLUN BROADCAST] Succeeded across {} hops: {}", hops, msg);
+            } else {
+                kprintln_amber!("[KUNLUN BROADCAST] Failed across {} hops: {}", hops, msg);
+            }
+        } else if sub == "drm" {
+            let fake_weights = [0x5A; 64];
+            let res = unsafe {
+                kunlun_accel_mesh::KUNLUN_FABRIC.attest_and_verify_model(
+                    0,
+                    0xCAFE_0001,
+                    kunlun_accel_mesh::WatermarkType::WeightPerturbation,
+                    &fake_weights,
+                )
+            };
+            match res {
+                Ok(ev) => {
+                    kprintln_emerald!(
+                        "[KUNLUN DRM] Model 0x{:08X} Validated! Freshness TS: {} | Nonce: {:#016x} | Valid: {}",
+                        ev.model_id, ev.freshness_timestamp, ev.nonce, ev.is_valid
+                    );
+                }
+                Err(err) => {
+                    kprintln_amber!("[KUNLUN DRM] Rejection: {}", err);
+                }
+            }
+        }
+        let (bcasts, attests, cycles) = unsafe {
+            (
+                kunlun_accel_mesh::KUNLUN_FABRIC.total_broadcasts_dispatched.load(Ordering::Relaxed),
+                kunlun_accel_mesh::KUNLUN_FABRIC.total_watermark_attestations.load(Ordering::Relaxed),
+                kunlun_accel_mesh::KUNLUN_FABRIC.total_cycle_terminations.load(Ordering::Relaxed),
+            )
+        };
+        kprintln_amber!("=== KUNLUNXIN CONFIDENTIAL AI MESH & ATTESTATION ENGINE (CN 112528244 B / CN 112953855 B) ===");
+        kprintln!(
+            "Silicon Security: Die-Integrated SU (SK_RK / PK_RK) + Anti-Replay Monotonic Time Unit (TU)"
+        );
+        kprintln!(
+            "Fabric Topology: 4-DPA Inter-Accelerator Ring/Mesh | Broadcast Session Key: K_bc | Hop-by-Hop Anti-Cycle"
+        );
+        kprintln!(
+            "Model DRM Protection: Dual-Factor (Type 1 Weight Perturbation + Type 2 Trigger Set) & Hardware Policy Table"
+        );
+        kprintln!(
+            "Telemetry: Dispatched Broadcasts: {} | Watermark Attestations: {} | Loop Cycle Terminations: {}",
+            bcasts, attests, cycles
         );
     } else if cmd == "clear" || cmd == "cls" {
         CURSOR_COL = 0;
