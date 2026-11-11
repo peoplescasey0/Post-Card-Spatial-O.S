@@ -1,11 +1,23 @@
 param(
-    [string]$IsoPath = (Join-Path $PSScriptRoot "target\postcard-spatial-os-live-demo.iso"),
+    [string]$IsoPath = "",
     [string]$QemuExe = "C:\Program Files\qemu\qemu-system-x86_64.exe",
     [string]$Display = "sdl",
     [switch]$Headless
 )
 
 $ErrorActionPreference = "Stop"
+
+if (-not $IsoPath) {
+    $primaryIso = Join-Path $PSScriptRoot "target\postcard-spatial-os.iso"
+    $demoIso = Join-Path $PSScriptRoot "target\postcard-spatial-os-live-demo.iso"
+    if (Test-Path $primaryIso) {
+        $IsoPath = $primaryIso
+    } elseif (Test-Path $demoIso) {
+        $IsoPath = $demoIso
+    } else {
+        $IsoPath = $primaryIso
+    }
+}
 
 if (-not (Test-Path $IsoPath)) {
     throw "Post Card OS ISO not found at: $IsoPath"
