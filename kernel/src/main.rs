@@ -862,6 +862,8 @@ mod anjuna_barkly_enclave;
 mod citrix_gpu_sliding;
 mod provenance_pvm_protect;
 mod diov_streams_ehas;
+mod slm_kernel_share;
+mod cross_adapt_orom_sandbox;
 
 // ============================================================================
 // 5. HARDWARE VT-x (VMXON / VMCS) & MICRO-VM CAPSULE HYPERVISOR ENGINE
@@ -1894,6 +1896,14 @@ pub unsafe extern "C" fn _start(multiboot2_info_addr: usize) -> ! {
     diov_streams_ehas::init_diov_subsystem();
     kprintln_emerald!("[ok] Dynavisor DIOV Streams & EHAS: zero-VMEXIT mailboxes & RFO-free cache armed (US 9,910,689 B2)");
 
+    // Initialize Intel Inter-Kernel Shared Local Memory Sharing (CN 113490917 A)
+    slm_kernel_share::init_slm_share_subsystem();
+    kprintln_emerald!("[ok] Inter-Kernel SLM Sharing: dependency-aware flush bypass & NN layer handoff armed (CN 113490917 A)");
+
+    // Initialize Cross-Platform Kernel Adaptation (CN 119311315 A) & Boot OROM Sandbox (CN 112740211 A)
+    cross_adapt_orom_sandbox::init_cross_adapt_orom_subsystem();
+    kprintln_emerald!("[ok] Cross-Platform Adaptation & Boot OROM Sandbox: CSR >=0.8 & Ring-3 OROM guard armed (CN 119311315 A / CN 112740211 A)");
+
     kprintln_emerald!("Spatial OS is ALIVE!");
 
     // 4. Interactive bare-metal shell (accepts input from BOTH PS/2 Keyboard and Serial COM1)
@@ -1959,7 +1969,7 @@ unsafe fn handle_shell_command(cmd_bytes: &[u8], mb2: &Multiboot2ParsedInfo) {
         return;
     }
     if cmd == "help" {
-        kprintln!("commands: help, gui, deck, mouse, routes, route [bind/free], usbc, sec, hsm [auth/lock], trust/graph, span [kick/ipi/rebalance], rootvmm [enter/exit/verify], snvme [read/write/target], hyos, dock, undock, pats [lba], shrink [mb], sva [activate/morph/dma/priv], latehv [step/trap], muse [fast/slow/mdev], coreiso [dispatch/pf], vgpu [tx/bounds], sriov [trigger/error/reset], vmsec [io/snap/bounds], ppt [ecall/aex/exit], vam [profile/bench], hvm [rma/poll/info], wasm [test/fuel/status], maxq [opt/step/tdp], shm [pub/sub], arais [level/flush], astguard [test], kwasm [test/call], mddma [burst/5d], dtree [eval/test], panda [test/parse], fortinet [test/eos], nudt [test/rule], snic [test/rule], afxdp [test/bind], mesh [test/arp], soundhound [test/move], ericsson [test/move], astound [test/bypass], vcr [test/query], fsm [test/audit], mongo [test/workload], enclave [test/seal], metal [test/pipeline], kunlun [test/broadcast/drm/attest/cache/info], antmem [test/info], quantum [test/route/solve/status], socbridge [test/status], forensics [test/status/chain/ebpf], anjuna [test/status], gpuslide [test/status/slide], provenance [test/status], diov [test/status], browse [url], bookmarks, http [get], email [inbox/read/send/outbox/test], cxl, scibuf, ltssm/margin, hud, net, stream, flynet [slot], fly [0..3], land, cpu, vmx, vms, vmrun, spawn, exec, elf, sched, syscall, ls, echo, uptime, mem, ps, pci, disks, sandbox, avionics, radiator, install, halt, reboot");
+        kprintln!("commands: help, gui, deck, mouse, routes, route [bind/free], usbc, sec, hsm [auth/lock], trust/graph, span [kick/ipi/rebalance], rootvmm [enter/exit/verify], snvme [read/write/target], hyos, dock, undock, pats [lba], shrink [mb], sva [activate/morph/dma/priv], latehv [step/trap], muse [fast/slow/mdev], coreiso [dispatch/pf], vgpu [tx/bounds], sriov [trigger/error/reset], vmsec [io/snap/bounds], ppt [ecall/aex/exit], vam [profile/bench], hvm [rma/poll/info], wasm [test/fuel/status], maxq [opt/step/tdp], shm [pub/sub], arais [level/flush], astguard [test], kwasm [test/call], mddma [burst/5d], dtree [eval/test], panda [test/parse], fortinet [test/eos], nudt [test/rule], snic [test/rule], afxdp [test/bind], mesh [test/arp], soundhound [test/move], ericsson [test/move], astound [test/bypass], vcr [test/query], fsm [test/audit], mongo [test/workload], enclave [test/seal], metal [test/pipeline], kunlun [test/broadcast/drm/attest/cache/info], antmem [test/info], quantum [test/route/solve/status], socbridge [test/status], forensics [test/status/chain/ebpf], anjuna [test/status], gpuslide [test/status/slide], provenance [test/status], diov [test/status], slmshare [test/status], kadapt [test/status], oromsandbox [test/status], browse [url], bookmarks, http [get], email [inbox/read/send/outbox/test], cxl, scibuf, ltssm/margin, hud, net, stream, flynet [slot], fly [0..3], land, cpu, vmx, vms, vmrun, spawn, exec, elf, sched, syscall, ls, echo, uptime, mem, ps, pci, disks, sandbox, avionics, radiator, install, halt, reboot");
         kprintln!("storage:  disks, mount [pN], umount, df, ls [dir], cat <file>, write <file> <text>, append <file> <text>, touch <file>, mkdir <dir>, rm <path>, sync, blk <dev> <lba>");
     } else if cmd == "gui" || cmd == "deck" || cmd == "desktop" {
         if let Some(ref fb) = GOP_FB {
@@ -5093,6 +5103,70 @@ unsafe fn handle_shell_command(cmd_bytes: &[u8], mb2: &Multiboot2ParsedInfo) {
             kprintln!(
                 "RFO-Free Dirty Writes: {} | Active Writebacks: {} | Set-Associative Hits: {}",
                 rfo, wb, hits
+            );
+        }
+    } else if cmd.starts_with("slmshare") {
+        let arg = cmd.strip_prefix("slmshare").unwrap_or("").trim();
+        if arg == "test" {
+            let (ok, msg) = slm_kernel_share::run_self_test();
+            if ok {
+                kprintln_emerald!("{}", msg);
+            } else {
+                kprintln_amber!("[SLMSHARE FAIL] {}", msg);
+            }
+        } else {
+            kprintln_cyan!("=== INTER-KERNEL SHARED LOCAL MEMORY SHARING (CN 113490917 A) ===");
+            let bypassed = unsafe { slm_kernel_share::SLM_SHARE_MGR.flushes_bypassed.load(Ordering::Relaxed) };
+            let enforced = unsafe { slm_kernel_share::SLM_SHARE_MGR.flushes_enforced.load(Ordering::Relaxed) };
+            let blocked = unsafe { slm_kernel_share::SLM_SHARE_MGR.isolation_blocks.load(Ordering::Relaxed) };
+            let nn = unsafe { slm_kernel_share::SLM_SHARE_MGR.nn_layer_handoffs.load(Ordering::Relaxed) };
+            let saved = unsafe { slm_kernel_share::SLM_SHARE_MGR.dram_bytes_saved.load(Ordering::Relaxed) };
+            kprintln!(
+                "SLM Flushes Bypassed: {} | Enforced Clears: {} | Isolation Blocks: {} | NN Layer Handoffs: {} | DRAM Saved: {} B",
+                bypassed, enforced, blocked, nn, saved
+            );
+        }
+    } else if cmd.starts_with("kadapt") {
+        let arg = cmd.strip_prefix("kadapt").unwrap_or("").trim();
+        if arg == "test" {
+            let (ok, msg) = cross_adapt_orom_sandbox::run_kadapt_self_test();
+            if ok {
+                kprintln_emerald!("{}", msg);
+            } else {
+                kprintln_amber!("[KADAPT FAIL] {}", msg);
+            }
+        } else {
+            kprintln_cyan!("=== CROSS-PLATFORM KERNEL ADAPTATION (CN 119311315 A) ===");
+            let cpuid = unsafe { cross_adapt_orom_sandbox::CROSS_ADAPT_OROM_MGR.cpuid_signature };
+            let csr_edges = unsafe { cross_adapt_orom_sandbox::CROSS_ADAPT_OROM_MGR.csr_count };
+            let disp = unsafe { cross_adapt_orom_sandbox::CROSS_ADAPT_OROM_MGR.adapt_dispatches.load(Ordering::Relaxed) };
+            let bp = unsafe { cross_adapt_orom_sandbox::CROSS_ADAPT_OROM_MGR.backpressure_events.load(Ordering::Relaxed) };
+            let wd = unsafe { cross_adapt_orom_sandbox::CROSS_ADAPT_OROM_MGR.watchdog_recoveries.load(Ordering::Relaxed) };
+            let fsm = unsafe { cross_adapt_orom_sandbox::CROSS_ADAPT_OROM_MGR.fsm_state };
+            kprintln!(
+                "CPUID={:#x} | CSR Edges (>=0.8): {} | FSM={:?} | Dispatches: {} | Backpressure: {} | Watchdog Recoveries: {}",
+                cpuid, csr_edges, fsm, disp, bp, wd
+            );
+        }
+    } else if cmd.starts_with("oromsandbox") {
+        let arg = cmd.strip_prefix("oromsandbox").unwrap_or("").trim();
+        if arg == "test" {
+            let (ok, msg) = cross_adapt_orom_sandbox::run_orom_sandbox_self_test();
+            if ok {
+                kprintln_emerald!("{}", msg);
+            } else {
+                kprintln_amber!("[OROM FAIL] {}", msg);
+            }
+        } else {
+            kprintln_cyan!("=== BOOT FIRMWARE OROM SANDBOXING (CN 112740211 A) ===");
+            let cnt = unsafe { cross_adapt_orom_sandbox::CROSS_ADAPT_OROM_MGR.sandbox_count };
+            let down = unsafe { cross_adapt_orom_sandbox::CROSS_ADAPT_OROM_MGR.downcalls_cloned.load(Ordering::Relaxed) };
+            let up = unsafe { cross_adapt_orom_sandbox::CROSS_ADAPT_OROM_MGR.upcalls_cloned.load(Ordering::Relaxed) };
+            let side = unsafe { cross_adapt_orom_sandbox::CROSS_ADAPT_OROM_MGR.sidecalls_allowed.load(Ordering::Relaxed) };
+            let blocked = unsafe { cross_adapt_orom_sandbox::CROSS_ADAPT_OROM_MGR.sandbox_violations_blocked.load(Ordering::Relaxed) };
+            kprintln!(
+                "Active Sandboxes: {} | Ring3->0 Downcalls: {} | Upcalls: {} | MMIO Sidecalls: {} | Violations Blocked: {}",
+                cnt, down, up, side, blocked
             );
         }
     } else if cmd == "clear" || cmd == "cls" {
