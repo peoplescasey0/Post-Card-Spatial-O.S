@@ -52,25 +52,40 @@ if [[ -f "${RAMDISK_IMG}" ]]; then
 fi
 
 cat > "${GRUB_DIR}/grub.cfg" << 'EOF'
+insmod all_video
+insmod efi_gop
+insmod gfxterm
+insmod part_gpt
+insmod part_msdos
+insmod fat
+insmod iso9660
+insmod multiboot2
+
 serial --unit=0 --speed=115200
 terminal_input serial console
 terminal_output serial console
+set gfxmode=auto
+set gfxpayload=keep
 set timeout=0
 set default=0
 
 menuentry "Post Card Spatial OS" {
+    search --no-floppy --file --set=root /boot/kernel.elf
     multiboot2 /boot/kernel.elf console=ttyS0 console=tty0
+    if [ -f /boot/ramdisk.img ]; then
+        module2 /boot/ramdisk.img
+    fi
     boot
 }
 EOF
 
-echo "=== Generating Multiboot2 ISO with grub-mkrescue ==="
+echo "=== Generating Hybrid Multiboot2 ISO (UEFI + Legacy BIOS + Rufus/Etcher Ready) ==="
 if ! command -v grub-mkrescue &>/dev/null; then
     echo "Error: grub-mkrescue not found" >&2
     exit 1
 fi
 
-grub-mkrescue -o "${ISO_FILE}" "${ISO_DIR}"
+grub-mkrescue -o "${ISO_FILE}" "${ISO_DIR}" -- -volid "POSTCARD_OS"
 
 if [[ ! -s "${ISO_FILE}" ]]; then
     echo "Error: Failed to create ISO at ${ISO_FILE}" >&2
