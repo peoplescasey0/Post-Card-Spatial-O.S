@@ -176,6 +176,8 @@ gdt64_ptr:
     .global guest_vmcs_region
     .global guest_capsule_arena
     .global elf_exec_arena
+    .global boot_stack_bottom
+    .global boot_stack_top
 boot_pml4:
     .space 4096
 boot_pdpt:
@@ -204,6 +206,9 @@ extern "C" {
     static mut guest_vmcs_region: [u8; 4096];
     static mut guest_capsule_arena: [u8; 16384];
     static mut elf_exec_arena: [u8; 16384];
+    static mut boot_stack_bottom: [u8; 65536];
+    #[allow(dead_code)]
+    static mut boot_stack_top: [u8; 0];
 }
 
 pub(crate) unsafe fn guest_capsule_arena_ptr() -> *mut u8 {
@@ -835,6 +840,8 @@ mod mongodb_enc_engine;
 mod microsoft_cross_enclave;
 mod apple_metal_pipeline;
 mod kunlun_accel_mesh;
+mod ant_safe_memory;
+mod quantum_complexity_router;
 
 // ============================================================================
 // 5. HARDWARE VT-x (VMXON / VMCS) & MICRO-VM CAPSULE HYPERVISOR ENGINE
@@ -1826,6 +1833,15 @@ pub unsafe extern "C" fn _start(multiboot2_info_addr: usize) -> ! {
     kunlun_accel_mesh::init_kunlun_subsystem();
     kprintln_emerald!("[ok] Kunlunxin AI Mesh: Ring broadcast fabric & neural DRM attestation armed (CN 112528244 B)");
 
+    // Initialize Ant Group Safe Memory Management & NUDT Invariants (CN 117908859 A / CN 116484439 B)
+    let stack_bottom_addr = core::ptr::addr_of!(boot_stack_bottom) as usize;
+    ant_safe_memory::init_safe_memory_subsystem(stack_bottom_addr, 65536);
+    kprintln_emerald!("[ok] Ant Group Safe Memory: 100% Safe interface & stack guard page armed (CN 117908859 A)");
+
+    // Initialize Quantum Enhanced Complexity Orchestration & Priority Backtracking (US 2026/0148042 A1 / CN 117931412 A)
+    quantum_complexity_router::init_quantum_router();
+    kprintln_emerald!("[ok] Quantum Complexity Router: Hybrid orchestrator & priority backtracking armed (US 2026/0148042 A1 / CN 117931412 A)");
+
     kprintln_emerald!("Spatial OS is ALIVE!");
 
     // 4. Interactive bare-metal shell (accepts input from BOTH PS/2 Keyboard and Serial COM1)
@@ -1891,7 +1907,7 @@ unsafe fn handle_shell_command(cmd_bytes: &[u8], mb2: &Multiboot2ParsedInfo) {
         return;
     }
     if cmd == "help" {
-        kprintln!("commands: help, gui, deck, mouse, routes, route [bind/free], usbc, sec, hsm [auth/lock], trust/graph, span [kick/ipi/rebalance], rootvmm [enter/exit/verify], snvme [read/write/target], hyos, dock, undock, pats [lba], shrink [mb], sva [activate/morph/dma/priv], latehv [step/trap], muse [fast/slow/mdev], coreiso [dispatch/pf], vgpu [tx/bounds], sriov [trigger/error/reset], vmsec [io/snap/bounds], ppt [ecall/aex/exit], vam [profile/bench], hvm [rma/poll/info], wasm [test/fuel/status], maxq [opt/step/tdp], shm [pub/sub], arais [level/flush], astguard [test], kwasm [test/call], mddma [burst/5d], dtree [eval/test], panda [test/parse], fortinet [test/eos], nudt [test/rule], snic [test/rule], afxdp [test/bind], mesh [test/arp], soundhound [test/move], ericsson [test/move], astound [test/bypass], vcr [test/query], fsm [test/audit], mongo [test/workload], enclave [test/seal], metal [test/pipeline], kunlun [test/broadcast/drm/info], cxl, scibuf, ltssm/margin, hud, net, stream, flynet [slot], fly [0..3], land, cpu, vmx, vms, vmrun, spawn, exec, elf, sched, syscall, ls, echo, uptime, mem, ps, pci, disks, sandbox, avionics, radiator, install, halt, reboot");
+        kprintln!("commands: help, gui, deck, mouse, routes, route [bind/free], usbc, sec, hsm [auth/lock], trust/graph, span [kick/ipi/rebalance], rootvmm [enter/exit/verify], snvme [read/write/target], hyos, dock, undock, pats [lba], shrink [mb], sva [activate/morph/dma/priv], latehv [step/trap], muse [fast/slow/mdev], coreiso [dispatch/pf], vgpu [tx/bounds], sriov [trigger/error/reset], vmsec [io/snap/bounds], ppt [ecall/aex/exit], vam [profile/bench], hvm [rma/poll/info], wasm [test/fuel/status], maxq [opt/step/tdp], shm [pub/sub], arais [level/flush], astguard [test], kwasm [test/call], mddma [burst/5d], dtree [eval/test], panda [test/parse], fortinet [test/eos], nudt [test/rule], snic [test/rule], afxdp [test/bind], mesh [test/arp], soundhound [test/move], ericsson [test/move], astound [test/bypass], vcr [test/query], fsm [test/audit], mongo [test/workload], enclave [test/seal], metal [test/pipeline], kunlun [test/broadcast/drm/attest/cache/info], antmem [test/info], quantum [test/route/solve/status], cxl, scibuf, ltssm/margin, hud, net, stream, flynet [slot], fly [0..3], land, cpu, vmx, vms, vmrun, spawn, exec, elf, sched, syscall, ls, echo, uptime, mem, ps, pci, disks, sandbox, avionics, radiator, install, halt, reboot");
         kprintln!("storage:  disks, mount [pN], umount, df, ls [dir], cat <file>, write <file> <text>, append <file> <text>, touch <file>, mkdir <dir>, rm <path>, sync, blk <dev> <lba>");
     } else if cmd == "gui" || cmd == "deck" || cmd == "desktop" {
         if let Some(ref fb) = GOP_FB {
@@ -4507,11 +4523,40 @@ unsafe fn handle_shell_command(cmd_bytes: &[u8], mb2: &Multiboot2ParsedInfo) {
                     kprintln_amber!("[KUNLUN DRM] Rejection: {}", err);
                 }
             }
+        } else if sub == "attest" {
+            let test_bin = [0x77u8; 32];
+            let res = unsafe {
+                kunlun_accel_mesh::KUNLUN_FABRIC.execute_cmd_do_attestation(0, 0x2001, 0xABCD_1234, &test_bin)
+            };
+            match res {
+                Ok(ev) => {
+                    kprintln_emerald!(
+                        "[KUNLUN ATTEST] Kernel 0x{:04X} Attested! Nonce: {:#016x} | Freshness TS: {} | Valid: {}",
+                        ev.kernel_id, ev.challenge_nonce, ev.freshness_timestamp, ev.is_valid
+                    );
+                }
+                Err(err) => {
+                    kprintln_amber!("[KUNLUN ATTEST] Rejection: {}", err);
+                }
+            }
+        } else if sub == "cache" {
+            let res = unsafe {
+                kunlun_accel_mesh::KUNLUN_FABRIC.get_active_watermark_algorithm(0, 0)
+            };
+            match res {
+                Ok(algo) => {
+                    kprintln_emerald!("[KUNLUN CACHE] Slot 0 Active Algorithm: {:?} (T_expire valid)", algo);
+                }
+                Err(err) => {
+                    kprintln_amber!("[KUNLUN CACHE] Slot 0 Error: {}", err);
+                }
+            }
         }
-        let (bcasts, attests, cycles) = unsafe {
+        let (bcasts, attests, k_attests, cycles) = unsafe {
             (
                 kunlun_accel_mesh::KUNLUN_FABRIC.total_broadcasts_dispatched.load(Ordering::Relaxed),
                 kunlun_accel_mesh::KUNLUN_FABRIC.total_watermark_attestations.load(Ordering::Relaxed),
+                kunlun_accel_mesh::KUNLUN_FABRIC.total_kernel_attestations.load(Ordering::Relaxed),
                 kunlun_accel_mesh::KUNLUN_FABRIC.total_cycle_terminations.load(Ordering::Relaxed),
             )
         };
@@ -4526,8 +4571,112 @@ unsafe fn handle_shell_command(cmd_bytes: &[u8], mb2: &Multiboot2ParsedInfo) {
             "Model DRM Protection: Dual-Factor (Type 1 Weight Perturbation + Type 2 Trigger Set) & Hardware Policy Table"
         );
         kprintln!(
-            "Telemetry: Dispatched Broadcasts: {} | Watermark Attestations: {} | Loop Cycle Terminations: {}",
-            bcasts, attests, cycles
+            "Kernel Object Attestation: Host TEE KernelDigestStore (CN 112292678 B) | Dynamic Watermark Cache (CN 112528242 B)"
+        );
+        kprintln!(
+            "Telemetry: Broadcasts: {} | Watermark Attests: {} | Kernel Attests: {} | Cycle Terminations: {}",
+            bcasts, attests, k_attests, cycles
+        );
+    } else if cmd == "antmem" || cmd.starts_with("antmem ") {
+        let arg = if cmd.len() > 6 { &cmd[7..] } else { "" };
+        let mut it = arg.split_whitespace();
+        let sub = it.next().unwrap_or("");
+        if sub == "test" {
+            let (ok, msg) = unsafe {
+                ant_safe_memory::SAFE_MEMORY_MANAGER.run_formal_tests()
+            };
+            if ok {
+                kprintln_emerald!("[ANTMEM PASS] Safe Memory & Invariants: {}", msg);
+            } else {
+                kprintln_amber!("[ANTMEM FAIL] Safe Memory & Invariants: {}", msg);
+            }
+        }
+        let (reads, writes, typed_viols, stack_traps, cap_viols, regions) = unsafe {
+            ant_safe_memory::SAFE_MEMORY_MANAGER.get_telemetry()
+        };
+        kprintln_amber!("=== ANT GROUP SAFE MEMORY & NUDT FORMAL INVARIANTS (CN 117908859 A / CN 116484439 B) ===");
+        kprintln!("Architecture: 100% Safe Management Interface (101) | Private Leaf Execution (103)");
+        kprintln!("Segregation: Typed Memory (Immutable Kernel/Paging) vs Untyped (Allocatable RAM/Capsules)");
+        kprintln!("Protection: Kernel Stack Guard Page (4 KiB at boot_stack_bottom) | ACSL Invariants");
+        kprintln!(
+            "Telemetry: Safe Reads: {} | Safe Writes: {} | Stack Traps: {} | Typed Rejections: {} | Capsule Violations: {} | Regions: {}",
+            reads, writes, stack_traps, typed_viols, cap_viols, regions
+        );
+    } else if cmd == "quantum" || cmd.starts_with("quantum ") {
+        let arg = if cmd.len() > 7 { &cmd[8..] } else { "" };
+        let mut it = arg.split_whitespace();
+        let sub = it.next().unwrap_or("");
+        if sub == "test" {
+            let (ok, msg) = unsafe {
+                quantum_complexity_router::QUANTUM_ROUTER.run_self_test()
+            };
+            if ok {
+                kprintln_emerald!("[QUANTUM PASS] Complexity Router & Priority Backtracking: {}", msg);
+            } else {
+                kprintln_amber!("[QUANTUM FAIL] Complexity Router & Priority Backtracking: {}", msg);
+            }
+        } else if sub == "route" {
+            let target = it.next().unwrap_or("telemetry");
+            let profile = if target == "qubo" || target == "np" {
+                quantum_complexity_router::TaskComplexityProfile {
+                    dimension: 16,
+                    sparsity_ppm: 500_000,
+                    non_linearity_order: 2,
+                    is_combinatorial_np: true,
+                    deadline_microseconds: 5000,
+                }
+            } else if target == "tensor" || target == "vision" {
+                quantum_complexity_router::TaskComplexityProfile {
+                    dimension: 128,
+                    sparsity_ppm: 100_000,
+                    non_linearity_order: 1,
+                    is_combinatorial_np: false,
+                    deadline_microseconds: 2000,
+                }
+            } else {
+                quantum_complexity_router::TaskComplexityProfile {
+                    dimension: 16,
+                    sparsity_ppm: 950_000,
+                    non_linearity_order: 1,
+                    is_combinatorial_np: false,
+                    deadline_microseconds: 500,
+                }
+            };
+            let (tier, reason) = unsafe {
+                quantum_complexity_router::QUANTUM_ROUTER.classify_complexity(&profile)
+            };
+            kprintln_emerald!("[QUANTUM ROUTE] Task '{}' -> Tier: {:?} | Reason: {}", target, tier, reason);
+        } else if sub == "solve" {
+            let mut coupling = [[0i32; quantum_complexity_router::MAX_QUBO_SPINS]; quantum_complexity_router::MAX_QUBO_SPINS];
+            let mut bias = [0i32; quantum_complexity_router::MAX_QUBO_SPINS];
+            for i in 0..7 {
+                coupling[i][i + 1] = 10;
+            }
+            bias[0] = -5;
+            let res = unsafe {
+                quantum_complexity_router::QUANTUM_ROUTER.solve_qubo_ising(8, &coupling, &bias, 150)
+            };
+            kprintln_emerald!(
+                "[QUANTUM SOLVE] Spins: {} | Ground Energy: {} | Steps: {} | Converged: {}",
+                res.spin_count, res.ground_state_energy, res.iterations, res.converged
+            );
+        }
+        let (routed, simd_c, tensor_c, qubo_c, inheritances, backtracks) = unsafe {
+            (
+                quantum_complexity_router::QUANTUM_ROUTER.total_tasks_routed.load(Ordering::Relaxed),
+                quantum_complexity_router::QUANTUM_ROUTER.count_tier_simd.load(Ordering::Relaxed),
+                quantum_complexity_router::QUANTUM_ROUTER.count_tier_tensor.load(Ordering::Relaxed),
+                quantum_complexity_router::QUANTUM_ROUTER.count_tier_qubo.load(Ordering::Relaxed),
+                quantum_complexity_router::QUANTUM_ROUTER.count_priority_inheritances.load(Ordering::Relaxed),
+                quantum_complexity_router::QUANTUM_ROUTER.count_priority_backtracks.load(Ordering::Relaxed),
+            )
+        };
+        kprintln_amber!("=== QOMPLX HYBRID QUANTUM ORCHESTRATOR & BUPT RTOS (US 2026/0148042 A1 / CN 117931412 A) ===");
+        kprintln!("Orchestration: Content-Aware Complexity Scoring across CPU SIMD, Tensor Mesh & Quantum Annealer");
+        kprintln!("Flight RTOS: Dual-Kernel Priority Ceiling with Backtracking Stack (Anti-Priority Inversion)");
+        kprintln!(
+            "Telemetry: Routed: {} (SIMD: {}, Tensor: {}, QUBO: {}) | Priority Boosts: {} | Backtracks: {}",
+            routed, simd_c, tensor_c, qubo_c, inheritances, backtracks
         );
     } else if cmd == "clear" || cmd == "cls" {
         CURSOR_COL = 0;

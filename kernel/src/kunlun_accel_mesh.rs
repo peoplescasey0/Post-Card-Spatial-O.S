@@ -9,6 +9,10 @@
 //      Hop-by-Hop Adjacent Forwarding, and Anti-Cycle Loop Termination.
 //   4. CN 112262546 B: Host-to-Accelerator Key Distribution & ACL MMU DMA Isolation.
 //   5. CN 112262547 B: Silicon Security Unit (SU) & Battery-Backed Time Unit (TU).
+//   6. CN 112292678 B: Host TEE Kernel Digest Store (2603), Binary Verification,
+//      and CMD_DO_ATTESTATION Protocol with SK_ATT & TU Freshness Nonce.
+//   7. CN 112528242 B: Dynamic Watermark Algorithm Runtime Configuration,
+//      Hot-Swapping, and Expiration Threshold Caching (T_expire).
 // ============================================================================
 
 #![allow(dead_code)]
@@ -21,6 +25,10 @@ pub const MAX_ACCELERATORS: usize = 4;
 pub const MAX_BROADCAST_PAYLOAD: usize = 128;
 /// Maximum number of model policy rules stored in the hardware DRM table.
 pub const MAX_POLICY_ENTRIES: usize = 8;
+/// Maximum number of verified kernel objects in the Host TEE digest store (CN 112292678 B).
+pub const MAX_KERNEL_OBJECTS: usize = 8;
+/// Maximum number of dynamically cached watermark algorithm slots (CN 112528242 B).
+pub const MAX_WATERMARK_SLOTS: usize = 4;
 
 // ============================================================================
 // 1. SILICON SECURITY UNIT (SU) & TAMPER-PROOF TIME UNIT (TU) (CN 112262547 B)
@@ -181,6 +189,66 @@ pub struct AttestationEvidence {
     pub is_valid: bool,
 }
 
+/// Host TEE Kernel Digest Store Entry (CN 112292678 B Module 2603).
+#[derive(Debug, Clone, Copy)]
+pub struct KernelObjectEntry {
+    pub kernel_id: u32,
+    pub kernel_name: [u8; 24],
+    pub expected_digest: [u8; 32],
+    pub dev_pubkey: [u8; 32],
+    pub is_active: bool,
+    pub total_attestations: u32,
+}
+
+impl KernelObjectEntry {
+    pub const fn empty() -> Self {
+        Self {
+            kernel_id: 0,
+            kernel_name: [0u8; 24],
+            expected_digest: [0u8; 32],
+            dev_pubkey: [0u8; 32],
+            is_active: false,
+            total_attestations: 0,
+        }
+    }
+}
+
+/// Hardware Attestation Evidence for Kernel Object Execution (CN 112292678 B).
+#[derive(Debug, Clone, Copy)]
+pub struct KernelAttestationEvidence {
+    pub kernel_id: u32,
+    pub dpa_uid: [u8; 16],
+    pub computed_digest: [u8; 32],
+    pub challenge_nonce: u64,
+    pub freshness_timestamp: u64,
+    pub hardware_signature: [u8; 64],
+    pub is_valid: bool,
+}
+
+/// Dynamic Watermark Algorithm Runtime Cache Entry (CN 112528242 B).
+#[derive(Debug, Clone, Copy)]
+pub struct DynamicWatermarkSlot {
+    pub slot_id: u8,
+    pub algorithm_id: u32,
+    pub algorithm_type: WatermarkType,
+    pub configured_timestamp: u64,
+    pub expiration_ticks: u64, // T_expire
+    pub is_active: bool,
+}
+
+impl DynamicWatermarkSlot {
+    pub const fn empty() -> Self {
+        Self {
+            slot_id: 0,
+            algorithm_id: 0,
+            algorithm_type: WatermarkType::WeightPerturbation,
+            configured_timestamp: 0,
+            expiration_ticks: 0,
+            is_active: false,
+        }
+    }
+}
+
 // ============================================================================
 // 3. ENCRYPTED RING/MESH BROADCAST PROTOCOL (CN 112953855 B)
 // ============================================================================
@@ -239,9 +307,12 @@ impl AcceleratorNode {
 pub struct KunlunMeshFabric {
     pub nodes: [AcceleratorNode; MAX_ACCELERATORS],
     pub policy_table: [Option<ModelPolicyRule>; MAX_POLICY_ENTRIES],
+    pub kernel_store: [Option<KernelObjectEntry>; MAX_KERNEL_OBJECTS],
+    pub watermark_slots: [Option<DynamicWatermarkSlot>; MAX_WATERMARK_SLOTS],
     pub active_broadcast_session: AtomicU32,
     pub total_broadcasts_dispatched: AtomicU64,
     pub total_watermark_attestations: AtomicU64,
+    pub total_kernel_attestations: AtomicU64,
     pub total_cycle_terminations: AtomicU64,
 }
 
@@ -255,14 +326,17 @@ impl KunlunMeshFabric {
                 AcceleratorNode::new(3, 0), // Ring closure: 3 forwards back to 0
             ],
             policy_table: [None; MAX_POLICY_ENTRIES],
+            kernel_store: [None; MAX_KERNEL_OBJECTS],
+            watermark_slots: [None; MAX_WATERMARK_SLOTS],
             active_broadcast_session: AtomicU32::new(0x1000),
             total_broadcasts_dispatched: AtomicU64::new(0),
             total_watermark_attestations: AtomicU64::new(0),
+            total_kernel_attestations: AtomicU64::new(0),
             total_cycle_terminations: AtomicU64::new(0),
         }
     }
 
-    /// Initialize default hardware DRM policies for protected neural models.
+    /// Initialize default hardware DRM policies, registered compute kernels, and dynamic watermark slots.
     pub fn init(&mut self) {
         // Policy 0: ResNet/Vision Spatial Transformer
         self.policy_table[0] = Some(ModelPolicyRule {
@@ -293,6 +367,24 @@ impl KunlunMeshFabric {
             max_inference_count: 0,
             current_inferences: 0,
         });
+
+        // Host TEE Kernel Digest Store (CN 112292678 B Module 2603)
+        // Kernel 0x1001: 3D Spatial Projection Kernel
+        let mut k1_digest = [0u8; 32];
+        for i in 0..32 {
+            k1_digest[i] = (i as u8).wrapping_mul(7) ^ 0x3D;
+        }
+        let _ = self.register_kernel_object(0x1001, b"SPATIAL_PROJECTION_3D\0", k1_digest, [0x4B; 32]);
+
+        // Kernel 0x1002: Neural Beamformer GEMM Kernel
+        let mut k2_digest = [0u8; 32];
+        for i in 0..32 {
+            k2_digest[i] = (i as u8).wrapping_mul(11) ^ 0x5A;
+        }
+        let _ = self.register_kernel_object(0x1002, b"NEURAL_BEAMFORM_GEMM\0\0", k2_digest, [0x4C; 32]);
+
+        // Dynamic Watermark Slot 0 (CN 112528242 B)
+        let _ = self.configure_watermark_slot(0, 0, 0x8001, WatermarkType::HybridDualFactor, 50_000_000);
     }
 
     /// Establish Broadcast Session Key (K_bc) across all accelerators (CN 112953855 B Claim 1).
@@ -530,6 +622,176 @@ impl KunlunMeshFabric {
         })
     }
 
+    /// Register a verified kernel object in Host TEE Digest Store (CN 112292678 B Module 2603).
+    pub fn register_kernel_object(
+        &mut self,
+        kernel_id: u32,
+        name: &[u8],
+        expected_digest: [u8; 32],
+        dev_pubkey: [u8; 32],
+    ) -> Result<(), &'static str> {
+        let mut empty_slot = None;
+        for (idx, slot) in self.kernel_store.iter_mut().enumerate() {
+            if let Some(entry) = slot {
+                if entry.kernel_id == kernel_id {
+                    entry.expected_digest = expected_digest;
+                    entry.dev_pubkey = dev_pubkey;
+                    entry.is_active = true;
+                    return Ok(());
+                }
+            } else if empty_slot.is_none() {
+                empty_slot = Some(idx);
+            }
+        }
+        let slot_idx = empty_slot.ok_or("Kernel digest store full")?;
+        let mut name_arr = [0u8; 24];
+        let copy_len = name.len().min(24);
+        name_arr[..copy_len].copy_from_slice(&name[..copy_len]);
+
+        self.kernel_store[slot_idx] = Some(KernelObjectEntry {
+            kernel_id,
+            kernel_name: name_arr,
+            expected_digest,
+            dev_pubkey,
+            is_active: true,
+            total_attestations: 0,
+        });
+        Ok(())
+    }
+
+    /// Execute CMD_DO_ATTESTATION Protocol on DPA (CN 112292678 B).
+    pub fn execute_cmd_do_attestation(
+        &mut self,
+        dpa_id: u8,
+        kernel_id: u32,
+        challenge_nonce: u64,
+        simulated_binary: &[u8],
+    ) -> Result<KernelAttestationEvidence, &'static str> {
+        if dpa_id as usize >= MAX_ACCELERATORS {
+            return Err("Invalid DPA ID");
+        }
+
+        // 1. Look up kernel in Host TEE Digest Store
+        let mut kernel_opt = None;
+        for entry_slot in self.kernel_store.iter_mut() {
+            if let Some(entry) = entry_slot {
+                if entry.kernel_id == kernel_id && entry.is_active {
+                    kernel_opt = Some(entry);
+                    break;
+                }
+            }
+        }
+        let kernel_entry = kernel_opt.ok_or("Kernel not registered in Host TEE digest store")?;
+
+        // 2. Hardware DPA computes digest over loaded kernel binary
+        let mut computed = [0u8; 32];
+        for (idx, byte) in simulated_binary.iter().enumerate() {
+            computed[idx % 32] ^= byte.wrapping_mul(7).wrapping_add(idx as u8);
+        }
+
+        // Verify computed digest matches registered digest in Host TEE store
+        if computed != kernel_entry.expected_digest {
+            return Err("Kernel binary verification failed: Hash mismatch against TEE digest store");
+        }
+
+        // 3. Silicon Security Unit signs attestation evidence
+        let node = &self.nodes[dpa_id as usize];
+        let fresh_ts = node.su.tu.read_fresh_timestamp();
+
+        let mut att_digest = [0u8; 32];
+        let k_bytes = kernel_id.to_le_bytes();
+        let ts_bytes = fresh_ts.to_le_bytes();
+        let n_bytes = challenge_nonce.to_le_bytes();
+
+        for i in 0..4 {
+            att_digest[i] = k_bytes[i];
+        }
+        for i in 0..16 {
+            att_digest[4 + i] = node.su.device_uid[i] ^ computed[i];
+        }
+        for i in 0..8 {
+            att_digest[20 + i] = ts_bytes[i] ^ n_bytes[i];
+        }
+        att_digest[28] = 0xAA;
+        att_digest[29] = 0x55;
+        att_digest[30] = 0x4B; // 'K'
+        att_digest[31] = dpa_id;
+
+        let sig = node.su.sign_attestation(&att_digest);
+        let is_valid = SiliconSecurityUnit::verify_signature(
+            &node.su.silicon_root_pub_key,
+            &node.su.device_uid,
+            &att_digest,
+            &sig,
+        );
+
+        kernel_entry.total_attestations = kernel_entry.total_attestations.saturating_add(1);
+        self.total_kernel_attestations.fetch_add(1, Ordering::SeqCst);
+
+        Ok(KernelAttestationEvidence {
+            kernel_id,
+            dpa_uid: node.su.device_uid,
+            computed_digest: computed,
+            challenge_nonce,
+            freshness_timestamp: fresh_ts,
+            hardware_signature: sig,
+            is_valid,
+        })
+    }
+
+    /// Dynamic Watermark Algorithm Runtime Configuration & Caching (CN 112528242 B).
+    pub fn configure_watermark_slot(
+        &mut self,
+        dpa_id: u8,
+        slot_id: u8,
+        algorithm_id: u32,
+        wm_type: WatermarkType,
+        ttl_ticks: u64,
+    ) -> Result<(), &'static str> {
+        if slot_id as usize >= MAX_WATERMARK_SLOTS {
+            return Err("Invalid watermark algorithm slot");
+        }
+        let node_id = (dpa_id as usize).min(MAX_ACCELERATORS - 1);
+        let current_ts = self.nodes[node_id].su.tu.read_fresh_timestamp();
+
+        self.watermark_slots[slot_id as usize] = Some(DynamicWatermarkSlot {
+            slot_id,
+            algorithm_id,
+            algorithm_type: wm_type,
+            configured_timestamp: current_ts,
+            expiration_ticks: ttl_ticks,
+            is_active: true,
+        });
+        Ok(())
+    }
+
+    /// Retrieve active watermark algorithm, checking expiration threshold T_expire (CN 112528242 B).
+    pub fn get_active_watermark_algorithm(
+        &self,
+        dpa_id: u8,
+        slot_id: u8,
+    ) -> Result<WatermarkType, &'static str> {
+        if slot_id as usize >= MAX_WATERMARK_SLOTS {
+            return Err("Invalid watermark algorithm slot");
+        }
+        let slot = self.watermark_slots[slot_id as usize]
+            .as_ref()
+            .ok_or("Watermark algorithm slot uninitialized")?;
+
+        if !slot.is_active {
+            return Err("Watermark algorithm slot inactive");
+        }
+
+        let node_id = (dpa_id as usize).min(MAX_ACCELERATORS - 1);
+        let current_ts = self.nodes[node_id].su.tu.read_fresh_timestamp();
+
+        if current_ts > slot.configured_timestamp + slot.expiration_ticks {
+            return Err("Watermark algorithm slot expired (T_expire exceeded)");
+        }
+
+        Ok(slot.algorithm_type)
+    }
+
     /// Comprehensive self-test for CI and QEMU test suites.
     pub fn run_self_test(&mut self) -> (bool, &'static str) {
         // Test 1: Dispatch ring broadcast from DPA 0 to adjacent nodes
@@ -588,6 +850,37 @@ impl KunlunMeshFabric {
         );
         if rev_res.is_ok() {
             return (false, "Revoked model license was improperly allowed");
+        }
+
+        // Test 5: Host TEE Kernel Digest Store & CMD_DO_ATTESTATION (CN 112292678 B)
+        let test_bin = [0x77u8; 32];
+        let mut expected_digest = [0u8; 32];
+        for (idx, byte) in test_bin.iter().enumerate() {
+            expected_digest[idx % 32] ^= byte.wrapping_mul(7).wrapping_add(idx as u8);
+        }
+        let _ = self.register_kernel_object(0x2001, b"TEST_ACCEL_KERNEL\0\0\0\0\0", expected_digest, [0x11; 32]);
+        let k_attest = self.execute_cmd_do_attestation(0, 0x2001, 0xABCD_1234, &test_bin);
+        match k_attest {
+            Ok(ev) => {
+                if !ev.is_valid {
+                    return (false, "Kernel attestation signature verification failed");
+                }
+            }
+            Err(_) => return (false, "Registered kernel attestation rejected"),
+        }
+
+        // Test 6: Tampered kernel binary rejection
+        let bad_bin = [0x00u8; 32];
+        let bad_attest = self.execute_cmd_do_attestation(0, 0x2001, 0xABCD_1234, &bad_bin);
+        if bad_attest.is_ok() {
+            return (false, "Tampered kernel binary was improperly attested");
+        }
+
+        // Test 7: Dynamic Watermark Algorithm Slot caching & retrieval (CN 112528242 B)
+        let _ = self.configure_watermark_slot(0, 1, 0x9001, WatermarkType::TriggerProbeSet, 10_000_000);
+        let active_algo = self.get_active_watermark_algorithm(0, 1);
+        if active_algo != Ok(WatermarkType::TriggerProbeSet) {
+            return (false, "Dynamic watermark slot algorithm retrieval mismatch");
         }
 
         (true, "All Kunlunxin confidential AI mesh & attestation tests passed")
