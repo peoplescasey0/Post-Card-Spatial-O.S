@@ -858,6 +858,8 @@ mod web_browser;
 mod email_client;
 mod syscall_bridge_soc;
 mod forensic_ebpf_audit;
+mod anjuna_barkly_enclave;
+mod citrix_gpu_sliding;
 
 // ============================================================================
 // 5. HARDWARE VT-x (VMXON / VMCS) & MICRO-VM CAPSULE HYPERVISOR ENGINE
@@ -1874,6 +1876,14 @@ pub unsafe extern "C" fn _start(multiboot2_info_addr: usize) -> ! {
     forensic_ebpf_audit::init_forensic_ebpf_subsystem();
     kprintln_emerald!("[ok] Forensics & eBPF: Version-Tree causal log & in-kernel eBPF audit armed (US 9,721,089 B2 / US 12,242,629 B2)");
 
+    // Initialize Anjuna Secure Runtime & Barkly Hypervisor MSR Shadow Monitor (US 11,714,895 B2 / US 9,589,132 B2)
+    anjuna_barkly_enclave::init_anjuna_barkly_subsystem();
+    kprintln_emerald!("[ok] Anjuna & Barkly: OS Bridge dual-stack enclaves & EPT/IA32_LSTAR shadow armed (US 11,714,895 B2 / US 9,589,132 B2)");
+
+    // Initialize Citrix Dynamic GPU Passthrough <-> Emulation Sliding Engine (US 9,406,099 B2)
+    citrix_gpu_sliding::init_gpu_sliding_subsystem();
+    kprintln_emerald!("[ok] Citrix GPU Sliding: VT-d passthrough <-> emulator state continuity armed (US 9,406,099 B2)");
+
     kprintln_emerald!("Spatial OS is ALIVE!");
 
     // 4. Interactive bare-metal shell (accepts input from BOTH PS/2 Keyboard and Serial COM1)
@@ -1939,7 +1949,7 @@ unsafe fn handle_shell_command(cmd_bytes: &[u8], mb2: &Multiboot2ParsedInfo) {
         return;
     }
     if cmd == "help" {
-        kprintln!("commands: help, gui, deck, mouse, routes, route [bind/free], usbc, sec, hsm [auth/lock], trust/graph, span [kick/ipi/rebalance], rootvmm [enter/exit/verify], snvme [read/write/target], hyos, dock, undock, pats [lba], shrink [mb], sva [activate/morph/dma/priv], latehv [step/trap], muse [fast/slow/mdev], coreiso [dispatch/pf], vgpu [tx/bounds], sriov [trigger/error/reset], vmsec [io/snap/bounds], ppt [ecall/aex/exit], vam [profile/bench], hvm [rma/poll/info], wasm [test/fuel/status], maxq [opt/step/tdp], shm [pub/sub], arais [level/flush], astguard [test], kwasm [test/call], mddma [burst/5d], dtree [eval/test], panda [test/parse], fortinet [test/eos], nudt [test/rule], snic [test/rule], afxdp [test/bind], mesh [test/arp], soundhound [test/move], ericsson [test/move], astound [test/bypass], vcr [test/query], fsm [test/audit], mongo [test/workload], enclave [test/seal], metal [test/pipeline], kunlun [test/broadcast/drm/attest/cache/info], antmem [test/info], quantum [test/route/solve/status], socbridge [test/status], forensics [test/status/chain/ebpf], browse [url], bookmarks, http [get], email [inbox/read/send/outbox/test], cxl, scibuf, ltssm/margin, hud, net, stream, flynet [slot], fly [0..3], land, cpu, vmx, vms, vmrun, spawn, exec, elf, sched, syscall, ls, echo, uptime, mem, ps, pci, disks, sandbox, avionics, radiator, install, halt, reboot");
+        kprintln!("commands: help, gui, deck, mouse, routes, route [bind/free], usbc, sec, hsm [auth/lock], trust/graph, span [kick/ipi/rebalance], rootvmm [enter/exit/verify], snvme [read/write/target], hyos, dock, undock, pats [lba], shrink [mb], sva [activate/morph/dma/priv], latehv [step/trap], muse [fast/slow/mdev], coreiso [dispatch/pf], vgpu [tx/bounds], sriov [trigger/error/reset], vmsec [io/snap/bounds], ppt [ecall/aex/exit], vam [profile/bench], hvm [rma/poll/info], wasm [test/fuel/status], maxq [opt/step/tdp], shm [pub/sub], arais [level/flush], astguard [test], kwasm [test/call], mddma [burst/5d], dtree [eval/test], panda [test/parse], fortinet [test/eos], nudt [test/rule], snic [test/rule], afxdp [test/bind], mesh [test/arp], soundhound [test/move], ericsson [test/move], astound [test/bypass], vcr [test/query], fsm [test/audit], mongo [test/workload], enclave [test/seal], metal [test/pipeline], kunlun [test/broadcast/drm/attest/cache/info], antmem [test/info], quantum [test/route/solve/status], socbridge [test/status], forensics [test/status/chain/ebpf], anjuna [test/status], gpuslide [test/status/slide], browse [url], bookmarks, http [get], email [inbox/read/send/outbox/test], cxl, scibuf, ltssm/margin, hud, net, stream, flynet [slot], fly [0..3], land, cpu, vmx, vms, vmrun, spawn, exec, elf, sched, syscall, ls, echo, uptime, mem, ps, pci, disks, sandbox, avionics, radiator, install, halt, reboot");
         kprintln!("storage:  disks, mount [pN], umount, df, ls [dir], cat <file>, write <file> <text>, append <file> <text>, touch <file>, mkdir <dir>, rm <path>, sync, blk <dev> <lba>");
     } else if cmd == "gui" || cmd == "deck" || cmd == "desktop" {
         if let Some(ref fb) = GOP_FB {
@@ -4956,6 +4966,68 @@ unsafe fn handle_shell_command(cmd_bytes: &[u8], mb2: &Multiboot2ParsedInfo) {
                 "Version-Tree Entries: {} | Exfiltration Packets Blocked: {} | eBPF Events: {} | Suppressed Re-Probes: {} | Alerts: {}",
                 ver_head, blocked, ebpf_evs, suppressed, alerts
             );
+        }
+    } else if cmd == "anjuna" || cmd.starts_with("anjuna ") {
+        let sub = cmd.strip_prefix("anjuna").unwrap_or("").trim();
+        if sub == "test" {
+            let (ok, msg) = unsafe { anjuna_barkly_enclave::ANJUNA_BARKLY_MGR.run_self_test() };
+            if ok {
+                kprintln_emerald!("[ANJUNA PASS] {}", msg);
+            } else {
+                kprintln_amber!("[ANJUNA FAIL] {}", msg);
+            }
+        } else {
+            kprintln_cyan!("=== ANJUNA SECURE RUNTIME & BARKLY HYPERVISOR MSR SHADOW (US 11,714,895 B2 / US 9,589,132 B2) ===");
+            let (bridged, enc_ops, switches, rdmsr_traps, wrmsr_blocks, fake_lstar, act_lstar, ept_viols) = unsafe {
+                (
+                    anjuna_barkly_enclave::ANJUNA_BARKLY_MGR.total_syscalls_bridged.load(Ordering::Relaxed),
+                    anjuna_barkly_enclave::ANJUNA_BARKLY_MGR.total_io_encrypted_ops.load(Ordering::Relaxed),
+                    anjuna_barkly_enclave::ANJUNA_BARKLY_MGR.stack_switches.load(Ordering::Relaxed),
+                    anjuna_barkly_enclave::ANJUNA_BARKLY_MGR.trapped_rdmsr_count.load(Ordering::Relaxed),
+                    anjuna_barkly_enclave::ANJUNA_BARKLY_MGR.blocked_wrmsr_count.load(Ordering::Relaxed),
+                    anjuna_barkly_enclave::ANJUNA_BARKLY_MGR.fake_ia32_lstar,
+                    anjuna_barkly_enclave::ANJUNA_BARKLY_MGR.active_ia32_lstar,
+                    anjuna_barkly_enclave::ANJUNA_BARKLY_MGR.ept_protection.ept_violations_trapped,
+                )
+            };
+            kprintln!(
+                "OS Bridge: {} Syscalls | {} Encrypted I/O | {} Stack Switches",
+                bridged, enc_ops, switches
+            );
+            kprintln!(
+                "MSR Monitor: Active LSTAR={:#x} | Shadow Fake LSTAR={:#x} | RDMSR Traps={} | WRMSR Blocks={} | EPT Traps={}",
+                act_lstar, fake_lstar, rdmsr_traps, wrmsr_blocks, ept_viols
+            );
+        }
+    } else if cmd == "gpuslide" || cmd.starts_with("gpuslide ") {
+        let sub = cmd.strip_prefix("gpuslide").unwrap_or("").trim();
+        if sub == "test" {
+            let (ok, msg) = unsafe { citrix_gpu_sliding::CITRIX_GPU_SLIDING.run_self_test() };
+            if ok {
+                kprintln_emerald!("[GPUSLIDE PASS] {}", msg);
+            } else {
+                kprintln_amber!("[GPUSLIDE FAIL] {}", msg);
+            }
+        } else {
+            kprintln_cyan!("=== CITRIX DYNAMIC GPU PASSTHROUGH <-> EMULATION SLIDING (US 9,406,099 B2) ===");
+            let (owner, slides, emu_renders) = unsafe {
+                (
+                    citrix_gpu_sliding::CITRIX_GPU_SLIDING.active_hw_owner_vm,
+                    citrix_gpu_sliding::CITRIX_GPU_SLIDING.total_slides.load(Ordering::Relaxed),
+                    citrix_gpu_sliding::CITRIX_GPU_SLIDING.total_emulated_renders.load(Ordering::Relaxed),
+                )
+            };
+            kprintln!(
+                "Active Hardware GPU Owner: VM {} | Total GPU Slides: {} | Emulated Renders: {}",
+                owner, slides, emu_renders
+            );
+            for i in 0..2usize {
+                let v = unsafe { &citrix_gpu_sliding::CITRIX_GPU_SLIDING.vms[i] };
+                kprintln!(
+                    "  VM {}: Focus={} | Mode={:?} | IOMMU Domain={} | MMIO={:#x} | PnP Loss Alerts={}",
+                    v.vm_id, v.has_focus, v.mode, v.vtd_iommu_domain, v.mmio_bar_addr, v.pnp_device_loss_alerts
+                );
+            }
         }
     } else if cmd == "clear" || cmd == "cls" {
         CURSOR_COL = 0;
