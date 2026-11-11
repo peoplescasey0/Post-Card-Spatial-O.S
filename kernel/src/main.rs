@@ -833,6 +833,7 @@ mod rbc_vcr_enclave;
 mod ucf_dax_fsm;
 mod mongodb_enc_engine;
 mod microsoft_cross_enclave;
+mod apple_metal_pipeline;
 
 // ============================================================================
 // 5. HARDWARE VT-x (VMXON / VMCS) & MICRO-VM CAPSULE HYPERVISOR ENGINE
@@ -1816,6 +1817,10 @@ pub unsafe extern "C" fn _start(multiboot2_info_addr: usize) -> ! {
     unsafe { microsoft_cross_enclave::init_cross_platform_enclave_subsystem(); }
     kprintln_emerald!("[ok] Microsoft Enclaves: 5-tier abstract identity & distributed sealing armed (EP 3 574 435 B1)");
 
+    // Initialize Apple Metal Unified Shading & Compute Pipeline Engine (EP 3 137 992 B1)
+    unsafe { apple_metal_pipeline::init_metal_pipeline_subsystem(); }
+    kprintln_emerald!("[ok] Apple Metal: Unified shader/compute AOT IR & stage_in signature matcher armed (EP 3 137 992 B1)");
+
     kprintln_emerald!("Spatial OS is ALIVE!");
 
     // 4. Interactive bare-metal shell (accepts input from BOTH PS/2 Keyboard and Serial COM1)
@@ -1881,7 +1886,7 @@ unsafe fn handle_shell_command(cmd_bytes: &[u8], mb2: &Multiboot2ParsedInfo) {
         return;
     }
     if cmd == "help" {
-        kprintln!("commands: help, gui, deck, mouse, routes, route [bind/free], usbc, sec, hsm [auth/lock], trust/graph, span [kick/ipi/rebalance], rootvmm [enter/exit/verify], snvme [read/write/target], hyos, dock, undock, pats [lba], shrink [mb], sva [activate/morph/dma/priv], latehv [step/trap], muse [fast/slow/mdev], coreiso [dispatch/pf], vgpu [tx/bounds], sriov [trigger/error/reset], vmsec [io/snap/bounds], ppt [ecall/aex/exit], vam [profile/bench], hvm [rma/poll/info], wasm [test/fuel/status], maxq [opt/step/tdp], shm [pub/sub], arais [level/flush], astguard [test], kwasm [test/call], mddma [burst/5d], dtree [eval/test], panda [test/parse], fortinet [test/eos], nudt [test/rule], snic [test/rule], afxdp [test/bind], mesh [test/arp], soundhound [test/move], ericsson [test/move], astound [test/bypass], vcr [test/query], fsm [test/audit], mongo [test/workload], enclave [test/seal], cxl, scibuf, ltssm/margin, hud, net, stream, flynet [slot], fly [0..3], land, cpu, vmx, vms, vmrun, spawn, exec, elf, sched, syscall, ls, echo, uptime, mem, ps, pci, disks, sandbox, avionics, radiator, install, halt, reboot");
+        kprintln!("commands: help, gui, deck, mouse, routes, route [bind/free], usbc, sec, hsm [auth/lock], trust/graph, span [kick/ipi/rebalance], rootvmm [enter/exit/verify], snvme [read/write/target], hyos, dock, undock, pats [lba], shrink [mb], sva [activate/morph/dma/priv], latehv [step/trap], muse [fast/slow/mdev], coreiso [dispatch/pf], vgpu [tx/bounds], sriov [trigger/error/reset], vmsec [io/snap/bounds], ppt [ecall/aex/exit], vam [profile/bench], hvm [rma/poll/info], wasm [test/fuel/status], maxq [opt/step/tdp], shm [pub/sub], arais [level/flush], astguard [test], kwasm [test/call], mddma [burst/5d], dtree [eval/test], panda [test/parse], fortinet [test/eos], nudt [test/rule], snic [test/rule], afxdp [test/bind], mesh [test/arp], soundhound [test/move], ericsson [test/move], astound [test/bypass], vcr [test/query], fsm [test/audit], mongo [test/workload], enclave [test/seal], metal [test/pipeline], cxl, scibuf, ltssm/margin, hud, net, stream, flynet [slot], fly [0..3], land, cpu, vmx, vms, vmrun, spawn, exec, elf, sched, syscall, ls, echo, uptime, mem, ps, pci, disks, sandbox, avionics, radiator, install, halt, reboot");
         kprintln!("storage:  disks, mount [pN], umount, df, ls [dir], cat <file>, write <file> <text>, append <file> <text>, touch <file>, mkdir <dir>, rm <path>, sync, blk <dev> <lba>");
     } else if cmd == "gui" || cmd == "deck" || cmd == "desktop" {
         if let Some(ref fb) = GOP_FB {
@@ -4394,6 +4399,65 @@ unsafe fn handle_shell_command(cmd_bytes: &[u8], mb2: &Multiboot2ParsedInfo) {
         kprintln!(
             "Execution Telemetry: Attestations: {} | Equivalence Matches: {} | Seals: {} | Unseals: {} | Vault Ops: {}",
             att, equiv, seals, unseals, vault_ops
+        );
+    } else if cmd == "metal" || cmd.starts_with("metal ") {
+        let arg = if cmd.len() > 5 { &cmd[6..] } else { "" };
+        let mut it = arg.split_whitespace();
+        let sub = it.next().unwrap_or("");
+        if sub == "test" {
+            let (ok, msg) = unsafe {
+                apple_metal_pipeline::APPLE_METAL_ENGINE.test_metal_engine()
+            };
+            if ok {
+                kprintln_emerald!("[METAL PASS] Apple Metal Engine: {}", msg);
+            } else {
+                kprintln_amber!("[METAL FAIL] Apple Metal Engine: {}", msg);
+            }
+        } else if sub == "pipeline" {
+            let mvp = apple_metal_pipeline::Matrix4x4::identity();
+            let (out_pos, _out_col, _) = unsafe {
+                apple_metal_pipeline::APPLE_METAL_ENGINE.execute_vertex_transform(
+                    &mvp,
+                    [0.5, 0.5, 0.0, 1.0],
+                    [0.2, 0.7, 0.9, 1.0],
+                    [0.0, 0.0],
+                )
+            };
+            let pixel = unsafe {
+                apple_metal_pipeline::APPLE_METAL_ENGINE.execute_fragment_shading(
+                    [0.2, 0.7, 0.9, 1.0],
+                    [0.0, 0.0],
+                    0.2,
+                )
+            };
+            kprintln_emerald!(
+                "[METAL PIPELINE] Transformed Pos: [{:.2}, {:.2}, {:.2}, {:.2}] -> Shaded Pixel: {:#08x}",
+                out_pos[0], out_pos[1], out_pos[2], out_pos[3], pixel
+            );
+        }
+        let (compiled, sigs, vtx, frags, compute, barriers) = unsafe {
+            (
+                apple_metal_pipeline::APPLE_METAL_ENGINE.total_compiled_pipelines.load(Ordering::Relaxed),
+                apple_metal_pipeline::APPLE_METAL_ENGINE.total_signature_validations.load(Ordering::Relaxed),
+                apple_metal_pipeline::APPLE_METAL_ENGINE.total_vertex_transforms.load(Ordering::Relaxed),
+                apple_metal_pipeline::APPLE_METAL_ENGINE.total_fragment_shades.load(Ordering::Relaxed),
+                apple_metal_pipeline::APPLE_METAL_ENGINE.total_compute_dispatches.load(Ordering::Relaxed),
+                apple_metal_pipeline::APPLE_METAL_ENGINE.total_threadgroup_barriers.load(Ordering::Relaxed),
+            )
+        };
+        kprintln_amber!("=== APPLE METAL UNIFIED SHADING & COMPUTE PIPELINE ENGINE (EP 3 137 992 B1) ===");
+        kprintln!(
+            "Language Model: Unified C++11 Graphics & Compute | AOT Compilation: LLVM Bitcode Intermediate Representation"
+        );
+        kprintln!(
+            "Address Spaces: global (VRAM) | local (Workgroup Scratchpad) | constant (Uniforms) | private (Registers)"
+        );
+        kprintln!(
+            "Pipelining: stage_in Input/Output Signature Matching & Hardware Resource Binding Slots"
+        );
+        kprintln!(
+            "Telemetry: Compiled PSOs: {} | Sig Validations: {} | Vertex Xforms: {} | Fragment Shades: {} | Compute Dispatches: {} | Barriers: {}",
+            compiled, sigs, vtx, frags, compute, barriers
         );
     } else if cmd == "clear" || cmd == "cls" {
         CURSOR_COL = 0;
