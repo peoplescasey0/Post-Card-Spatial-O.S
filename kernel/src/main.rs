@@ -856,6 +856,8 @@ mod ant_safe_memory;
 mod quantum_complexity_router;
 mod web_browser;
 mod email_client;
+mod syscall_bridge_soc;
+mod forensic_ebpf_audit;
 
 // ============================================================================
 // 5. HARDWARE VT-x (VMXON / VMCS) & MICRO-VM CAPSULE HYPERVISOR ENGINE
@@ -1864,6 +1866,14 @@ pub unsafe extern "C" fn _start(multiboot2_info_addr: usize) -> ! {
     email_client::init_email_subsystem();
     kprintln_emerald!("[ok] Email Client: RFC 5322 MIME engine & hardware-signed mailbox armed");
 
+    // Initialize Disaggregated SoC Syscall Bridge & Layered Arbiter Stack (CN 113989099 B / US 2020/0301764 A1)
+    syscall_bridge_soc::init_soc_bridge_subsystem();
+    kprintln_emerald!("[ok] SoC Syscall Bridge: Disaggregated dies, NAPI Bus & Arbiters armed (CN 113989099 B / US 2020/0301764 A1)");
+
+    // Initialize Hypervisor Forensic Tracker & Zero Context-Switch eBPF Auditor (US 9,721,089 B2 / US 12,242,629 B2)
+    forensic_ebpf_audit::init_forensic_ebpf_subsystem();
+    kprintln_emerald!("[ok] Forensics & eBPF: Version-Tree causal log & in-kernel eBPF audit armed (US 9,721,089 B2 / US 12,242,629 B2)");
+
     kprintln_emerald!("Spatial OS is ALIVE!");
 
     // 4. Interactive bare-metal shell (accepts input from BOTH PS/2 Keyboard and Serial COM1)
@@ -1929,7 +1939,7 @@ unsafe fn handle_shell_command(cmd_bytes: &[u8], mb2: &Multiboot2ParsedInfo) {
         return;
     }
     if cmd == "help" {
-        kprintln!("commands: help, gui, deck, mouse, routes, route [bind/free], usbc, sec, hsm [auth/lock], trust/graph, span [kick/ipi/rebalance], rootvmm [enter/exit/verify], snvme [read/write/target], hyos, dock, undock, pats [lba], shrink [mb], sva [activate/morph/dma/priv], latehv [step/trap], muse [fast/slow/mdev], coreiso [dispatch/pf], vgpu [tx/bounds], sriov [trigger/error/reset], vmsec [io/snap/bounds], ppt [ecall/aex/exit], vam [profile/bench], hvm [rma/poll/info], wasm [test/fuel/status], maxq [opt/step/tdp], shm [pub/sub], arais [level/flush], astguard [test], kwasm [test/call], mddma [burst/5d], dtree [eval/test], panda [test/parse], fortinet [test/eos], nudt [test/rule], snic [test/rule], afxdp [test/bind], mesh [test/arp], soundhound [test/move], ericsson [test/move], astound [test/bypass], vcr [test/query], fsm [test/audit], mongo [test/workload], enclave [test/seal], metal [test/pipeline], kunlun [test/broadcast/drm/attest/cache/info], antmem [test/info], quantum [test/route/solve/status], browse [url], bookmarks, http [get], email [inbox/read/send/outbox/test], cxl, scibuf, ltssm/margin, hud, net, stream, flynet [slot], fly [0..3], land, cpu, vmx, vms, vmrun, spawn, exec, elf, sched, syscall, ls, echo, uptime, mem, ps, pci, disks, sandbox, avionics, radiator, install, halt, reboot");
+        kprintln!("commands: help, gui, deck, mouse, routes, route [bind/free], usbc, sec, hsm [auth/lock], trust/graph, span [kick/ipi/rebalance], rootvmm [enter/exit/verify], snvme [read/write/target], hyos, dock, undock, pats [lba], shrink [mb], sva [activate/morph/dma/priv], latehv [step/trap], muse [fast/slow/mdev], coreiso [dispatch/pf], vgpu [tx/bounds], sriov [trigger/error/reset], vmsec [io/snap/bounds], ppt [ecall/aex/exit], vam [profile/bench], hvm [rma/poll/info], wasm [test/fuel/status], maxq [opt/step/tdp], shm [pub/sub], arais [level/flush], astguard [test], kwasm [test/call], mddma [burst/5d], dtree [eval/test], panda [test/parse], fortinet [test/eos], nudt [test/rule], snic [test/rule], afxdp [test/bind], mesh [test/arp], soundhound [test/move], ericsson [test/move], astound [test/bypass], vcr [test/query], fsm [test/audit], mongo [test/workload], enclave [test/seal], metal [test/pipeline], kunlun [test/broadcast/drm/attest/cache/info], antmem [test/info], quantum [test/route/solve/status], socbridge [test/status], forensics [test/status/chain/ebpf], browse [url], bookmarks, http [get], email [inbox/read/send/outbox/test], cxl, scibuf, ltssm/margin, hud, net, stream, flynet [slot], fly [0..3], land, cpu, vmx, vms, vmrun, spawn, exec, elf, sched, syscall, ls, echo, uptime, mem, ps, pci, disks, sandbox, avionics, radiator, install, halt, reboot");
         kprintln!("storage:  disks, mount [pN], umount, df, ls [dir], cat <file>, write <file> <text>, append <file> <text>, touch <file>, mkdir <dir>, rm <path>, sync, blk <dev> <lba>");
     } else if cmd == "gui" || cmd == "deck" || cmd == "desktop" {
         if let Some(ref fb) = GOP_FB {
@@ -4890,6 +4900,63 @@ unsafe fn handle_shell_command(cmd_bytes: &[u8], mb2: &Multiboot2ParsedInfo) {
             )
         };
         kprintln_gray!("Mailbox Telemetry: Total Sent: {} | Total Received: {}", sent, recv);
+    } else if cmd == "socbridge" || cmd.starts_with("socbridge ") {
+        let sub = cmd.strip_prefix("socbridge").unwrap_or("").trim();
+        if sub == "test" {
+            let (ok, msg) = unsafe { syscall_bridge_soc::SOC_SYSCALL_BRIDGE.run_self_test() };
+            if ok {
+                kprintln_emerald!("[SOCBRIDGE PASS] {}", msg);
+            } else {
+                kprintln_amber!("[SOCBRIDGE FAIL] {}", msg);
+            }
+        } else {
+            kprintln_cyan!("=== DISAGGREGATED SoC SYSCALL BRIDGE & ARBITER STACK (CN 113989099 B / US 2020/0301764 A1) ===");
+            let (bridged, denied, sram_hits, die_count, tresor) = unsafe {
+                (
+                    syscall_bridge_soc::SOC_SYSCALL_BRIDGE.total_bridge_syscalls.load(Ordering::Relaxed),
+                    syscall_bridge_soc::SOC_SYSCALL_BRIDGE.total_denied_calls.load(Ordering::Relaxed),
+                    syscall_bridge_soc::SOC_SYSCALL_BRIDGE.total_sram_3d_hits.load(Ordering::Relaxed),
+                    syscall_bridge_soc::SOC_SYSCALL_BRIDGE.die_count,
+                    syscall_bridge_soc::SOC_SYSCALL_BRIDGE.tresor_key_bound.load(Ordering::Relaxed),
+                )
+            };
+            kprintln!(
+                "SoC Chiplets: {} dies active | Bridged Syscalls: {} | Denied Escalations: {} | 3D SRAM Hits: {} | TRESOR Key Bound: {}",
+                die_count, bridged, denied, sram_hits, tresor
+            );
+            for i in 0..die_count {
+                let d = unsafe { &syscall_bridge_soc::SOC_SYSCALL_BRIDGE.dies[i] };
+                kprintln!(
+                    "  Die {} [{:?}]: L3 Banks={} | Stacked SRAM={} KiB | BW={} Gbps | Routed={}",
+                    d.die_id, d.kind, d.l3_cache_banks, d.sram_stacked_kb, d.interconnect_bw_gbps, d.routed_syscalls
+                );
+            }
+        }
+    } else if cmd == "forensics" || cmd.starts_with("forensics ") {
+        let sub = cmd.strip_prefix("forensics").unwrap_or("").trim();
+        if sub == "test" {
+            let (ok, msg) = unsafe { forensic_ebpf_audit::FORENSIC_EBPF_MGR.run_self_test() };
+            if ok {
+                kprintln_emerald!("[FORENSICS PASS] {}", msg);
+            } else {
+                kprintln_amber!("[FORENSICS FAIL] {}", msg);
+            }
+        } else {
+            kprintln_cyan!("=== HYPERVISOR FORENSICS & ZERO-CONTEXT-SWITCH eBPF (US 9,721,089 B2 / US 12,242,629 B2) ===");
+            let (blocked, ebpf_evs, suppressed, alerts, ver_head) = unsafe {
+                (
+                    forensic_ebpf_audit::FORENSIC_EBPF_MGR.total_exfiltrations_blocked.load(Ordering::Relaxed),
+                    forensic_ebpf_audit::FORENSIC_EBPF_MGR.total_ebpf_events.load(Ordering::Relaxed),
+                    forensic_ebpf_audit::FORENSIC_EBPF_MGR.total_suppressed_reprobes.load(Ordering::Relaxed),
+                    forensic_ebpf_audit::FORENSIC_EBPF_MGR.total_alerts_raised.load(Ordering::Relaxed),
+                    forensic_ebpf_audit::FORENSIC_EBPF_MGR.version_head,
+                )
+            };
+            kprintln!(
+                "Version-Tree Entries: {} | Exfiltration Packets Blocked: {} | eBPF Events: {} | Suppressed Re-Probes: {} | Alerts: {}",
+                ver_head, blocked, ebpf_evs, suppressed, alerts
+            );
+        }
     } else if cmd == "clear" || cmd == "cls" {
         CURSOR_COL = 0;
         CURSOR_ROW = 0;
