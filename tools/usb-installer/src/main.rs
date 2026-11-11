@@ -147,6 +147,7 @@ fn boot_qemu(iso_path: &Path) -> io::Result<()> {
         .args([
             "-name", "Post Card Spatial OS",
             "-machine", "pc",
+            "-cpu", "max",
             "-m", "256M",
             "-cdrom", iso_path.to_str().unwrap_or("target/postcard-spatial-os.iso"),
             "-boot", "d",

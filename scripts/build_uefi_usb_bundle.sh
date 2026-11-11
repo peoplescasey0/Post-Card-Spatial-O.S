@@ -31,51 +31,60 @@ insmod fat
 insmod ext2
 insmod multiboot2
 insmod linux
+insmod serial
+
+serial --unit=0 --speed=115200
+terminal_input serial console
+terminal_output serial gfxterm
 
 set gfxmode=auto
 set gfxpayload=keep
-terminal_input console
-terminal_output gfxterm
 set timeout=5
 set default=0
 
-menuentry "Post Card OS // Space Plane Avionics v1.0.4 (Direct Bare-Metal Boot)" {
+menuentry "Post Card Spatial OS // Space Plane Avionics (Universal Auto-Mount Boot)" {
     if [ -f (memdisk)/boot/postcard-kernel-v1.0.4-x86_64 ]; then
-        multiboot2 (memdisk)/boot/postcard-kernel-v1.0.4-x86_64 console=tty0 root=/dev/nvme0n1p2
-        module2 (memdisk)/boot/initrd.img
+        multiboot2 (memdisk)/boot/postcard-kernel-v1.0.4-x86_64 console=ttyS0 console=tty0
+        if [ -f (memdisk)/boot/initrd.img ]; then
+            module2 (memdisk)/boot/initrd.img
+        fi
     else
         search --no-floppy --file --set=root /boot/postcard-kernel-v1.0.4-x86_64
-        multiboot2 /boot/postcard-kernel-v1.0.4-x86_64 console=tty0 root=/dev/nvme0n1p2
-        module2 /boot/initrd.img
+        multiboot2 /boot/postcard-kernel-v1.0.4-x86_64 console=ttyS0 console=tty0
+        if [ -f /boot/initrd.img ]; then
+            module2 /boot/initrd.img
+        fi
     fi
     boot
 }
 
-menuentry "Post Card OS // Space Plane Avionics v1.0.4 (64GB eMMC /dev/mmcblk0p2)" {
+menuentry "Post Card Spatial OS // Space Plane Avionics (Screen-Only No-Serial Mode)" {
     if [ -f (memdisk)/boot/postcard-kernel-v1.0.4-x86_64 ]; then
-        multiboot2 (memdisk)/boot/postcard-kernel-v1.0.4-x86_64 console=tty0 noserial root=/dev/mmcblk0p2
-        module2 (memdisk)/boot/initrd.img
+        multiboot2 (memdisk)/boot/postcard-kernel-v1.0.4-x86_64 console=tty0 noserial
+        if [ -f (memdisk)/boot/initrd.img ]; then
+            module2 (memdisk)/boot/initrd.img
+        fi
     else
         search --no-floppy --file --set=root /boot/postcard-kernel-v1.0.4-x86_64
-        multiboot2 /boot/postcard-kernel-v1.0.4-x86_64 console=tty0 noserial root=/dev/mmcblk0p2
-        module2 /boot/initrd.img
+        multiboot2 /boot/postcard-kernel-v1.0.4-x86_64 console=tty0 noserial
+        if [ -f /boot/initrd.img ]; then
+            module2 /boot/initrd.img
+        fi
     fi
     boot
 }
 
-menuentry "Post Card OS // Space Plane Avionics v1.0.4 (Safe Mode / Screen-Only No-Serial)" {
+menuentry "Post Card Spatial OS // Safe Mode (RAM-Only / No Block Device Probe)" {
     if [ -f (memdisk)/boot/postcard-kernel-v1.0.4-x86_64 ]; then
-        multiboot2 (memdisk)/boot/postcard-kernel-v1.0.4-x86_64 console=tty0 noserial nosmp
-        module2 (memdisk)/boot/initrd.img
+        multiboot2 (memdisk)/boot/postcard-kernel-v1.0.4-x86_64 console=ttyS0 console=tty0 nostorage
     else
         search --no-floppy --file --set=root /boot/postcard-kernel-v1.0.4-x86_64
-        multiboot2 /boot/postcard-kernel-v1.0.4-x86_64 console=tty0 noserial nosmp
-        module2 /boot/initrd.img
+        multiboot2 /boot/postcard-kernel-v1.0.4-x86_64 console=ttyS0 console=tty0 nostorage
     fi
     boot
 }
 
-menuentry "UEFI Firmware Settings (Dell Latitude 3120 BIOS Setup)" {
+menuentry "UEFI Firmware Settings (BIOS / Setup)" {
     fwsetup
 }
 

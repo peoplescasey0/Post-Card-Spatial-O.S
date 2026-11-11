@@ -2,6 +2,8 @@ param(
     [string]$IsoPath = "",
     [string]$QemuExe = "",
     [string]$Display = "sdl",
+    [string]$Cpu = "max",
+    [switch]$HostCpu,
     [switch]$Headless,
     [switch]$Detached
 )
@@ -47,9 +49,12 @@ if (-not $QemuExe -or -not (Test-Path $QemuExe)) {
 
 $displayArg = if ($Headless) { "none" } else { $Display }
 
+$effectiveCpu = if ($HostCpu) { "host" } else { $Cpu }
+
 $arguments = @(
     "-name", "Post Card Spatial OS - Live Demo",
     "-machine", "pc",
+    "-cpu", $effectiveCpu,
     "-m", "256M",
     "-cdrom", $IsoPath,
     "-boot", "d",
@@ -57,6 +62,10 @@ $arguments = @(
     "-serial", "stdio",
     "-no-reboot"
 )
+
+if ($HostCpu) {
+    $arguments = @("-accel", "whpx") + $arguments
+}
 
 Write-Host "===============================================================================" -ForegroundColor Cyan
 Write-Host "         BOOTING POST CARD SPATIAL OS IN QEMU VIRTUAL MACHINE" -ForegroundColor Cyan
