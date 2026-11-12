@@ -1,5 +1,20 @@
 #!/usr/bin/env bash
+# Build the bootable ISO (kernel ELF + GRUB + ramdisk.img).
+#
+# The kernel is rebuilt on every run, so the ISO can never package a stale ELF.
+# Pass --no-build to reuse the existing ELF; a stale ELF is then rejected.
+#
+# Usage: scripts/create_iso.sh [--no-build]
 set -euo pipefail
+
+BUILD_KERNEL=1
+for arg in "$@"; do
+    case "${arg}" in
+        --no-build) BUILD_KERNEL=0 ;;
+        -h|--help) sed -n '2,9p' "$0"; exit 0 ;;
+        *) echo "unknown option: ${arg}" >&2; exit 2 ;;
+    esac
+done
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
@@ -51,13 +66,24 @@ build_kernel() {
     )
 }
 
+if [[ "${BUILD_KERNEL}" == "1" ]]; then
+    build_kernel
+else
+    echo "=== Skipping kernel build (--no-build) ==="
+fi
+
 KERNEL_ELF="$(find_kernel_elf || true)"
 if [[ -z "${KERNEL_ELF}" ]]; then
-    build_kernel
-    KERNEL_ELF="$(find_kernel_elf || true)"
+    echo "Error: kernel ELF not found (looked in kernel/target and target/)" >&2
+    [[ "${BUILD_KERNEL}" == "0" ]] && echo "Run without --no-build to build it." >&2
+    exit 1
 fi
-if [[ -z "${KERNEL_ELF}" ]]; then
-    echo "Error: kernel ELF not found after building (looked in kernel/target and target/)" >&2
+
+# A stale ELF is worse than a slow build: it makes a test run look green while
+# testing code that is no longer there.
+if [[ "${BUILD_KERNEL}" == "0" ]] && [[ -n "$(find "${KERNEL_DIR}/src" -newer "${KERNEL_ELF}" -print -quit 2>/dev/null)" ]]; then
+    echo "Error: ${KERNEL_ELF} is older than kernel/src, so it is stale." >&2
+    echo "Run without --no-build to rebuild it." >&2
     exit 1
 fi
 echo "Using kernel: ${KERNEL_ELF}"
