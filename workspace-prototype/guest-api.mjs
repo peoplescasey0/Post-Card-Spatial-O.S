@@ -332,7 +332,15 @@ function linuxAccelArgs() {
   return ["-accel", "tcg,thread=multi"];
 }
 
-export function qemuArguments({ bootMode, cardId, diskPath, isoPath, ports, networkMode = "nat", dropDir, memoryMb = 1024, vcpus = 2, isMacOs = false, isAndroid = false, openCorePath = "", macOvmfCode = "", macOvmfVars = "", kernelPath = "", initrdPath = "" }) {
+// A bare `-cdrom` claims IDE index 2, which is exactly where the paper-plane
+// FAT drive sits, so QEMU exits 1 with "drive with bus=2, unit=0 (index=2)
+// exists" and the guest never starts. Pin every CD to its own free slot
+// instead, the way windowsQemuArguments already does.
+function cdromDriveArgs(isoPath) {
+  return ["-drive", `file=${isoPath},media=cdrom,readonly=on,if=ide,index=1`];
+}
+
+export function qemuArguments({ bootMode, cardId, diskPath, isoPath, ports, networkMode = "nat", dropDir, memoryMb = 1024, vcpus = 2, isMacOs = false, isAndroid = false, openCorePath = "", macOvmfCode = "", macOvmfVars = "", kernelPath = "", initrdPath = "", bootFromIso = false }) {
   if (isMacOs) {
     const args = [
       "-name", `Post Card ${cardId} macOS guest`,
@@ -400,7 +408,7 @@ export function qemuArguments({ bootMode, cardId, diskPath, isoPath, ports, netw
     // Explicit bootindex: SeaBIOS otherwise prefers the IDE paper-plane FAT
     // drive over the virtio OS disk and hangs at "Booting from Hard Disk...".
     "-drive", `file=${diskPath},if=none,id=osdisk,format=qcow2`,
-    "-device", `virtio-blk-pci,drive=osdisk${bootMode === "installer" ? "" : ",bootindex=0"}`,
+    "-device", `virtio-blk-pci,drive=osdisk${bootMode === "installer" || bootFromIso ? "" : ",bootindex=0"}`,
     ...displayDevice,
     "-device", "qemu-xhci",
     "-device", "usb-kbd",
@@ -422,25 +430,24 @@ export function qemuArguments({ bootMode, cardId, diskPath, isoPath, ports, netw
     "-qmp", `tcp:127.0.0.1:${ports.qmpPort},server=on,wait=off`,
   ];
 
-  if (kernelPath && existsSync(kernelPath)) {
+  if (bootFromIso && isoPath && existsSync(isoPath)) {
+    // The card carries its own bootable ISO, so start that media. QEMU's
+    // -kernel loader only understands a Linux bzImage, a PVH ELF or a
+    // Multiboot1 image, and this kernel is Multiboot2, so the firmware has to
+    // read it through GRUB on the ISO instead.
+    args.push(...cdromDriveArgs(isoPath), "-boot", "order=d");
+  } else if (kernelPath && existsSync(kernelPath)) {
     args.push("-kernel", kernelPath, "-append", "console=ttyS0,115200 root=/dev/nvme0n1p2");
     if (initrdPath && existsSync(initrdPath)) {
       args.push("-initrd", initrdPath);
     }
   } else if (isAndroid) {
     if (isoPath && existsSync(isoPath)) {
-      args.push("-cdrom", isoPath);
+      args.push(...cdromDriveArgs(isoPath));
     }
     args.push("-boot", bootMode === "installer" ? "order=d,menu=on" : "order=c,menu=on");
   } else if (bootMode === "installer") {
-    // A bare `-cdrom` claims IDE index 2, which is exactly where the
-    // paper-plane FAT drive above sits, so QEMU exits 1 with "drive with
-    // bus=2, unit=0 (index=2) exists" and the guest never starts. Pin the CD
-    // to its own free slot instead, the way windowsQemuArguments already does.
-    args.push(
-      "-drive", `file=${isoPath},media=cdrom,readonly=on,if=ide,index=1`,
-      "-boot", "order=d",
-    );
+    args.push(...cdromDriveArgs(isoPath), "-boot", "order=d");
   } else {
     args.push("-boot", "order=c");
   }
@@ -1710,6 +1717,7 @@ export function createGuestApi(options = {}) {
           cardId,
           diskPath: isMac ? path.join(overlayDirectory, `${cardId}.qcow2`) : (isRawDiskImage ? cardCustomIso : diskPath),
           isoPath: cardCustomIso,
+          bootFromIso: /\.iso$/i.test(cardCustomIso),
           ports,
           networkMode,
           dropDir: cardDropDir,
