@@ -81,6 +81,66 @@
               <p class="home-section-note">SELECT A CARD TO OPEN IT IN THE STUDIO</p>
             </div>
 
+            <!-- Card Theme Customization Controls -->
+            <div class="home-theme-bar" aria-label="Card Theme Customization">
+              <div class="home-theme-meta">
+                <span class="home-theme-badge">THEME</span>
+                <span class="home-theme-desc">Card Style Preset:</span>
+              </div>
+              <div class="home-theme-picker" data-theme-picker role="radiogroup" aria-label="Card Theme">
+                <button class="theme-chip is-active" type="button" role="radio" aria-checked="true" data-theme-id="classic" title="Classic Studio: Tactile Slate Cardstock &amp; Cyan Precision Border">
+                  <span class="theme-swatch theme-swatch-classic" aria-hidden="true"></span>
+                  <span class="theme-chip-label">Classic Studio</span>
+                </button>
+                <button class="theme-chip" type="button" role="radio" aria-checked="false" data-theme-id="cyberpunk" title="Cyberpunk Neon: Obsidian High-Gloss &amp; Dual Magenta/Cyan Glow">
+                  <span class="theme-swatch theme-swatch-cyberpunk" aria-hidden="true"></span>
+                  <span class="theme-chip-label">Cyberpunk Neon</span>
+                </button>
+                <button class="theme-chip" type="button" role="radio" aria-checked="false" data-theme-id="minimal-dark" title="Minimal Dark: Pure AMOLED Zero-Reflectance &amp; Micro-Thin Zinc">
+                  <span class="theme-swatch theme-swatch-minimal-dark" aria-hidden="true"></span>
+                  <span class="theme-chip-label">Minimal Dark</span>
+                </button>
+                <button class="theme-chip" type="button" role="radio" aria-checked="false" data-theme-id="glass" title="Glass / Frosted: Translucent Ice-Blue Acrylic &amp; Crystal Specular">
+                  <span class="theme-swatch theme-swatch-glass" aria-hidden="true"></span>
+                  <span class="theme-chip-label">Glass</span>
+                </button>
+                <button class="theme-chip" type="button" role="radio" aria-checked="false" data-theme-id="material-vibrant" title="Material Vibrant: Android Expressive Indigo &amp; Warm Amber/Violet">
+                  <span class="theme-swatch theme-swatch-material-vibrant" aria-hidden="true"></span>
+                  <span class="theme-chip-label">Material Vibrant</span>
+                </button>
+              </div>
+
+              <!-- Android Material 3 Presets & Dynamic Seed Color Controls -->
+              <div class="home-theme-picker home-theme-android-picker" data-theme-picker role="radiogroup" aria-label="Android Material Presets">
+                <button class="theme-chip" type="button" role="radio" aria-checked="false" data-theme-id="pixel-blue" title="Pixel Blue: Google Pixel flagship dynamic blue with royal sapphire accents">
+                  <span class="theme-swatch theme-swatch-pixel-blue" aria-hidden="true"></span>
+                  <span class="theme-chip-label">Pixel Blue</span>
+                </button>
+                <button class="theme-chip" type="button" role="radio" aria-checked="false" data-theme-id="forest-emerald" title="Forest Emerald: Lush botanical dynamic palette with emerald green accents">
+                  <span class="theme-swatch theme-swatch-forest-emerald" aria-hidden="true"></span>
+                  <span class="theme-chip-label">Forest Emerald</span>
+                </button>
+                <button class="theme-chip" type="button" role="radio" aria-checked="false" data-theme-id="lavender-mist" title="Lavender Mist: Material Design 3 baseline iris purple &amp; wisteria undertones">
+                  <span class="theme-swatch theme-swatch-lavender-mist" aria-hidden="true"></span>
+                  <span class="theme-chip-label">Lavender Mist</span>
+                </button>
+                <button class="theme-chip" type="button" role="radio" aria-checked="false" data-theme-id="sunset-amber" title="Sunset Amber: Radiant golden sunset palette with toasted amber accents">
+                  <span class="theme-swatch theme-swatch-sunset-amber" aria-hidden="true"></span>
+                  <span class="theme-chip-label">Sunset Amber</span>
+                </button>
+                <button class="theme-chip" type="button" role="radio" aria-checked="false" data-theme-id="obsidian-monochrome" title="Obsidian Monochrome: Official Android 14 pure achromatic monochrome">
+                  <span class="theme-swatch theme-swatch-obsidian-monochrome" aria-hidden="true"></span>
+                  <span class="theme-chip-label">Obsidian Mono</span>
+                </button>
+
+                <div class="theme-seed-picker-wrapper" title="Generate custom Android dynamic tonal palette from any seed color">
+                  <label for="theme-seed-picker" class="theme-seed-label">SEED</label>
+                  <input type="color" id="theme-seed-picker" data-seed-picker aria-label="Custom seed color" value="#1a73e8" />
+                  <input type="text" id="theme-seed-hex" data-seed-hex placeholder="#1a73e8" maxlength="7" aria-label="Seed hex color code" class="theme-seed-hex-input" />
+                </div>
+              </div>
+            </div>
+
             <div class="home-system-grid">
               <button class="home-system-card" type="button" data-open-studio data-card-id="android" aria-label="Open Android · Pocket Lab in Spatial Studio">
                 <span class="home-system-top">
@@ -166,7 +226,7 @@
 
       <div class="studio-view" id="studio-view">
       <header class="topbar">
-        <a class="brand" href="#room" aria-label="Post Card OS spatial home">
+        <a class="brand" href="#home" aria-label="Post Card OS home" data-open-home title="Return to Workspace Home (H)">
           <img class="brand-logo-img" src="/company-logo.svg" width="32" height="32" alt="Post Card OS company logo" />
           <span>post card<span class="brand-light">.os</span></span>
         </a>
@@ -177,6 +237,10 @@
           <span class="scene-count"><span id="card-count">05</span><span> POST CARDS</span></span>
         </div>
         <div class="topbar-actions">
+          <button class="home-return-button" id="home-return-button" type="button" data-open-home title="Return to Workspace Home (H)">
+            <span aria-hidden="true">⌂</span>
+            <span>HOME</span>
+          </button>
           <button class="mode-pill tour-pill" id="tour-button" type="button" aria-pressed="false" title="Guided 3D Spatial Demo Tour (T)">▷ TOUR</button>
           <button class="mode-pill record-pill" id="record-tour-button" type="button" aria-pressed="false" title="Record 60FPS Spatial Demo Video">⏺ 60FPS</button>
           <span id="selected-tier" class="tier-badge tier-badge-community" title="Your current plan. Click to view editions.">COMMUNITY</span>
@@ -184,6 +248,68 @@
           <button class="mode-pill" id="bench-toggle" type="button" title="Pull 1, 2, or 3 cards to the front workbench (B)">▣ BENCH · 1 CARD</button>
           <button class="mode-pill" id="secops-toggle" type="button" aria-pressed="false" title="Toggle SecOps &amp; Pen-Test Cyber Range Mode">🛡️ SECOPS LAB</button>
           <button class="mode-pill manual-pill" id="help-button" type="button" aria-label="Open User Manual" title="Open Post Card OS User Manual (?)">📖 USER MANUAL</button>
+          <!-- Studio Theme Selector Pulldown -->
+          <details class="pulldown studio-theme-pulldown" id="studio-theme-pulldown">
+            <summary class="mode-pill theme-pill" id="studio-theme-pill" title="Card &amp; Studio Theme" aria-haspopup="true">
+              <span class="studio-theme-swatch" id="studio-theme-swatch" aria-hidden="true"></span>
+              <span id="studio-theme-label">THEME</span>
+              <span class="pulldown-chevron" aria-hidden="true">▾</span>
+            </summary>
+            <div class="pulldown-panel pulldown-panel-down studio-theme-panel">
+              <div class="pulldown-section-label">CANONICAL PRESETS</div>
+              <div class="studio-theme-picker" data-studio-theme-picker role="radiogroup" aria-label="Studio Canonical Themes">
+                <button class="studio-theme-chip" type="button" role="radio" aria-checked="false" data-theme-id="classic" title="Classic Studio">
+                  <span class="theme-swatch theme-swatch-classic" aria-hidden="true"></span>
+                  <span>Classic</span>
+                </button>
+                <button class="studio-theme-chip" type="button" role="radio" aria-checked="false" data-theme-id="cyberpunk" title="Cyberpunk Neon">
+                  <span class="theme-swatch theme-swatch-cyberpunk" aria-hidden="true"></span>
+                  <span>Cyberpunk</span>
+                </button>
+                <button class="studio-theme-chip" type="button" role="radio" aria-checked="false" data-theme-id="minimal-dark" title="Minimal Dark">
+                  <span class="theme-swatch theme-swatch-minimal-dark" aria-hidden="true"></span>
+                  <span>Minimal Dark</span>
+                </button>
+                <button class="studio-theme-chip" type="button" role="radio" aria-checked="false" data-theme-id="glass" title="Glass">
+                  <span class="theme-swatch theme-swatch-glass" aria-hidden="true"></span>
+                  <span>Glass</span>
+                </button>
+                <button class="studio-theme-chip" type="button" role="radio" aria-checked="false" data-theme-id="material-vibrant" title="Material Vibrant">
+                  <span class="theme-swatch theme-swatch-material-vibrant" aria-hidden="true"></span>
+                  <span>Material Vibrant</span>
+                </button>
+              </div>
+              <div class="pulldown-section-label">ANDROID MATERIAL PRESETS</div>
+              <div class="studio-theme-picker" data-studio-theme-picker role="radiogroup" aria-label="Studio Android Presets">
+                <button class="studio-theme-chip" type="button" role="radio" aria-checked="false" data-theme-id="pixel-blue" title="Pixel Blue">
+                  <span class="theme-swatch theme-swatch-pixel-blue" aria-hidden="true"></span>
+                  <span>Pixel Blue</span>
+                </button>
+                <button class="studio-theme-chip" type="button" role="radio" aria-checked="false" data-theme-id="forest-emerald" title="Forest Emerald">
+                  <span class="theme-swatch theme-swatch-forest-emerald" aria-hidden="true"></span>
+                  <span>Forest Emerald</span>
+                </button>
+                <button class="studio-theme-chip" type="button" role="radio" aria-checked="false" data-theme-id="lavender-mist" title="Lavender Mist">
+                  <span class="theme-swatch theme-swatch-lavender-mist" aria-hidden="true"></span>
+                  <span>Lavender Mist</span>
+                </button>
+                <button class="studio-theme-chip" type="button" role="radio" aria-checked="false" data-theme-id="sunset-amber" title="Sunset Amber">
+                  <span class="theme-swatch theme-swatch-sunset-amber" aria-hidden="true"></span>
+                  <span>Sunset Amber</span>
+                </button>
+                <button class="studio-theme-chip" type="button" role="radio" aria-checked="false" data-theme-id="obsidian-monochrome" title="Obsidian Monochrome">
+                  <span class="theme-swatch theme-swatch-obsidian-monochrome" aria-hidden="true"></span>
+                  <span>Obsidian Mono</span>
+                </button>
+              </div>
+              <div class="pulldown-section-label">DYNAMIC SEED COLOR</div>
+              <div class="studio-seed-control">
+                <label for="studio-seed-picker" class="theme-seed-label">SEED</label>
+                <input type="color" id="studio-seed-picker" data-seed-picker aria-label="Studio seed color" value="#1a73e8" />
+                <input type="text" id="studio-seed-hex" data-seed-hex placeholder="#1a73e8" maxlength="7" aria-label="Studio seed hex code" class="theme-seed-hex-input" />
+              </div>
+            </div>
+          </details>
           <div class="profile-control" id="profile-control">
             <button
               class="avatar profile-avatar"

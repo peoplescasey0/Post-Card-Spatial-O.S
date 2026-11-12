@@ -33,6 +33,18 @@ import {
   renderNativeHudToCanvas,
   type KernelTelemetryPacket,
 } from "./native-hud";
+import {
+  CARD_THEMES,
+  CARD_THEME_IDS,
+  DEFAULT_CARD_THEME_ID,
+  THEME_STORAGE_KEY,
+  getCardTheme,
+  isValidCardThemeId,
+  loadPersistedTheme,
+  persistTheme,
+  type CardThemeDefinition,
+  type CardThemeId,
+} from "./card-themes";
 
 /**
  * Windows "Animation effects: off" makes browsers report prefers-reduced-motion,
@@ -171,6 +183,10 @@ type SystemCard = {
   cachedContentKey?: string;
   cachedSharpTexture?: THREE.CanvasTexture;
   cachedBlurredTexture?: THREE.CanvasTexture;
+  theme?: CardThemeId;
+  edgeMesh?: THREE.Mesh;
+  frontMesh?: THREE.Mesh;
+  backMesh?: THREE.Mesh;
   flipAnim?: {
     startRotationY: number;
     startRotationX?: number;
@@ -247,6 +263,7 @@ const FACET_META: Record<
 const container = document.querySelector<HTMLDivElement>("#scene");
 const sceneShell = document.querySelector<HTMLElement>("#room");
 const studioView = document.querySelector<HTMLElement>("#studio-view");
+const homeView = document.querySelector<HTMLElement>("#home-view");
 const facetBar = document.querySelector<HTMLElement>("#facet-bar");
 const roomCardNav = document.querySelector<HTMLElement>("#room-card-nav");
 const roomCardSummary = document.querySelector<HTMLElement>("#room-card-summary");
@@ -352,6 +369,7 @@ if (
   !container ||
   !sceneShell ||
   !studioView ||
+  !homeView ||
   !facetBar ||
   !roomCardNav ||
   !roomCardSummary ||
@@ -445,6 +463,7 @@ if (
 const sceneElement = container;
 const sceneShellElement = sceneShell;
 const studioViewElement = studioView;
+const homeViewElement = homeView;
 const facetBarElement = facetBar;
 const roomCardNavElement = roomCardNav;
 const roomCardSummaryElement = roomCardSummary;
@@ -574,12 +593,23 @@ scene.add(duskLight);
 scene.add(rimLight);
 
 // Dynamic Card Neon Halo: casts a signature glow behind the active Post Card
-const cardHaloLight = new THREE.PointLight("#ffb81c", 48, 16, 1.8);
+const initialTheme = getCardTheme(loadPersistedTheme());
+const cardHaloLight = new THREE.PointLight(
+  initialTheme.lighting.haloColor,
+  initialTheme.lighting.haloIntensity,
+  16,
+  1.8,
+);
 cardHaloLight.position.set(0, 3, -1.8);
 scene.add(cardHaloLight);
 
 // Under-card specular floor pool light (Pillar 1 Atmosphere)
-const cardFloorGlow = new THREE.PointLight("#70d5cf", 32, 7.5, 2.0);
+const cardFloorGlow = new THREE.PointLight(
+  initialTheme.lighting.floorGlowColor,
+  initialTheme.lighting.floorGlowIntensity,
+  7.5,
+  2.0,
+);
 cardFloorGlow.position.set(0, 0.2, 1.9);
 scene.add(cardFloorGlow);
 
@@ -1021,11 +1051,101 @@ const fastenerMaterial = new THREE.MeshStandardMaterial({
 });
 const statusLedGeometry = new THREE.SphereGeometry(0.026, 12, 12);
 
+// ============================================================================
+// Floor & Dais Collision Constraints (Milestone M2)
+// ============================================================================
+
+export const FLOOR_Y = -0.12;
+export const DAIS_SURFACE_Y = 0.085;
+export const DAIS_CENTER_Z = -0.25;
+export const DAIS_RADIUS = 7.7;
+export const DAIS_RADIUS_SQ = DAIS_RADIUS * DAIS_RADIUS; // 59.29
+
+const CARD_HALF_WIDTH = CARD_WIDTH / 2;   // 1.075
+const CARD_HALF_HEIGHT = CARD_HEIGHT / 2; // 1.600
+const CARD_HALF_DEPTH = 0.091;            // 0.155 edge + bevel + fastener bead
+const floorBoxHelper = new THREE.Box3();
+
+/**
+ * Returns the ground surface height (Y) at world coordinate (x, z).
+ * Over the raised circular dais platform (radius 7.7 around (0, -0.25)), returns +0.085.
+ * Anywhere else in the room on the specular obsidian floor, returns -0.12.
+ */
+export function getFloorHeightAt(x: number, z: number): number {
+  const dx = x;
+  const dz = z - DAIS_CENTER_Z;
+  return dx * dx + dz * dz <= DAIS_RADIUS_SQ ? DAIS_SURFACE_Y : FLOOR_Y;
+}
+
+/**
+ * Computes the maximum downward vertical extent (half-height in world Y)
+ * of a card under its current world rotation and non-uniform scale.
+ * Derived from the OBB theorem: r_y = |M_1,0|*w + |M_1,1|*h + |M_1,2|*d.
+ */
+export function getCardHalfHeightExtent(card: SystemCard): number {
+  card.group.updateWorldMatrix(true, false);
+  const e = card.group.matrixWorld.elements;
+  return (
+    Math.abs(e[1]) * CARD_HALF_WIDTH +
+    Math.abs(e[5]) * CARD_HALF_HEIGHT +
+    Math.abs(e[9]) * CARD_HALF_DEPTH
+  );
+}
+
+/**
+ * Returns the effective floor height beneath a card, accounting for card footprint overhang.
+ * If any part of the card footprint overlaps the elevated dais platform, returns DAIS_SURFACE_Y.
+ */
+export function getEffectiveFloorHeightForCard(card: SystemCard): number {
+  const dx = card.group.position.x;
+  const dz = card.group.position.z - DAIS_CENTER_Z;
+  const dist = Math.hypot(dx, dz);
+  // Max horizontal extent of the card in the XZ plane
+  const cardScale = Math.max(card.group.scale.x, card.group.scale.z, 1.0);
+  const cardHorizRadius = 1.1 * cardScale;
+  if (dist <= DAIS_RADIUS + cardHorizRadius) {
+    return DAIS_SURFACE_Y;
+  }
+  return FLOOR_Y;
+}
+
+/**
+ * Enforces floor and dais surface collision boundaries.
+ * Clamps card.group.position.y such that no card vertex or bounding corner penetrates
+ * below the ground surface.
+ */
+export function clampCardAboveFloor(card: SystemCard, useBox3 = false): void {
+  const targetFloor = getEffectiveFloorHeightForCard(card);
+  if (useBox3) {
+    card.group.updateWorldMatrix(true, false);
+    floorBoxHelper.setFromObject(card.group);
+    if (floorBoxHelper.min.y < targetFloor) {
+      card.group.position.y += targetFloor - floorBoxHelper.min.y;
+      card.group.updateWorldMatrix(true, false);
+    }
+  } else {
+    const extentY = getCardHalfHeightExtent(card);
+    const minY = targetFloor + extentY;
+    if (card.group.position.y < minY) {
+      card.group.position.y = minY;
+      card.group.updateWorldMatrix(true, false);
+    }
+  }
+}
+
 const raycaster = new THREE.Raycaster();
 const pointer = new THREE.Vector2();
 const dragPlane = new THREE.Plane();
 const dragPoint = new THREE.Vector3();
 const cards: SystemCard[] = [];
+let activeCardThemeId: CardThemeId = loadPersistedTheme();
+export function getActiveCardThemeId(): CardThemeId {
+  return activeCardThemeId;
+}
+let currentCardTheme: CardThemeDefinition = getCardTheme(activeCardThemeId);
+export function getCurrentCardTheme(): CardThemeDefinition {
+  return currentCardTheme;
+}
 let selectedCard: SystemCard | null = null;
 let selectedIndex = 2;
 const CARD_STATE_STORAGE_KEY = "postcard.os.room-state.v1";
@@ -2249,6 +2369,11 @@ window.addEventListener("keydown", (event) => {
     if (editionsDialog && !editionsDialog.open) editionsDialog.showModal();
     return;
   }
+  if (event.key.toLowerCase() === "h") {
+    event.preventDefault();
+    showHome();
+    return;
+  }
   if (document.activeElement !== renderer.domElement) {
     onCanvasKeyDown(event);
   }
@@ -2809,7 +2934,9 @@ function cardToGuestOs(card: SystemCard): GuestOS {
 }
 
 function openOrStartSelectedGuest(card: SystemCard): void {
-  guestDialogElement.showModal();
+  if (!guestDialogElement.open) {
+    guestDialogElement.showModal();
+  }
   if (card === selectedCard) cardGuestActionElement.disabled = true;
   guestTargetCardId = card.id;
   guestTargetOs = cardToGuestOs(card);
@@ -2928,15 +3055,16 @@ function createCard(
   definition: CardDefinition,
   index: number,
 ): SystemCard {
+  const theme = getCardTheme((definition as Partial<SystemCard>).theme ?? activeCardThemeId);
   const group = new THREE.Group();
   const edge = new THREE.Mesh(
     edgeGeometry,
     new THREE.MeshStandardMaterial({
-      color: "#19212d",
-      emissive: "#152631",
-      emissiveIntensity: 0.22,
-      metalness: 0.82,
-      roughness: 0.26,
+      color: theme.material.edgeColor ?? "#19212d",
+      emissive: theme.material.edgeEmissive ?? "#152631",
+      emissiveIntensity: theme.material.edgeEmissiveIntensity ?? 0.22,
+      metalness: theme.material.edgeMetalness ?? 0.82,
+      roughness: theme.material.edgeRoughness ?? 0.26,
     }),
   );
   edge.castShadow = true;
@@ -2957,6 +3085,7 @@ function createCard(
     layoutOffset: new THREE.Vector3(),
     layoutPosition: wheelPosition(index),
     orbitAngle: cardTargetOrbitAngle(index),
+    edgeMesh: edge,
   };
 
   // 4 corner metallic hex fasteners (Pillar 2 Hardware Chassis)
@@ -2990,11 +3119,11 @@ function createCard(
     cardGeometry,
     new THREE.MeshStandardMaterial({
       map: frontTexture,
-      roughness: 0.88,
-      metalness: 0.02,
-      emissive: "#ffffff",
+      roughness: theme.material.roughness,
+      metalness: theme.material.metalness,
+      emissive: theme.material.emissive,
       emissiveMap: frontTexture,
-      emissiveIntensity: 0.82,
+      emissiveIntensity: theme.material.emissiveIntensity,
       side: THREE.FrontSide,
     }),
   );
@@ -3007,11 +3136,11 @@ function createCard(
     cardGeometry,
     new THREE.MeshStandardMaterial({
       map: backTexture,
-      roughness: 0.88,
-      metalness: 0.02,
-      emissive: "#ffffff",
+      roughness: theme.material.roughness,
+      metalness: theme.material.metalness,
+      emissive: theme.material.emissive,
       emissiveMap: backTexture,
-      emissiveIntensity: 0.82,
+      emissiveIntensity: theme.material.emissiveIntensity,
       side: THREE.FrontSide,
     }),
   );
@@ -3021,24 +3150,28 @@ function createCard(
   back.userData.face = "back";
   group.add(front, back);
 
+  card.frontMesh = front;
+  card.backMesh = back;
+
   group.userData.card = card;
   group.position.copy(wheelPosition(index));
   scene.add(group);
   return card;
 }
 
-function drawChassisFastener(context: CanvasRenderingContext2D, cx: number, cy: number): void {
+function drawChassisFastener(context: CanvasRenderingContext2D, cx: number, cy: number, theme?: CardThemeDefinition): void {
+  const t = theme ?? getCardTheme(activeCardThemeId);
   context.save();
   context.translate(cx, cy);
-  context.fillStyle = "#0a0e16";
+  context.fillStyle = t.canvas.fastenerHead || "#0a0e16";
   context.beginPath();
   context.arc(0, 0, 7.5, 0, Math.PI * 2);
   context.fill();
-  context.strokeStyle = "#334155";
+  context.strokeStyle = t.canvas.fastenerRim || "#334155";
   context.lineWidth = 1.2;
   context.stroke();
 
-  context.fillStyle = "#64748b";
+  context.fillStyle = t.canvas.fastenerRim || "#64748b";
   context.beginPath();
   for (let i = 0; i < 6; i++) {
     const angle = (i * Math.PI) / 3;
@@ -3050,7 +3183,7 @@ function drawChassisFastener(context: CanvasRenderingContext2D, cx: number, cy: 
   context.closePath();
   context.fill();
 
-  context.strokeStyle = "#1e293b";
+  context.strokeStyle = t.canvas.fastenerHead || "#1e293b";
   context.lineWidth = 1.2;
   context.beginPath();
   context.moveTo(-2.4, 0);
@@ -3069,11 +3202,12 @@ function makeCardTexture(card: SystemCard, facet: CardFacet): THREE.CanvasTextur
   if (!context) throw new Error("Unable to create Post Card canvas texture.");
   context.scale(2, 2);
 
+  const theme = getCardTheme(card.theme ?? activeCardThemeId);
   const meta = FACET_META[facet];
   const gradient = context.createLinearGradient(0, 0, 640, 960);
-  gradient.addColorStop(0, facet === "front" ? "#14161B" : "#14161B");
-  gradient.addColorStop(0.58, "#0D111A");
-  gradient.addColorStop(1, "#0D111A");
+  gradient.addColorStop(0, theme.canvas.bgTop);
+  gradient.addColorStop(theme.canvas.bgGradientStop ?? 0.58, theme.canvas.bgBottom);
+  gradient.addColorStop(1, theme.canvas.bgBottom);
   context.fillStyle = gradient;
   context.fillRect(0, 0, 640, 960);
 
@@ -3085,8 +3219,8 @@ function makeCardTexture(card: SystemCard, facet: CardFacet): THREE.CanvasTextur
   roundRect(context, 48, 49, 7, 30, 3.5);
   context.fill();
 
-  context.strokeStyle = `${meta.accent}55`;
-  context.lineWidth = 2;
+  context.strokeStyle = theme.canvas.borderStroke;
+  context.lineWidth = theme.canvas.borderWidth;
   roundRect(context, 25, 24, 590, 912, 18);
   context.stroke();
 
@@ -3101,22 +3235,22 @@ function makeCardTexture(card: SystemCard, facet: CardFacet): THREE.CanvasTextur
 
   switch (facet) {
     case "front":
-      drawCardFront(context, card);
+      drawCardFront(context, card, theme);
       break;
     case "back":
-      drawCardSettings(context, card);
+      drawCardSettings(context, card, theme);
       break;
     case "left":
-      drawCardSecurity(context, card);
+      drawCardSecurity(context, card, theme);
       break;
     case "right":
-      drawCardPlanes(context, card);
+      drawCardPlanes(context, card, theme);
       break;
     case "top":
-      drawCardQuickActions(context, card);
+      drawCardQuickActions(context, card, theme);
       break;
     case "bottom":
-      drawCardTelemetry(context, card);
+      drawCardTelemetry(context, card, theme);
       break;
   }
 
@@ -3127,17 +3261,17 @@ function makeCardTexture(card: SystemCard, facet: CardFacet): THREE.CanvasTextur
   context.fillStyle = meta.accent;
   context.font = "700 18px Inter, Arial, sans-serif";
   context.fillText("POST CARD · OS", 76, 915);
-  context.fillStyle = "#c3c8d1";
+  context.fillStyle = theme.canvas.detailColor || "#c3c8d1";
   context.font = "600 16.5px Inter, Arial, sans-serif";
   context.textAlign = "right";
   context.fillText("CLICK TO ZOOM · DRAG TO FLIP", 592, 914);
   context.textAlign = "left";
 
   // Pillar 2: 4 corner chassis fasteners on every facet
-  drawChassisFastener(context, 38, 36);
-  drawChassisFastener(context, 602, 36);
-  drawChassisFastener(context, 38, 924);
-  drawChassisFastener(context, 602, 924);
+  drawChassisFastener(context, 38, 36, theme);
+  drawChassisFastener(context, 602, 36, theme);
+  drawChassisFastener(context, 38, 924, theme);
+  drawChassisFastener(context, 602, 924, theme);
 
   const blurAmount = card.blurStep ?? 1;
   const texture = new THREE.CanvasTexture(blurAmount <= 0 ? canvas : blurCardCanvas(canvas, card, blurAmount));
@@ -3171,7 +3305,8 @@ function blurCardCanvas(source: HTMLCanvasElement, card: SystemCard, amount: num
     context.strokeStyle = "#79ded8";
     context.lineWidth = 1.5;
     context.strokeRect(35, 205, 250, 50);
-    context.fillStyle = "#f4f5f7";
+    const blurTheme = getCardTheme(card.theme ?? activeCardThemeId);
+    context.fillStyle = blurTheme.canvas.titleColor || "#f4f5f7";
     context.textAlign = "center";
     context.textBaseline = "middle";
     context.font = "700 16px Inter, Arial, sans-serif";
@@ -3305,7 +3440,12 @@ function drawFacetCompassDots(
   }
 }
 
-function drawCardFront(context: CanvasRenderingContext2D, card: SystemCard): void {
+function drawCardFront(
+  context: CanvasRenderingContext2D,
+  card: SystemCard,
+  theme?: CardThemeDefinition,
+): void {
+  const t = theme ?? getCardTheme(card.theme ?? activeCardThemeId);
   if (card.twisted) {
     // Compact single-line header when twisted so the display port gets maximum room on the card.
     context.fillStyle = card.color;
@@ -3317,11 +3457,11 @@ function drawCardFront(context: CanvasRenderingContext2D, card: SystemCard): voi
     context.font = "700 21px Inter, Arial, sans-serif";
     context.fillText(card.os, 48, 133);
 
-    context.fillStyle = "#f4f5f7";
+    context.fillStyle = t.canvas.titleColor || "#f4f5f7";
     context.font = "700 52px Inter, Arial, sans-serif";
     drawWrappedText(context, card.name.split(" · ")[1] ?? card.name, 48, 192, 530, 58, 2);
 
-    context.fillStyle = "#c3c8d1";
+    context.fillStyle = t.canvas.detailColor || "#c3c8d1";
     context.font = "500 25px Inter, Arial, sans-serif";
     drawWrappedText(context, card.detail, 48, 280, 530, 34, 2);
   }
@@ -3333,10 +3473,10 @@ function drawCardFront(context: CanvasRenderingContext2D, card: SystemCard): voi
   context.beginPath();
   context.arc(58, 818, 6, 0, Math.PI * 2);
   context.fill();
-  context.fillStyle = "#f4f5f7";
+  context.fillStyle = t.canvas.titleColor || "#f4f5f7";
   context.font = "700 20px Inter, Arial, sans-serif";
   context.fillText(card.status, 76, 825);
-  context.fillStyle = "#c3c8d1";
+  context.fillStyle = t.canvas.detailColor || "#c3c8d1";
   context.font = "500 19px Inter, Arial, sans-serif";
   const previewNote =
     card.os === "ANDROID"
@@ -3354,12 +3494,12 @@ function drawCardFront(context: CanvasRenderingContext2D, card: SystemCard): voi
 function cardButtonStates(card: SystemCard): Record<CardButtonId, { label: string; enabled: boolean }> {
   const os = cardToGuestOs(card);
   const status = guestServiceStatus;
-  const guest = status?.guests.find((item) => item.os === os && item.cardId === card.id);
+  const guest = status?.guests?.find((item) => item.os === os && item.cardId === card.id);
   const hasDisk =
     os === "windows"
       ? (status?.installedWindowsCardIds?.includes(card.id) ?? false) ||
         (/^windows[-_]/.test(card.id) && (status?.installedWindowsCardIds?.includes("windows") ?? false))
-      : (status?.preparedCardIds.includes(card.id) ?? false);
+      : (status?.preparedCardIds?.includes(card.id) ?? false);
   const actionState = getOnCardActionState({
     os,
     guestStatus: guest?.status,
@@ -3382,6 +3522,7 @@ function cardButtonStates(card: SystemCard): Record<CardButtonId, { label: strin
 
 function drawCardButtons(context: CanvasRenderingContext2D, card: SystemCard): void {
   const states = cardButtonStates(card);
+  const theme = getCardTheme(card.theme ?? activeCardThemeId);
   context.save();
   context.textAlign = "center";
   context.textBaseline = "middle";
@@ -3389,16 +3530,16 @@ function drawCardButtons(context: CanvasRenderingContext2D, card: SystemCard): v
     const rect = cardButtonRect(index);
     const { label, enabled } = states[id];
     const danger = id === "bin" || id === "stop";
-    const accent = danger ? "#e495a4" : id === "guest" ? card.color : "#79ded8";
+    const accent = danger ? "#e495a4" : id === "guest" ? card.color : theme.canvas.buttonStroke;
     context.globalAlpha = enabled ? 1 : 0.38;
-    context.fillStyle = id === "guest" && enabled ? `${card.color}33` : "#07090ee8";
+    context.fillStyle = id === "guest" && enabled ? `${card.color}33` : theme.canvas.buttonFill;
     roundRect(context, rect.x, rect.y, rect.w, rect.h, 10);
     context.fill();
-    context.strokeStyle = `${accent}b0`;
+    context.strokeStyle = danger ? "#e495a4b0" : theme.canvas.buttonStroke;
     context.lineWidth = 2;
     roundRect(context, rect.x, rect.y, rect.w, rect.h, 10);
     context.stroke();
-    context.fillStyle = "#f4f5f7";
+    context.fillStyle = danger ? "#ffffff" : theme.canvas.buttonText;
     context.font = "700 18px Inter, Arial, sans-serif";
     context.fillText(label.toUpperCase(), rect.x + rect.w / 2, rect.y + rect.h / 2 + 1);
   }
@@ -3432,7 +3573,7 @@ function runCardButton(id: CardButtonId, card: SystemCard): void {
       runCardExtra("savepoint", card);
       break;
     case "performance":
-      runCardExtra("performance", card);
+      flipCardTo(card, "bottom");
       break;
   }
 }
@@ -3638,15 +3779,20 @@ function drawMockDisplay(context: CanvasRenderingContext2D, card: SystemCard): v
   context.restore();
 }
 
-function drawCardSettings(context: CanvasRenderingContext2D, card: SystemCard): void {
+function drawCardSettings(
+  context: CanvasRenderingContext2D,
+  card: SystemCard,
+  theme?: CardThemeDefinition,
+): void {
+  const t = theme ?? getCardTheme(card.theme ?? activeCardThemeId);
   drawCompanyLogo(context, 534, 112, 54, true);
-  context.fillStyle = "#FFB81C";
+  context.fillStyle = t.canvas.badgeColor || "#FFB81C";
   context.font = "700 20px Inter, Arial, sans-serif";
   context.fillText(`${card.os} · HARDWARE PERSONALITY`, 48, 137);
-  context.fillStyle = "#f4f5f7";
+  context.fillStyle = t.canvas.titleColor || "#f4f5f7";
   context.font = "700 44px Inter, Arial, sans-serif";
   context.fillText("Behind the card.", 48, 194);
-  context.fillStyle = "#c3c8d1";
+  context.fillStyle = t.canvas.detailColor || "#c3c8d1";
   context.font = "500 23px Inter, Arial, sans-serif";
   context.fillText("vCPU allocation, RAM profile & storage mount.", 48, 234);
 
@@ -3714,19 +3860,24 @@ function drawCardSettings(context: CanvasRenderingContext2D, card: SystemCard): 
     ],
   ];
 
-  drawKeyValueRows(context, rows, 298, 102);
-  drawStatusFooter(context, card);
+  drawKeyValueRows(context, rows, 298, 102, 1, t);
+  drawStatusFooter(context, card, t);
 }
 
-function drawCardSecurity(context: CanvasRenderingContext2D, card: SystemCard): void {
+function drawCardSecurity(
+  context: CanvasRenderingContext2D,
+  card: SystemCard,
+  theme?: CardThemeDefinition,
+): void {
+  const t = theme ?? getCardTheme(card.theme ?? activeCardThemeId);
   drawCompanyLogo(context, 534, 112, 54, true);
-  context.fillStyle = "#FFB81C";
+  context.fillStyle = t.canvas.badgeColor || "#FFB81C";
   context.font = "700 20px Inter, Arial, sans-serif";
   context.fillText(`${card.os} · SANDBOX & ISOLATION`, 48, 137);
-  context.fillStyle = "#f4f5f7";
+  context.fillStyle = t.canvas.titleColor || "#f4f5f7";
   context.font = "700 44px Inter, Arial, sans-serif";
   context.fillText("Zero-trust boundary.", 48, 194);
-  context.fillStyle = "#c3c8d1";
+  context.fillStyle = t.canvas.detailColor || "#c3c8d1";
   context.font = "500 23px Inter, Arial, sans-serif";
   context.fillText("Per-card disk isolation & loopback guardrails.", 48, 234);
 
@@ -3735,7 +3886,7 @@ function drawCardSecurity(context: CanvasRenderingContext2D, card: SystemCard): 
   const baseLocked = guestServiceStatus?.baseReady ?? false;
   const hasOverlay = isWindows
     ? (guestServiceStatus?.installedWindowsCardIds?.includes(card.id) ?? false)
-    : (guestServiceStatus?.preparedCardIds.includes(card.id) ?? false);
+    : (guestServiceStatus?.preparedCardIds?.includes(card.id) ?? false);
   const checkpoint = guestServiceStatus?.checkpoints?.[card.id];
   const netMode = guestServiceStatus?.networkModes?.[card.id] ?? "nat";
   const netLabel =
@@ -3782,19 +3933,24 @@ function drawCardSecurity(context: CanvasRenderingContext2D, card: SystemCard): 
     ],
   ];
 
-  drawKeyValueRows(context, rows, 298, 102);
-  drawStatusFooter(context, card);
+  drawKeyValueRows(context, rows, 298, 102, 1, t);
+  drawStatusFooter(context, card, t);
 }
 
-function drawCardPlanes(context: CanvasRenderingContext2D, card: SystemCard): void {
+function drawCardPlanes(
+  context: CanvasRenderingContext2D,
+  card: SystemCard,
+  theme?: CardThemeDefinition,
+): void {
+  const t = theme ?? getCardTheme(card.theme ?? activeCardThemeId);
   drawCompanyLogo(context, 534, 112, 54, true);
-  context.fillStyle = "#FFB81C";
+  context.fillStyle = t.canvas.badgeColor || "#FFB81C";
   context.font = "700 20px Inter, Arial, sans-serif";
   context.fillText(`${card.os} · PAPER AIRPLANE RELAY`, 48, 137);
-  context.fillStyle = "#f4f5f7";
+  context.fillStyle = t.canvas.titleColor || "#f4f5f7";
   context.font = "700 44px Inter, Arial, sans-serif";
   context.fillText("Cross-card notes.", 48, 194);
-  context.fillStyle = "#c3c8d1";
+  context.fillStyle = t.canvas.detailColor || "#c3c8d1";
   context.font = "500 23px Inter, Arial, sans-serif";
   context.fillText(
     `${card.receivedNotes.length} received · ${card.sentNotes.length} sent from this card`,
@@ -3802,7 +3958,7 @@ function drawCardPlanes(context: CanvasRenderingContext2D, card: SystemCard): vo
     234,
   );
 
-  context.fillStyle = "#8a909e";
+  context.fillStyle = t.canvas.badgeColor || "#8a909e";
   context.font = "700 19px Inter, Arial, sans-serif";
   context.fillText("INBOX · RECEIVED PLANES", 48, 290);
 
@@ -3816,15 +3972,16 @@ function drawCardPlanes(context: CanvasRenderingContext2D, card: SystemCard): vo
       110,
       "#8a909e48",
       "No paper planes received yet. Use 'Send a paper plane' in the dock to flick a note here.",
+      t,
     );
   } else {
     recentReceived.forEach((note, idx) => {
-      drawMessageBox(context, 48, 310 + idx * 96, 544, 84, "#8a909e66", note);
+      drawMessageBox(context, 48, 310 + idx * 96, 544, 84, "#8a909e66", note, t);
     });
   }
 
   const outboxY = 620;
-  context.fillStyle = "#FFB81C";
+  context.fillStyle = t.canvas.badgeColor || "#FFB81C";
   context.font = "700 18px Inter, Arial, sans-serif";
   context.fillText("OUTBOX · RECENTLY SENT", 48, outboxY);
 
@@ -3838,14 +3995,15 @@ function drawCardPlanes(context: CanvasRenderingContext2D, card: SystemCard): vo
       90,
       "#FFB81C48",
       "No outgoing planes sent from this card yet.",
+      t,
     );
   } else {
     recentSent.forEach((note, idx) => {
-      drawMessageBox(context, 48, outboxY + 20 + idx * 86, 544, 76, "#FFB81C66", note);
+      drawMessageBox(context, 48, outboxY + 20 + idx * 86, 544, 76, "#FFB81C66", note, t);
     });
   }
 
-  drawStatusFooter(context, card);
+  drawStatusFooter(context, card, t);
 }
 
 function drawMessageBox(
@@ -3856,7 +4014,9 @@ function drawMessageBox(
   h: number,
   borderColor: string,
   text: string,
+  theme?: CardThemeDefinition,
 ): void {
+  const t = theme ?? getCardTheme(activeCardThemeId);
   context.fillStyle = "#07090ee8";
   roundRect(context, x, y, w, h, 12);
   context.fill();
@@ -3864,20 +4024,25 @@ function drawMessageBox(
   context.lineWidth = 1.5;
   roundRect(context, x, y, w, h, 12);
   context.stroke();
-  context.fillStyle = "#f4f5f7";
+  context.fillStyle = t.canvas.titleColor || "#f4f5f7";
   context.font = "500 21px Inter, Arial, sans-serif";
   drawWrappedText(context, text, x + 18, y + 34, w - 36, 26, 2);
 }
 
-function drawCardQuickActions(context: CanvasRenderingContext2D, card: SystemCard): void {
+function drawCardQuickActions(
+  context: CanvasRenderingContext2D,
+  card: SystemCard,
+  theme?: CardThemeDefinition,
+): void {
+  const t = theme ?? getCardTheme(card.theme ?? activeCardThemeId);
   drawCompanyLogo(context, 534, 112, 54, true);
-  context.fillStyle = "#8a909e";
+  context.fillStyle = t.canvas.badgeColor || "#8a909e";
   context.font = "700 20px Inter, Arial, sans-serif";
   context.fillText(`${card.os} · SANDBOX DECK`, 48, 137);
-  context.fillStyle = "#f4f5f7";
+  context.fillStyle = t.canvas.titleColor || "#f4f5f7";
   context.font = "700 44px Inter, Arial, sans-serif";
   context.fillText("Quick actions.", 48, 194);
-  context.fillStyle = "#c3c8d1";
+  context.fillStyle = t.canvas.detailColor || "#c3c8d1";
   context.font = "500 23px Inter, Arial, sans-serif";
   context.fillText("Click a tile on this card or use the dock below.", 48, 234);
 
@@ -3920,23 +4085,28 @@ function drawCardQuickActions(context: CanvasRenderingContext2D, card: SystemCar
     context.fillStyle = act.accent;
     context.font = "700 22.5px Inter, Arial, sans-serif";
     context.fillText(act.title, 72, y + 44);
-    context.fillStyle = "#f4f5f7";
+    context.fillStyle = t.canvas.detailColor || "#f4f5f7";
     context.font = "500 19.5px Inter, Arial, sans-serif";
     context.fillText(act.subtitle, 72, y + 79);
   });
 
-  drawStatusFooter(context, card);
+  drawStatusFooter(context, card, t);
 }
 
-function drawCardTelemetry(context: CanvasRenderingContext2D, card: SystemCard): void {
+function drawCardTelemetry(
+  context: CanvasRenderingContext2D,
+  card: SystemCard,
+  theme?: CardThemeDefinition,
+): void {
+  const t = theme ?? getCardTheme(card.theme ?? activeCardThemeId);
   drawCompanyLogo(context, 534, 112, 54, true);
-  context.fillStyle = "#FFB81C";
+  context.fillStyle = t.canvas.badgeColor || "#FFB81C";
   context.font = "700 20px Inter, Arial, sans-serif";
   context.fillText(`${card.os} · LIVE TELEMETRY`, 48, 137);
-  context.fillStyle = "#f4f5f7";
+  context.fillStyle = t.canvas.titleColor || "#f4f5f7";
   context.font = "700 44px Inter, Arial, sans-serif";
   context.fillText("Runtime & ports.", 48, 194);
-  context.fillStyle = "#c3c8d1";
+  context.fillStyle = t.canvas.detailColor || "#c3c8d1";
   context.font = "500 23px Inter, Arial, sans-serif";
   context.fillText("Loopback endpoints, vCPU profile & pool utilization.", 48, 234);
 
@@ -3976,7 +4146,7 @@ function drawCardTelemetry(context: CanvasRenderingContext2D, card: SystemCard):
     ["STREAMLINED GUEST POOL", `${activeCount} / 6 VMs active · ${usedRamMb} / 8192 MiB RAM · ${serialPort}`],
   ];
 
-  drawKeyValueRows(context, rows, 286, 88);
+  drawKeyValueRows(context, rows, 286, 88, 1, t);
 
   // Pillar 3: Realtime Sparkline Waveform & vCPU Grid on Facet 06
   const sparkX = 42;
@@ -4025,7 +4195,7 @@ function drawCardTelemetry(context: CanvasRenderingContext2D, card: SystemCard):
     sparkY + 17,
   );
 
-  drawStatusFooter(context, card);
+  drawStatusFooter(context, card, t);
 }
 
 function drawKeyValueRows(
@@ -4034,7 +4204,9 @@ function drawKeyValueRows(
   startY: number,
   stepY: number,
   textScale = 1,
+  theme?: CardThemeDefinition,
 ): void {
+  const t = theme ?? getCardTheme(activeCardThemeId);
   rows.forEach(([label, value], index) => {
     const y = startY + index * stepY;
     context.fillStyle = "#07090ee8";
@@ -4048,21 +4220,26 @@ function drawKeyValueRows(
     context.lineWidth = 1.5;
     roundRect(context, 42, y - 24, 556, rowHeight, 12);
     context.stroke();
-    context.fillStyle = "#FFB81C";
+    context.fillStyle = t.canvas.badgeColor || "#FFB81C";
     context.font = `700 ${18.5 * textScale}px Inter, Arial, sans-serif`;
     context.fillText(label, 60, y + 2);
-    context.fillStyle = "#ffffff";
+    context.fillStyle = t.canvas.titleColor || "#ffffff";
     context.font = `600 ${23 * textScale}px Inter, Arial, sans-serif`;
     drawWrappedText(context, value, 60, y + 34, 520, 26 * textScale, 2);
   });
 }
 
-function drawStatusFooter(context: CanvasRenderingContext2D, card: SystemCard): void {
+function drawStatusFooter(
+  context: CanvasRenderingContext2D,
+  card: SystemCard,
+  theme?: CardThemeDefinition,
+): void {
+  const t = theme ?? getCardTheme(card.theme ?? activeCardThemeId);
   context.fillStyle = card.color;
   context.beginPath();
   context.arc(58, 852, 6, 0, Math.PI * 2);
   context.fill();
-  context.fillStyle = "#f4f5f7";
+  context.fillStyle = t.canvas.titleColor || "#f4f5f7";
   context.font = "700 19.5px Inter, Arial, sans-serif";
   context.fillText(card.status, 76, 859);
 }
@@ -4217,6 +4394,10 @@ function resolveCardCollisions(activeCard?: SystemCard): void {
       }
     }
   }
+
+  for (const card of cards) {
+    clampCardAboveFloor(card);
+  }
 }
 
 function arrangeCards(): void {
@@ -4319,14 +4500,342 @@ function selectCard(card: SystemCard, withAnticipation = false): void {
     "aria-label",
     `${card.name}, ${card.status}, facet ${FACET_META[card.facet].shortLabel}. Use left and right arrow keys to browse, WASD or 1-6 to flip 6 ways, or drag to arrange.`,
   );
+  const activeTheme = getCardTheme(activeCardThemeId);
+  const selectedEmissive = activeTheme.material.edgeEmissive || activeTheme.swatchPrimary;
+  const idleEmissive = activeTheme.material.edgeColor || "#152631";
+  const idleIntensity = activeTheme.material.edgeEmissiveIntensity ?? 0.22;
   for (const item of cards) {
-    const edge = item.group.children[0];
+    const edge = item.edgeMesh ?? item.group.children[0];
     const material = edge instanceof THREE.Mesh ? edge.material : undefined;
     if (material instanceof THREE.MeshStandardMaterial) {
-      material.emissive.set(item === card ? "#70d5cf" : "#152631");
-      material.emissiveIntensity = item === card ? 0.62 : 0.22;
+      material.emissive.set(item === card ? selectedEmissive : idleEmissive);
+      material.emissiveIntensity = item === card ? 0.62 : idleIntensity;
     }
   }
+}
+
+/**
+ * Switch from Home View to Spatial Studio.
+ * Optionally focuses/selects the designated card by ID and synchronizes the URL hash.
+ */
+export function showStudio(cardId?: string): void {
+  homeViewElement.hidden = true;
+  studioViewElement.hidden = false;
+  studioViewElement.dataset.cardTheme = activeCardThemeId;
+
+  if (cardId) {
+    const target = cards.find((c) => c.id === cardId);
+    if (target) {
+      selectCard(target, true);
+    }
+  }
+
+  if (window.location.hash !== "#studio" && window.location.hash !== "#room") {
+    window.location.hash = "#studio";
+  }
+
+  resize();
+  renderer.domElement.focus();
+}
+
+/**
+ * Switch from Spatial Studio to Home View.
+ * Closes popovers, updates URL hash, and synchronizes the active card badge.
+ */
+export function showHome(): void {
+  closeProfilePopover();
+  studioViewElement.hidden = true;
+  homeViewElement.hidden = false;
+  homeViewElement.dataset.cardTheme = activeCardThemeId;
+
+  if (window.location.hash !== "#home") {
+    window.location.hash = "#home";
+  }
+
+  if (selectedCard) {
+    const homeCards = homeViewElement.querySelectorAll<HTMLElement>(".home-system-card");
+    homeCards.forEach((cardEl) => {
+      const isSelected = cardEl.dataset.cardId === selectedCard?.id;
+      cardEl.classList.toggle("home-system-card-featured", isSelected);
+      const codeEl = cardEl.querySelector(".home-system-code");
+      if (codeEl) {
+        const pcCode = codeEl.textContent?.split("·")[0]?.trim() ?? "";
+        codeEl.textContent = isSelected ? `${pcCode} · SELECTED IN STUDIO` : pcCode;
+      }
+    });
+  }
+
+  const primaryCta = homeViewElement.querySelector<HTMLElement>(".home-primary-button");
+  primaryCta?.focus();
+}
+
+function initViewRouter(): void {
+  // Delegate clicks on [data-open-studio] inside home view
+  homeViewElement.addEventListener("click", (event) => {
+    const trigger = (event.target as HTMLElement | null)?.closest<HTMLElement>("[data-open-studio]");
+    if (!trigger) return;
+    const cardId = trigger.dataset.cardId;
+    showStudio(cardId);
+  });
+
+  // Delegate clicks on [data-open-home] inside studio view
+  studioViewElement.addEventListener("click", (event) => {
+    const trigger = (event.target as HTMLElement | null)?.closest<HTMLElement>("[data-open-home]");
+    if (!trigger) return;
+    event.preventDefault();
+    showHome();
+  });
+
+  // Topbar brand logo link
+  const brandLogo = studioViewElement.querySelector<HTMLAnchorElement>("a.brand");
+  if (brandLogo) {
+    brandLogo.addEventListener("click", (event) => {
+      event.preventDefault();
+      showHome();
+    });
+  }
+
+  // Synchronize hash changes
+  window.addEventListener("hashchange", () => {
+    closeProfilePopover();
+    const hash = window.location.hash;
+    if (hash === "#home") {
+      showHome();
+    } else if (hash === "#studio" || hash === "#room") {
+      showStudio();
+    }
+  });
+
+  // Keyboard navigation on Home View (Escape returns to Studio)
+  homeViewElement.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      showStudio();
+    }
+  });
+
+  // Initial route resolution on boot
+  if (window.location.hash === "#home") {
+    showHome();
+  } else if (window.location.hash === "#studio" || window.location.hash === "#room") {
+    showStudio();
+  }
+}
+
+/**
+ * Applies a card theme globally across 2D DOM cards (#home-view, #studio-view),
+ * dynamic Three.js spatial lighting, PBR materials, and 3D card textures.
+ */
+export function applyCardTheme(themeId: CardThemeId): void {
+  if (!isValidCardThemeId(themeId)) {
+    themeId = DEFAULT_CARD_THEME_ID;
+  }
+  activeCardThemeId = themeId;
+  persistTheme(themeId);
+
+  const theme = getCardTheme(themeId);
+  currentCardTheme = theme;
+
+  // 1. Synchronize dataset attributes and CSS custom properties on #home-view and #studio-view
+  const targetHome = homeViewElement || (typeof document !== "undefined" ? document.getElementById("home-view") : null);
+  if (targetHome) {
+    targetHome.dataset.cardTheme = themeId;
+    if (targetHome.style && typeof targetHome.style.setProperty === "function") {
+      const cardBg = theme.homeCss?.cardBg ?? theme.homeCss?.["--card-theme-bg"] ?? "linear-gradient(135deg, rgba(20, 22, 27, 0.95), rgba(13, 17, 26, 0.90))";
+      const cardBorder = theme.homeCss?.cardBorder ?? theme.homeCss?.["--card-theme-border"] ?? "rgba(112, 213, 207, 0.32)";
+      const cardAccent = theme.homeCss?.cardAccent ?? theme.homeCss?.["--card-theme-accent"] ?? theme.swatchPrimary ?? "#70d5cf";
+      const cardGlow = theme.homeCss?.cardGlow ?? theme.homeCss?.["--card-theme-glow"] ?? "0 8px 28px rgba(112, 213, 207, 0.14)";
+      const cardCorner = theme.canvas?.borderStroke ?? theme.homeCss?.["--card-theme-corner"] ?? "rgba(112, 213, 207, 0.48)";
+      const cardOnSurface = theme.canvas?.titleColor ?? theme.homeCss?.["--card-theme-on-surface"] ?? "#f4f5f7";
+      const cardOnSurfaceVariant = theme.canvas?.detailColor ?? theme.homeCss?.["--card-theme-on-surface-variant"] ?? "#c3c8d1";
+
+      targetHome.style.setProperty("--card-theme-bg", cardBg);
+      targetHome.style.setProperty("--card-theme-border", cardBorder);
+      targetHome.style.setProperty("--card-theme-accent", cardAccent);
+      targetHome.style.setProperty("--card-theme-glow", cardGlow);
+      targetHome.style.setProperty("--card-theme-corner", cardCorner);
+      targetHome.style.setProperty("--card-theme-on-surface", cardOnSurface);
+      targetHome.style.setProperty("--card-theme-on-surface-variant", cardOnSurfaceVariant);
+    }
+  }
+
+  const targetStudio = studioViewElement || (typeof document !== "undefined" ? document.getElementById("studio-view") : null);
+  if (targetStudio) {
+    targetStudio.dataset.cardTheme = themeId;
+  }
+
+  // 2. Synchronize theme chips and seed pickers across #home-view and #studio-view
+  if (typeof document !== "undefined") {
+    const themeChips = document.querySelectorAll<HTMLButtonElement>("[data-theme-id]");
+    themeChips.forEach((chip) => {
+      const isSelected = chip.getAttribute("data-theme-id") === themeId;
+      chip.classList.toggle("is-active", isSelected);
+      chip.setAttribute("aria-checked", isSelected ? "true" : "false");
+    });
+
+    const isSeed = typeof themeId === "string" && themeId.startsWith("seed:");
+    const seedHex = isSeed
+      ? themeId.slice(5).trim()
+      : (theme.seedColor ?? (typeof themeId === "string" && themeId.startsWith("#") ? themeId : ""));
+
+    if (seedHex && /^#([0-9a-fA-F]{6})$/i.test(seedHex)) {
+      const hexLower = seedHex.toLowerCase();
+      const seedPickers = document.querySelectorAll<HTMLInputElement>("[data-seed-picker]");
+      seedPickers.forEach((picker) => {
+        picker.value = hexLower;
+      });
+      const seedHexInputs = document.querySelectorAll<HTMLInputElement>("[data-seed-hex]");
+      seedHexInputs.forEach((hexInput) => {
+        hexInput.value = hexLower;
+      });
+    }
+
+    // Update studio topbar indicator if present
+    const studioLabel = document.getElementById("studio-theme-label");
+    if (studioLabel) {
+      studioLabel.textContent = isSeed ? "SEED" : (theme.name ?? "THEME").toUpperCase();
+    }
+    const studioSwatch = document.getElementById("studio-theme-swatch");
+    if (studioSwatch) {
+      studioSwatch.style.background = `linear-gradient(135deg, ${theme.swatchPrimary} 50%, ${theme.swatchSecondary} 50%)`;
+      studioSwatch.style.boxShadow = `0 0 6px ${theme.swatchPrimary}`;
+    }
+  }
+
+  // 3. Synchronize spatial scene lighting
+  if (cardHaloLight) {
+    cardHaloLight.color.set(theme.lighting.haloColor);
+    cardHaloLight.intensity = theme.lighting.haloIntensity;
+  }
+  if (cardFloorGlow) {
+    cardFloorGlow.color.set(theme.lighting.floorGlowColor);
+    cardFloorGlow.intensity = theme.lighting.floorGlowIntensity;
+  }
+  if (glowDisc && glowDisc.material instanceof THREE.MeshBasicMaterial) {
+    glowDisc.material.color.set(theme.lighting.floorGlowColor);
+  }
+
+  // 4. Update Three.js materials & textures for all cards
+  for (const card of cards) {
+    // Edge chassis PBR material
+    if (card.edgeMesh && card.edgeMesh.material instanceof THREE.MeshStandardMaterial) {
+      if (theme.material.edgeColor) card.edgeMesh.material.color.set(theme.material.edgeColor);
+      if (theme.material.edgeEmissive) card.edgeMesh.material.emissive.set(theme.material.edgeEmissive);
+      if (theme.material.edgeEmissiveIntensity !== undefined) card.edgeMesh.material.emissiveIntensity = theme.material.edgeEmissiveIntensity;
+      if (theme.material.edgeRoughness !== undefined) card.edgeMesh.material.roughness = theme.material.edgeRoughness;
+      if (theme.material.edgeMetalness !== undefined) card.edgeMesh.material.metalness = theme.material.edgeMetalness;
+      card.edgeMesh.material.needsUpdate = true;
+    }
+
+    // Front face PBR material
+    if (card.frontMesh && card.frontMesh.material instanceof THREE.MeshStandardMaterial) {
+      card.frontMesh.material.roughness = theme.material.roughness;
+      card.frontMesh.material.metalness = theme.material.metalness;
+      card.frontMesh.material.emissive.set(theme.material.emissive);
+      card.frontMesh.material.emissiveIntensity = theme.material.emissiveIntensity;
+      card.frontMesh.material.needsUpdate = true;
+    }
+
+    // Back face PBR material
+    if (card.backMesh && card.backMesh.material instanceof THREE.MeshStandardMaterial) {
+      card.backMesh.material.roughness = theme.material.roughness;
+      card.backMesh.material.metalness = theme.material.metalness;
+      card.backMesh.material.emissive.set(theme.material.emissive);
+      card.backMesh.material.emissiveIntensity = theme.material.emissiveIntensity;
+      card.backMesh.material.needsUpdate = true;
+    }
+
+    // Trigger texture invalidation and redraw
+    refreshCardTexture(card, true);
+  }
+
+  // 5. Restore high-contrast selection emissive on active card
+  try {
+    if (typeof selectedCard !== "undefined" && selectedCard && typeof selectCard === "function") {
+      selectCard(selectedCard);
+    }
+  } catch {
+    // Ignore in synthetic test harnesses where selectedCard is not declared
+  }
+}
+
+/**
+ * Initializes click handlers for card theme selector chips and seed pickers across
+ * #home-view and #studio-view.
+ */
+export function initCardThemePicker(): void {
+  if (typeof document === "undefined") return;
+
+  const sanitizeHex = (raw: string): string | null => {
+    let clean = raw.trim();
+    if (!clean.startsWith("#")) {
+      clean = "#" + clean;
+    }
+    if (/^#[0-9a-fA-F]{3}$/.test(clean)) {
+      clean = "#" + clean[1] + clean[1] + clean[2] + clean[2] + clean[3] + clean[3];
+    }
+    if (/^#[0-9a-fA-F]{6}$/.test(clean)) {
+      return clean.toLowerCase();
+    }
+    return null;
+  };
+
+  const handleSeedChange = (rawHex: string) => {
+    const sanitized = sanitizeHex(rawHex);
+    if (sanitized) {
+      applyCardTheme("seed:" + sanitized);
+    }
+  };
+
+  // Wire all [data-theme-picker] containers for chip click delegation
+  const pickers = document.querySelectorAll("[data-theme-picker], [data-studio-theme-picker], .home-theme-picker, .studio-theme-picker");
+  pickers.forEach((picker) => {
+    picker.addEventListener("click", (event) => {
+      const target = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-theme-id]");
+      if (!target) return;
+      const themeId = target.getAttribute("data-theme-id");
+      if (isValidCardThemeId(themeId)) {
+        applyCardTheme(themeId);
+      }
+    });
+  });
+
+  // Also attach delegated click handler on document to ensure chips in dynamically opened pulldowns work
+  document.addEventListener("click", (event) => {
+    const target = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-theme-id]");
+    if (!target) return;
+    const themeId = target.getAttribute("data-theme-id");
+    if (isValidCardThemeId(themeId)) {
+      applyCardTheme(themeId);
+    }
+  });
+
+  // Wire seed color inputs (<input type="color">)
+  const seedPickers = document.querySelectorAll<HTMLInputElement>("[data-seed-picker]");
+  seedPickers.forEach((picker) => {
+    picker.addEventListener("input", (event) => {
+      const target = event.target as HTMLInputElement;
+      handleSeedChange(target.value);
+    });
+    picker.addEventListener("change", (event) => {
+      const target = event.target as HTMLInputElement;
+      handleSeedChange(target.value);
+    });
+  });
+
+  // Wire seed hex text inputs
+  const seedHexInputs = document.querySelectorAll<HTMLInputElement>("[data-seed-hex]");
+  seedHexInputs.forEach((hexInput) => {
+    const submitHex = () => {
+      handleSeedChange(hexInput.value);
+    };
+    hexInput.addEventListener("change", submitHex);
+    hexInput.addEventListener("keydown", (event: KeyboardEvent) => {
+      if (event.key === "Enter") {
+        submitHex();
+      }
+    });
+  });
 }
 
 function refreshPrivateGuestPreview(
@@ -4355,13 +4864,13 @@ function updateOnCardActions(status = guestServiceStatus): void {
   cardActionStripElement.setAttribute("aria-label", `Actions for ${card.name}`);
 
   const os = cardToGuestOs(card);
-  const guest = status?.guests.find((item) => item.os === os && item.cardId === card.id);
+  const guest = status?.guests?.find((item) => item.os === os && item.cardId === card.id);
   const hasDisk =
     os === "windows"
       ? (status?.installedWindowsCardIds?.includes(card.id) ?? false) ||
         (/^windows[-_]/.test(card.id) &&
           (status?.installedWindowsCardIds?.includes("windows") ?? false))
-      : (status?.preparedCardIds.includes(card.id) ?? false);
+      : (status?.preparedCardIds?.includes(card.id) ?? false);
   const actionState = getOnCardActionState({
     os,
     guestStatus: guest?.status,
@@ -4509,12 +5018,12 @@ function updateGuestCardStatus(status: GuestServiceStatus): void {
   }
   for (const card of cards) {
     const os: GuestOS = cardToGuestOs(card);
-    const guest = status.guests.find((item) => item.os === os && item.cardId === card.id);
+    const guest = status.guests?.find((item) => item.os === os && item.cardId === card.id);
     const hasDisk =
       os === "windows"
         ? (status.installedWindowsCardIds?.includes(card.id) ?? false) ||
           (/^windows[-_]/.test(card.id) && (status.installedWindowsCardIds?.includes("windows") ?? false))
-        : status.preparedCardIds.includes(card.id);
+        : (status.preparedCardIds?.includes(card.id) ?? false);
     const displayStatus =
       guest?.status === "running"
         ? guest.bootMode === "installer"
@@ -4569,11 +5078,11 @@ function updateGuestCardStatus(status: GuestServiceStatus): void {
     );
   }
   updateGuestActionButton(status);
-  const activeGuests = status.guests.filter(
+  const activeGuests = (status.guests ?? []).filter(
     (guest) =>
       guest.status === "running" || guest.status === "starting" || guest.status === "stopping",
   );
-  const targetGuest = status.guests.find(
+  const targetGuest = status.guests?.find(
     (guest) => guest.os === guestTargetOs && guest.cardId === guestTargetCardId,
   );
   const targetBusy = targetGuest?.status === "starting" || targetGuest?.status === "stopping";
@@ -4587,7 +5096,7 @@ function updateGuestCardStatus(status: GuestServiceStatus): void {
   const targetHasDisk =
     guestTargetOs === "windows"
       ? (status.installedWindowsCardIds?.includes(guestTargetCardId ?? "") ?? false)
-      : status.baseReady || status.preparedCardIds.includes(guestTargetCardId ?? "");
+      : status.baseReady || (status.preparedCardIds?.includes(guestTargetCardId ?? "") ?? false);
   guestInstallButtonElement.disabled =
     targetBusy ||
     (guestTargetOs === "linux" && !targetCustomIso && !targetRunning && (status.baseReady || activeGuests.length > 0));
@@ -4642,6 +5151,7 @@ function computeCardContentKey(card: SystemCard): string {
     ).length ?? 0;
   const hasPrivateStream = Boolean(card.liveCanvas || card.serialOutput);
   return [
+    card.theme ?? activeCardThemeId,
     card.status,
     card.facet,
     card.backFaceVisible ? "B" : "F",
@@ -4681,7 +5191,7 @@ function refreshCardTexture(card: SystemCard, force = false): void {
   }
   card.lastTextureKey = nextKey;
 
-  if (card.cachedContentKey !== contentKey || card.liveCanvas) {
+  if (card.cachedContentKey !== contentKey || card.liveCanvas || force) {
     card.cachedSharpTexture?.dispose();
     card.cachedBlurredTexture?.dispose();
     card.cachedSharpTexture = undefined;
@@ -6348,12 +6858,19 @@ function onPointerMove(event: PointerEvent): void {
     if (!raycaster.ray.intersectPlane(dragPlane, dragPoint)) return;
     drag.card.group.position.copy(dragPoint.add(drag.offset ?? new THREE.Vector3()));
     drag.card.group.position.x = THREE.MathUtils.clamp(drag.card.group.position.x, -7.8, 7.2);
-    drag.card.group.position.y = THREE.MathUtils.clamp(drag.card.group.position.y, 0.6, 5.2);
     drag.card.group.position.z = THREE.MathUtils.clamp(drag.card.group.position.z, -6.6, 2.5);
+
     const overBin = isCardOverBinCan(drag.card, event.clientX, event.clientY);
     drag.card.tiltZ = overBin ? 0.22 : 0;
-    resolveCardCollisions(drag.card);
     drag.card.group.rotation.y = cardDisplayRotation(drag.card);
+    drag.card.group.rotation.z = drag.card.tiltZ;
+
+    // Enforce dynamic floor boundary based on card scale, orientation, and dais/floor level
+    clampCardAboveFloor(drag.card);
+    drag.card.group.position.y = THREE.MathUtils.clamp(drag.card.group.position.y, drag.card.group.position.y, 5.2);
+
+    resolveCardCollisions(drag.card);
+    clampCardAboveFloor(drag.card);
   } else if (drag.mode === "peel" && drag.card) {
     // Pull the display corner outward: it peels toward you and the card swells.
     const cx = drag.cornerX ?? 1;
@@ -6445,6 +6962,7 @@ function onPointerUp(event: PointerEvent): void {
         openShareDialog(targetPeer);
       } else if (completedDrag.freeMove) {
         resolveCardCollisions(completedDrag.card);
+        clampCardAboveFloor(completedDrag.card);
         completedDrag.card.layoutOffset
           .copy(completedDrag.card.group.position)
           .sub(wheelPosition(cards.indexOf(completedDrag.card)));
@@ -7565,6 +8083,7 @@ function animate(now = 0): void {
   requestAnimationFrame(animate);
   const dt = lastFrameTime > 0 ? Math.min(0.05, (now - lastFrameTime) / 1000) : 1 / 60;
   lastFrameTime = now;
+  if (studioViewElement.hidden) return;
   const reducePreviewMotion = prefersReducedMotion();
 
   // Smoothly damp turntable towards target with organic spring ease
@@ -7719,7 +8238,7 @@ function animate(now = 0): void {
       card.group.position.y = THREE.MathUtils.damp(card.group.position.y, targetPosition.y, 28, dt);
       card.group.position.z = THREE.MathUtils.damp(card.group.position.z, targetPosition.z, 28, dt);
     }
-    card.group.position.y = Math.max(card.group.position.y, 1.68);
+    clampCardAboveFloor(card);
   }
 
   // Update front-center selection when the carousel rotates to a new front card
@@ -7734,12 +8253,16 @@ function animate(now = 0): void {
     updateRoomSelection();
     selectedNameElement.textContent = `${closestCard.name} · ${FACET_META[closestCard.facet].badge}`;
     sceneCardIndexElement.textContent = String(selectedIndex + 1).padStart(2, "0");
+    const activeTheme = getCardTheme(activeCardThemeId);
+    const selectedEmissive = activeTheme.material.edgeEmissive || activeTheme.swatchPrimary;
+    const idleEmissive = activeTheme.material.edgeColor || "#152631";
+    const idleIntensity = activeTheme.material.edgeEmissiveIntensity ?? 0.22;
     for (const item of cards) {
-      const edge = item.group.children[0];
+      const edge = item.edgeMesh ?? item.group.children[0];
       const material = edge instanceof THREE.Mesh ? edge.material : undefined;
       if (material instanceof THREE.MeshStandardMaterial) {
-        material.emissive.set(item === closestCard ? "#70d5cf" : "#152631");
-        material.emissiveIntensity = item === closestCard ? 0.62 : 0.22;
+        material.emissive.set(item === closestCard ? selectedEmissive : idleEmissive);
+        material.emissiveIntensity = item === closestCard ? 0.62 : idleIntensity;
       }
     }
   }
@@ -7785,11 +8308,13 @@ function animate(now = 0): void {
 
   // Pillar 1: Dynamic Halo & Specular Floor Lighting tracking the active card
   if (selectedCard) {
-    const brandTarget = new THREE.Color(selectedCard.color);
-    cardHaloLight.color.lerp(brandTarget, Math.min(1, dt * 5.2));
-    cardFloorGlow.color.lerp(brandTarget, Math.min(1, dt * 5.2));
+    const activeTheme = selectedCard.theme ? getCardTheme(selectedCard.theme) : currentCardTheme;
+    const haloTarget = new THREE.Color(activeTheme.lighting.haloColor);
+    const floorTarget = new THREE.Color(activeTheme.lighting.floorGlowColor);
+    cardHaloLight.color.lerp(haloTarget, Math.min(1, dt * 5.2));
+    cardFloorGlow.color.lerp(floorTarget, Math.min(1, dt * 5.2));
     if (glowDisc.material instanceof THREE.MeshBasicMaterial) {
-      glowDisc.material.color.lerp(brandTarget, Math.min(1, dt * 5.2));
+      glowDisc.material.color.lerp(floorTarget, Math.min(1, dt * 5.2));
       glowDisc.material.opacity = 0.08 + 0.025 * Math.sin(now * 0.0024);
     }
     cardHaloLight.position.x = THREE.MathUtils.damp(cardHaloLight.position.x, selectedCard.group.position.x, 7.5, dt);
@@ -7912,6 +8437,9 @@ function initKernelTelemetryBridge(): void {
 
 initCommercialEditions();
 initKernelTelemetryBridge();
+initViewRouter();
+initCardThemePicker();
+applyCardTheme(loadPersistedTheme());
 animate();
 
 
