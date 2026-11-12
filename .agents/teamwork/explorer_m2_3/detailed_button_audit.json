@@ -1,0 +1,1232 @@
+[
+  {
+    "num": 1,
+    "id": null,
+    "type": "button",
+    "cls": "home-primary-button",
+    "text": "Open Spatial Studio ↗",
+    "dialog": null,
+    "section": "home-hero",
+    "findings": "data attribute data-open-studio NOT in main.ts"
+  },
+  {
+    "num": 2,
+    "id": "android",
+    "type": "button",
+    "cls": "home-system-card",
+    "text": "A PC / 01  Android · Pocket Lab You",
+    "dialog": null,
+    "section": "home-systems",
+    "findings": "ID referenced (7 times); data attribute data-open-studio NOT in main.ts; data attribute data-card-id NOT in main.ts"
+  },
+  {
+    "num": 3,
+    "id": "windows",
+    "type": "button",
+    "cls": "home-system-card",
+    "text": "PC / 02  Windows · Studio A familia",
+    "dialog": null,
+    "section": "home-systems",
+    "findings": "ID referenced (20 times); data attribute data-open-studio NOT in main.ts; data attribute data-card-id NOT in main.ts"
+  },
+  {
+    "num": 4,
+    "id": "linux",
+    "type": "button",
+    "cls": "home-system-card home-system-card-featured",
+    "text": "λ PC / 03 · SELECTED IN STUDIO  Lin",
+    "dialog": null,
+    "section": "home-systems",
+    "findings": "ID referenced (12 times); data attribute data-open-studio NOT in main.ts; data attribute data-card-id NOT in main.ts"
+  },
+  {
+    "num": 5,
+    "id": "macos",
+    "type": "button",
+    "cls": "home-system-card",
+    "text": "⌘ PC / 04  macOS · Cupertino Precis",
+    "dialog": null,
+    "section": "home-systems",
+    "findings": "ID referenced (8 times); data attribute data-open-studio NOT in main.ts; data attribute data-card-id NOT in main.ts"
+  },
+  {
+    "num": 6,
+    "id": "kali-red",
+    "type": "button",
+    "cls": "home-system-card",
+    "text": "K PC / 05  Kali · Cyber Range Offen",
+    "dialog": null,
+    "section": "home-systems",
+    "findings": "ID referenced (4 times); data attribute data-open-studio NOT in main.ts; data attribute data-card-id NOT in main.ts"
+  },
+  {
+    "num": 7,
+    "id": "tour-button",
+    "type": "button",
+    "cls": "mode-pill tour-pill",
+    "text": "▷ TOUR",
+    "dialog": null,
+    "section": "topbar",
+    "findings": "ID referenced (3 times)"
+  },
+  {
+    "num": 8,
+    "id": "record-tour-button",
+    "type": "button",
+    "cls": "mode-pill record-pill",
+    "text": "⏺ 60FPS",
+    "dialog": null,
+    "section": "topbar",
+    "findings": "ID referenced (3 times)"
+  },
+  {
+    "num": 9,
+    "id": "editions-button",
+    "type": "button",
+    "cls": "mode-pill tier-pill",
+    "text": "💎 EDITIONS",
+    "dialog": null,
+    "section": "topbar",
+    "findings": "ID referenced (1 times)"
+  },
+  {
+    "num": 10,
+    "id": "bench-toggle",
+    "type": "button",
+    "cls": "mode-pill",
+    "text": "▣ BENCH · 1 CARD",
+    "dialog": null,
+    "section": "topbar",
+    "findings": "ID referenced (1 times)"
+  },
+  {
+    "num": 11,
+    "id": "secops-toggle",
+    "type": "button",
+    "cls": "mode-pill",
+    "text": "🛡️ SECOPS LAB",
+    "dialog": null,
+    "section": "topbar",
+    "findings": "ID referenced (1 times)"
+  },
+  {
+    "num": 12,
+    "id": "help-button",
+    "type": "button",
+    "cls": "mode-pill manual-pill",
+    "text": "📖 USER MANUAL",
+    "dialog": null,
+    "section": "topbar",
+    "findings": "ID referenced (1 times)"
+  },
+  {
+    "num": 13,
+    "id": "profile-button",
+    "type": "button",
+    "cls": "avatar profile-avatar",
+    "text": "C",
+    "dialog": null,
+    "section": "topbar",
+    "findings": "ID referenced (1 times)"
+  },
+  {
+    "num": 14,
+    "id": "profile-editions-option",
+    "type": "button",
+    "cls": "profile-action",
+    "text": "💎 Commercial Editions &amp; Market",
+    "dialog": null,
+    "section": "profile-popover",
+    "findings": "ID referenced (1 times)"
+  },
+  {
+    "num": 15,
+    "id": "profile-restore-option",
+    "type": "button",
+    "cls": "profile-action",
+    "text": "🔑 Restore account &amp; purchasesR",
+    "dialog": null,
+    "section": "profile-popover",
+    "findings": "ID referenced (1 times)"
+  },
+  {
+    "num": 16,
+    "id": "profile-edit-option",
+    "type": "button",
+    "cls": "profile-action",
+    "text": "✎ Edit local profileName and initia",
+    "dialog": null,
+    "section": "profile-popover",
+    "findings": "ID referenced (1 times)"
+  },
+  {
+    "num": 17,
+    "id": "profile-performance-option",
+    "type": "button",
+    "cls": "profile-action",
+    "text": "◈ Studio preferencesGraphics and gu",
+    "dialog": null,
+    "section": "profile-popover",
+    "findings": "ID referenced (1 times)"
+  },
+  {
+    "num": 18,
+    "id": "profile-help-option",
+    "type": "button",
+    "cls": "profile-action",
+    "text": "⌘ Keyboard shortcuts &amp; manualOp",
+    "dialog": null,
+    "section": "profile-popover",
+    "findings": "ID referenced (1 times)"
+  },
+  {
+    "num": 19,
+    "id": "profile-about-option",
+    "type": "button",
+    "cls": "profile-action",
+    "text": "i About Post Card O.S.Local prototy",
+    "dialog": null,
+    "section": "profile-popover",
+    "findings": "ID referenced (1 times)"
+  },
+  {
+    "num": 20,
+    "id": null,
+    "type": "button",
+    "cls": "facet-pill active",
+    "text": "01 DISPLAY",
+    "dialog": null,
+    "section": "facet-bar",
+    "findings": "data attribute data-facet handled"
+  },
+  {
+    "num": 21,
+    "id": null,
+    "type": "button",
+    "cls": "facet-pill",
+    "text": "02 SETTINGS",
+    "dialog": null,
+    "section": "facet-bar",
+    "findings": "data attribute data-facet handled"
+  },
+  {
+    "num": 22,
+    "id": null,
+    "type": "button",
+    "cls": "facet-pill",
+    "text": "03 SECURITY",
+    "dialog": null,
+    "section": "facet-bar",
+    "findings": "data attribute data-facet handled"
+  },
+  {
+    "num": 23,
+    "id": null,
+    "type": "button",
+    "cls": "facet-pill",
+    "text": "04 PLANES",
+    "dialog": null,
+    "section": "facet-bar",
+    "findings": "data attribute data-facet handled"
+  },
+  {
+    "num": 24,
+    "id": null,
+    "type": "button",
+    "cls": "facet-pill",
+    "text": "05 ACTIONS",
+    "dialog": null,
+    "section": "facet-bar",
+    "findings": "data attribute data-facet handled"
+  },
+  {
+    "num": 25,
+    "id": null,
+    "type": "button",
+    "cls": "facet-pill",
+    "text": "06 TELEMETRY",
+    "dialog": null,
+    "section": "facet-bar",
+    "findings": "data attribute data-facet handled"
+  },
+  {
+    "num": 26,
+    "id": "zoom-button",
+    "type": "submit",
+    "cls": "dock-button",
+    "text": "🔍 Zoom card",
+    "dialog": null,
+    "section": "command-group command-card",
+    "findings": "ID referenced (1 times)"
+  },
+  {
+    "num": 27,
+    "id": "performance-button",
+    "type": "button",
+    "cls": "dock-button performance-button",
+    "text": "⚡ Performance",
+    "dialog": null,
+    "section": "command-group command-card",
+    "findings": "ID referenced (2 times)"
+  },
+  {
+    "num": 28,
+    "id": "clone-button",
+    "type": "button",
+    "cls": "dock-menu-item",
+    "text": "⧉ Clone card &amp; QCOW2 overlay",
+    "dialog": null,
+    "section": "command-group command-card",
+    "findings": "ID referenced (1 times)"
+  },
+  {
+    "num": 29,
+    "id": "reset-button",
+    "type": "button",
+    "cls": "dock-menu-item",
+    "text": "↺ Reset disk overlay to clean base",
+    "dialog": null,
+    "section": "command-group command-card",
+    "findings": "ID referenced (1 times)"
+  },
+  {
+    "num": 30,
+    "id": "custom-iso-button",
+    "type": "button",
+    "cls": "dock-menu-item",
+    "text": "💿 Load custom OS ISO / image…",
+    "dialog": null,
+    "section": "command-group command-card",
+    "findings": "ID referenced (1 times)"
+  },
+  {
+    "num": 31,
+    "id": "send-button",
+    "type": "submit",
+    "cls": "dock-button send-button",
+    "text": "➤ Send a paper plane",
+    "dialog": null,
+    "section": "command-group command-card",
+    "findings": "ID referenced (1 times)"
+  },
+  {
+    "num": 32,
+    "id": null,
+    "type": "button",
+    "cls": "omni-chip",
+    "text": "⚡ Recon Ports",
+    "dialog": null,
+    "section": "command-group command-card",
+    "findings": "data attribute data-omni-action handled"
+  },
+  {
+    "num": 33,
+    "id": null,
+    "type": "button",
+    "cls": "omni-chip",
+    "text": "🛡️ Priv Audit",
+    "dialog": null,
+    "section": "command-group command-card",
+    "findings": "data attribute data-omni-action handled"
+  },
+  {
+    "num": 34,
+    "id": null,
+    "type": "button",
+    "cls": "omni-chip",
+    "text": "🌐 Live Sockets",
+    "dialog": null,
+    "section": "command-group command-card",
+    "findings": "data attribute data-omni-action handled"
+  },
+  {
+    "num": 35,
+    "id": null,
+    "type": "button",
+    "cls": "omni-chip",
+    "text": "🔥 Firewall",
+    "dialog": null,
+    "section": "command-group command-card",
+    "findings": "data attribute data-omni-action handled"
+  },
+  {
+    "num": 36,
+    "id": null,
+    "type": "button",
+    "cls": "omni-chip",
+    "text": "🕵️ Forensics",
+    "dialog": null,
+    "section": "command-group command-card",
+    "findings": "data attribute data-omni-action handled"
+  },
+  {
+    "num": 37,
+    "id": null,
+    "type": "button",
+    "cls": "omni-chip omni-chip-horizon",
+    "text": "⏱️ Savepoint",
+    "dialog": null,
+    "section": "command-group command-card",
+    "findings": "data attribute data-omni-action handled"
+  },
+  {
+    "num": 38,
+    "id": null,
+    "type": "button",
+    "cls": "omni-chip omni-chip-horizon",
+    "text": "⏪ Rewind",
+    "dialog": null,
+    "section": "command-group command-card",
+    "findings": "data attribute data-omni-action handled"
+  },
+  {
+    "num": 39,
+    "id": null,
+    "type": "button",
+    "cls": "omni-chip omni-chip-horizon",
+    "text": "🐝 Swarm ×2",
+    "dialog": null,
+    "section": "command-group command-card",
+    "findings": "data attribute data-omni-action handled"
+  },
+  {
+    "num": 40,
+    "id": null,
+    "type": "button",
+    "cls": "omni-chip omni-chip-horizon",
+    "text": "🔌 Net Mode",
+    "dialog": null,
+    "section": "command-group command-card",
+    "findings": "data attribute data-omni-action handled"
+  },
+  {
+    "num": 41,
+    "id": null,
+    "type": "button",
+    "cls": "omni-chip omni-chip-horizon",
+    "text": "🍃 Eco RAM",
+    "dialog": null,
+    "section": "command-group command-card",
+    "findings": "data attribute data-omni-action handled"
+  },
+  {
+    "num": 42,
+    "id": null,
+    "type": "button",
+    "cls": "omni-chip omni-chip-horizon",
+    "text": "📦 Drop File",
+    "dialog": null,
+    "section": "command-group command-card",
+    "findings": "data attribute data-omni-action handled"
+  },
+  {
+    "num": 43,
+    "id": null,
+    "type": "button",
+    "cls": "omni-chip omni-chip-horizon",
+    "text": "📡 Serial Pipe",
+    "dialog": null,
+    "section": "command-group command-card",
+    "findings": "data attribute data-omni-action handled"
+  },
+  {
+    "num": 44,
+    "id": "add-button",
+    "type": "submit",
+    "cls": "add-button",
+    "text": "+",
+    "dialog": null,
+    "section": "command-group command-card",
+    "findings": "ID referenced (1 times)"
+  },
+  {
+    "num": 45,
+    "id": "romy-vault-toggle",
+    "type": "button",
+    "cls": "kernel-romy-toggle",
+    "text": "⚡ PA-ROMY",
+    "dialog": null,
+    "section": "scene-shell",
+    "findings": "ID referenced (1 times)"
+  },
+  {
+    "num": 46,
+    "id": "card-guest-action",
+    "type": "button",
+    "cls": "card-action",
+    "text": "↗ Install",
+    "dialog": null,
+    "section": "room-card-nav",
+    "findings": "ID referenced (1 times); data attribute data-card-action handled"
+  },
+  {
+    "num": 47,
+    "id": "card-shutdown-action",
+    "type": "button",
+    "cls": "card-action",
+    "text": "⏻ Stop",
+    "dialog": null,
+    "section": "room-card-nav",
+    "findings": "ID referenced (1 times); data attribute data-card-action handled"
+  },
+  {
+    "num": 48,
+    "id": "card-settings-action",
+    "type": "button",
+    "cls": "card-action",
+    "text": "⚙ Settings",
+    "dialog": null,
+    "section": "room-card-nav",
+    "findings": "ID referenced (1 times); data attribute data-card-action handled"
+  },
+  {
+    "num": 49,
+    "id": null,
+    "type": "button",
+    "cls": "card-action",
+    "text": "▣ Screen",
+    "dialog": null,
+    "section": "room-card-nav",
+    "findings": "data attribute data-card-extra handled"
+  },
+  {
+    "num": 50,
+    "id": null,
+    "type": "button",
+    "cls": "card-action",
+    "text": "⌕ Zoom",
+    "dialog": null,
+    "section": "room-card-nav",
+    "findings": "data attribute data-card-extra handled"
+  },
+  {
+    "num": 51,
+    "id": null,
+    "type": "button",
+    "cls": "card-action",
+    "text": "↻ Flip",
+    "dialog": null,
+    "section": "room-card-nav",
+    "findings": "data attribute data-card-extra handled"
+  },
+  {
+    "num": 52,
+    "id": null,
+    "type": "button",
+    "cls": "card-action",
+    "text": "⧉ Clone",
+    "dialog": null,
+    "section": "room-card-nav",
+    "findings": "data attribute data-card-extra handled"
+  },
+  {
+    "num": 53,
+    "id": null,
+    "type": "button",
+    "cls": "card-action",
+    "text": "⏱ Save",
+    "dialog": null,
+    "section": "room-card-nav",
+    "findings": "data attribute data-card-extra handled"
+  },
+  {
+    "num": 54,
+    "id": null,
+    "type": "button",
+    "cls": "card-action",
+    "text": "⚡ Perf",
+    "dialog": null,
+    "section": "room-card-nav",
+    "findings": "data attribute data-card-extra handled"
+  },
+  {
+    "num": 55,
+    "id": null,
+    "type": "button",
+    "cls": "card-action",
+    "text": "✦ Help",
+    "dialog": null,
+    "section": "room-card-nav",
+    "findings": "data attribute data-card-extra handled"
+  },
+  {
+    "num": 56,
+    "id": "card-bin-action",
+    "type": "button",
+    "cls": "card-action card-action-bin",
+    "text": "⌄ Paper Bin",
+    "dialog": null,
+    "section": "room-card-nav",
+    "findings": "ID referenced (1 times); data attribute data-card-action handled"
+  },
+  {
+    "num": 57,
+    "id": "card-delete-action",
+    "type": "button",
+    "cls": "card-action card-action-delete",
+    "text": "× Delete",
+    "dialog": null,
+    "section": "room-card-nav",
+    "findings": "ID referenced (1 times); data attribute data-card-action handled"
+  },
+  {
+    "num": 58,
+    "id": "trash-target",
+    "type": "button",
+    "cls": "trash-target",
+    "text": "THE PAPER BIN 0 Open to restore car",
+    "dialog": null,
+    "section": "room-card-nav",
+    "findings": "ID referenced (1 times)"
+  },
+  {
+    "num": 59,
+    "id": null,
+    "type": "button",
+    "cls": "compass-btn compass-up",
+    "text": "▲05 ACTIONS",
+    "dialog": null,
+    "section": "room-card-nav",
+    "findings": "data attribute data-compass-facet handled"
+  },
+  {
+    "num": 60,
+    "id": null,
+    "type": "button",
+    "cls": "compass-btn compass-left",
+    "text": "◀03 SEC",
+    "dialog": null,
+    "section": "room-card-nav",
+    "findings": "data attribute data-compass-facet handled"
+  },
+  {
+    "num": 61,
+    "id": "compass-cycle",
+    "type": "button",
+    "cls": "compass-btn compass-center",
+    "text": "↻01/02",
+    "dialog": null,
+    "section": "room-card-nav",
+    "findings": "ID referenced (1 times)"
+  },
+  {
+    "num": 62,
+    "id": null,
+    "type": "button",
+    "cls": "compass-btn compass-right",
+    "text": "▶04 PLANES",
+    "dialog": null,
+    "section": "room-card-nav",
+    "findings": "data attribute data-compass-facet handled"
+  },
+  {
+    "num": 63,
+    "id": null,
+    "type": "button",
+    "cls": "compass-btn compass-down",
+    "text": "▼06 PORTS",
+    "dialog": null,
+    "section": "room-card-nav",
+    "findings": "data attribute data-compass-facet handled"
+  },
+  {
+    "num": 64,
+    "id": "compass-zoom",
+    "type": "button",
+    "cls": "compass-zoom-btn",
+    "text": "🔍 Zoom Into Card (Z)",
+    "dialog": null,
+    "section": "room-card-nav",
+    "findings": "ID referenced (1 times)"
+  },
+  {
+    "num": 65,
+    "id": "bin-close",
+    "type": "button",
+    "cls": "dialog-cancel",
+    "text": "Close bin",
+    "dialog": "bin-dialog",
+    "section": "room-card-nav",
+    "findings": "ID referenced (1 times)"
+  },
+  {
+    "num": 66,
+    "id": "trash-cancel",
+    "type": "button",
+    "cls": "dialog-cancel",
+    "text": "Keep card",
+    "dialog": "trash-dialog",
+    "section": "room-card-nav",
+    "findings": "ID referenced (1 times)"
+  },
+  {
+    "num": 67,
+    "id": "trash-confirm",
+    "type": "button",
+    "cls": "trash-confirm",
+    "text": "Delete permanently",
+    "dialog": "trash-dialog",
+    "section": "room-card-nav",
+    "findings": "ID referenced (1 times)"
+  },
+  {
+    "num": 68,
+    "id": "cancel-share",
+    "type": "button",
+    "cls": "dialog-cancel",
+    "text": "Not now",
+    "dialog": "share-dialog",
+    "section": "room-card-nav",
+    "findings": "ID referenced (1 times)"
+  },
+  {
+    "num": 69,
+    "id": "confirm-send",
+    "type": "submit",
+    "cls": "dialog-send",
+    "text": "Fold &amp; send ↗",
+    "dialog": "share-dialog",
+    "section": "room-card-nav",
+    "findings": "ID not referenced in main.ts"
+  },
+  {
+    "num": 70,
+    "id": "cancel-performance",
+    "type": "button",
+    "cls": "dialog-cancel",
+    "text": "Cancel",
+    "dialog": "performance-dialog",
+    "section": "room-card-nav",
+    "findings": "ID referenced (1 times)"
+  },
+  {
+    "num": 71,
+    "id": null,
+    "type": "submit",
+    "cls": "dialog-send",
+    "text": "Save AV &amp; CPU Rack ↗",
+    "dialog": "performance-dialog",
+    "section": "room-card-nav",
+    "findings": ""
+  },
+  {
+    "num": 72,
+    "id": null,
+    "type": "submit",
+    "cls": "dialog-send",
+    "text": "Close Manual",
+    "dialog": "help-dialog",
+    "section": "room-card-nav",
+    "findings": ""
+  },
+  {
+    "num": 73,
+    "id": "profile-edit-restore-btn",
+    "type": "button",
+    "cls": "dialog-cancel",
+    "text": "🔑 Restore Account…",
+    "dialog": "profile-edit-dialog",
+    "section": "room-card-nav",
+    "findings": "ID not referenced in main.ts; data attribute data-open-restore-account handled"
+  },
+  {
+    "num": 74,
+    "id": "cancel-profile-edit",
+    "type": "button",
+    "cls": "dialog-cancel",
+    "text": "Cancel",
+    "dialog": "profile-edit-dialog",
+    "section": "room-card-nav",
+    "findings": "ID referenced (1 times)"
+  },
+  {
+    "num": 75,
+    "id": null,
+    "type": "submit",
+    "cls": "dialog-send",
+    "text": "Save local profile",
+    "dialog": "profile-edit-dialog",
+    "section": "room-card-nav",
+    "findings": ""
+  },
+  {
+    "num": 76,
+    "id": "restore-copy-key-btn",
+    "type": "button",
+    "cls": "restore-mini-btn",
+    "text": "Copy Key",
+    "dialog": "restore-account-dialog",
+    "section": "room-card-nav",
+    "findings": "ID referenced (1 times)"
+  },
+  {
+    "num": 77,
+    "id": "restore-license-submit",
+    "type": "submit",
+    "cls": "dialog-send",
+    "text": "🔑 Restore License",
+    "dialog": "restore-account-dialog",
+    "section": "room-card-nav",
+    "findings": "ID not referenced in main.ts"
+  },
+  {
+    "num": 78,
+    "id": "restore-resync-btn",
+    "type": "button",
+    "cls": "dialog-cancel restore-action-card",
+    "text": "↻ Re-Sync Saved Account Re-verify s",
+    "dialog": "restore-account-dialog",
+    "section": "room-card-nav",
+    "findings": "ID referenced (1 times)"
+  },
+  {
+    "num": 79,
+    "id": "restore-export-btn",
+    "type": "button",
+    "cls": "dialog-cancel restore-action-card",
+    "text": "⬇ Export Account Backup (.json) Sav",
+    "dialog": "restore-account-dialog",
+    "section": "room-card-nav",
+    "findings": "ID referenced (1 times)"
+  },
+  {
+    "num": 80,
+    "id": "restore-import-btn",
+    "type": "button",
+    "cls": "dialog-cancel restore-action-card",
+    "text": "⬆ Import Account Backup (.json) Res",
+    "dialog": "restore-account-dialog",
+    "section": "room-card-nav",
+    "findings": "ID referenced (1 times)"
+  },
+  {
+    "num": 81,
+    "id": "close-restore-account",
+    "type": "button",
+    "cls": "dialog-send",
+    "text": "Done / Close",
+    "dialog": "restore-account-dialog",
+    "section": "room-card-nav",
+    "findings": "ID referenced (1 times)"
+  },
+  {
+    "num": 82,
+    "id": null,
+    "type": "submit",
+    "cls": "dialog-send",
+    "text": "Close",
+    "dialog": "profile-about-dialog",
+    "section": "room-card-nav",
+    "findings": ""
+  },
+  {
+    "num": 83,
+    "id": "guest-close",
+    "type": "button",
+    "cls": "guest-close",
+    "text": "Close display",
+    "dialog": "guest-dialog",
+    "section": "guest-window-header",
+    "findings": "ID referenced (1 times)"
+  },
+  {
+    "num": 84,
+    "id": "guest-twist",
+    "type": "button",
+    "cls": "guest-action guest-twist-action",
+    "text": "⤢ Twist bigger",
+    "dialog": "guest-dialog",
+    "section": "guest-window-header",
+    "findings": "ID referenced (1 times)"
+  },
+  {
+    "num": 85,
+    "id": "guest-custom-iso",
+    "type": "button",
+    "cls": "guest-action",
+    "text": "💿 Custom OS ISO",
+    "dialog": "guest-dialog",
+    "section": "guest-window-header",
+    "findings": "ID referenced (1 times)"
+  },
+  {
+    "num": 86,
+    "id": "guest-paste-clipboard",
+    "type": "button",
+    "cls": "guest-action",
+    "text": "📋 Paste to VM",
+    "dialog": "guest-dialog",
+    "section": "guest-window-header",
+    "findings": "ID referenced (1 times)"
+  },
+  {
+    "num": 87,
+    "id": "guest-wake-screen",
+    "type": "button",
+    "cls": "guest-action guest-wake-action",
+    "text": "Wake screen",
+    "dialog": "guest-dialog",
+    "section": "guest-window-header",
+    "findings": "ID referenced (1 times)"
+  },
+  {
+    "num": 88,
+    "id": "guest-install",
+    "type": "button",
+    "cls": "guest-action guest-action-primary",
+    "text": "Install Debian base",
+    "dialog": "guest-dialog",
+    "section": "guest-window-header",
+    "findings": "ID referenced (1 times)"
+  },
+  {
+    "num": 89,
+    "id": "guest-finalize-base",
+    "type": "button",
+    "cls": "guest-action",
+    "text": "Finish base installation",
+    "dialog": "guest-dialog",
+    "section": "guest-window-header",
+    "findings": "ID referenced (1 times)"
+  },
+  {
+    "num": 90,
+    "id": "guest-boot-disk",
+    "type": "button",
+    "cls": "guest-action",
+    "text": "Boot this card",
+    "dialog": "guest-dialog",
+    "section": "guest-window-header",
+    "findings": "ID referenced (1 times)"
+  },
+  {
+    "num": 91,
+    "id": "guest-clone-card",
+    "type": "button",
+    "cls": "guest-action",
+    "text": "⧉ Clone card overlay",
+    "dialog": "guest-dialog",
+    "section": "guest-window-header",
+    "findings": "ID referenced (1 times)"
+  },
+  {
+    "num": 92,
+    "id": "guest-reset-overlay",
+    "type": "button",
+    "cls": "guest-action",
+    "text": "↺ Reset disk overlay",
+    "dialog": "guest-dialog",
+    "section": "guest-window-header",
+    "findings": "ID referenced (1 times)"
+  },
+  {
+    "num": 93,
+    "id": "guest-inject-plane",
+    "type": "button",
+    "cls": "guest-action",
+    "text": "➤ Type paper plane into VM",
+    "dialog": "guest-dialog",
+    "section": "guest-window-header",
+    "findings": "ID referenced (1 times)"
+  },
+  {
+    "num": 94,
+    "id": "guest-savepoint",
+    "type": "button",
+    "cls": "guest-action",
+    "text": "⏱️ Savepoint (RAM + Disk)",
+    "dialog": "guest-dialog",
+    "section": "guest-window-header",
+    "findings": "ID referenced (1 times)"
+  },
+  {
+    "num": 95,
+    "id": "guest-rewind",
+    "type": "button",
+    "cls": "guest-action",
+    "text": "⏪ Rewind VM",
+    "dialog": "guest-dialog",
+    "section": "guest-window-header",
+    "findings": "ID referenced (1 times)"
+  },
+  {
+    "num": 96,
+    "id": "guest-restore-checkpoint",
+    "type": "button",
+    "cls": "guest-action",
+    "text": "🛟 Restore last checkpoint",
+    "dialog": "guest-dialog",
+    "section": "guest-window-header",
+    "findings": "ID referenced (1 times)"
+  },
+  {
+    "num": 97,
+    "id": "guest-shutdown",
+    "type": "button",
+    "cls": "guest-action guest-action-stop",
+    "text": "Request shutdown",
+    "dialog": "guest-dialog",
+    "section": "guest-window-header",
+    "findings": "ID referenced (1 times)"
+  },
+  {
+    "num": 98,
+    "id": "guest-force-stop",
+    "type": "button",
+    "cls": "guest-action guest-action-force-stop",
+    "text": "Force stop · discard unsaved work",
+    "dialog": "guest-dialog",
+    "section": "guest-window-header",
+    "findings": "ID referenced (1 times)"
+  },
+  {
+    "num": 99,
+    "id": null,
+    "type": "button",
+    "cls": "billing-opt active",
+    "text": "Monthly",
+    "dialog": "editions-dialog",
+    "section": "guest-window-header",
+    "findings": "data attribute data-interval NOT in main.ts"
+  },
+  {
+    "num": 100,
+    "id": null,
+    "type": "button",
+    "cls": "billing-opt",
+    "text": "Yearly 2 months free",
+    "dialog": "editions-dialog",
+    "section": "guest-window-header",
+    "findings": "data attribute data-interval NOT in main.ts"
+  },
+  {
+    "num": 101,
+    "id": "editions-restore-top-btn",
+    "type": "button",
+    "cls": "dialog-cancel restore-account-trigger",
+    "text": "🔑 Restore Account / License",
+    "dialog": "editions-dialog",
+    "section": "guest-window-header",
+    "findings": "ID not referenced in main.ts; data attribute data-open-restore-account handled"
+  },
+  {
+    "num": 102,
+    "id": null,
+    "type": "button",
+    "cls": "dialog-send edition-action-btn",
+    "text": "Subscribe to Pro",
+    "dialog": "editions-dialog",
+    "section": "guest-window-header",
+    "findings": "data attribute data-select-tier handled"
+  },
+  {
+    "num": 103,
+    "id": null,
+    "type": "button",
+    "cls": "dialog-send edition-action-btn",
+    "text": "Subscribe to Enterprise",
+    "dialog": "editions-dialog",
+    "section": "guest-window-header",
+    "findings": "data attribute data-select-tier handled"
+  },
+  {
+    "num": 104,
+    "id": "btn-subscribe-ai",
+    "type": "button",
+    "cls": "dialog-send edition-action-btn",
+    "text": "Activate AI Butler Sub",
+    "dialog": "editions-dialog",
+    "section": "guest-window-header",
+    "findings": "ID referenced (1 times); data attribute data-select-tier handled"
+  },
+  {
+    "num": 105,
+    "id": null,
+    "type": "button",
+    "cls": "dlc-toggle-btn active",
+    "text": "ACTIVE",
+    "dialog": "editions-dialog",
+    "section": "guest-window-header",
+    "findings": "data attribute data-dlc handled"
+  },
+  {
+    "num": 106,
+    "id": null,
+    "type": "button",
+    "cls": "dlc-toggle-btn active",
+    "text": "ACTIVE",
+    "dialog": "editions-dialog",
+    "section": "guest-window-header",
+    "findings": "data attribute data-dlc handled"
+  },
+  {
+    "num": 107,
+    "id": null,
+    "type": "button",
+    "cls": "dlc-toggle-btn active",
+    "text": "ACTIVE",
+    "dialog": "editions-dialog",
+    "section": "guest-window-header",
+    "findings": "data attribute data-dlc handled"
+  },
+  {
+    "num": 108,
+    "id": null,
+    "type": "button",
+    "cls": "dlc-toggle-btn active",
+    "text": "ACTIVE",
+    "dialog": "editions-dialog",
+    "section": "guest-window-header",
+    "findings": "data attribute data-dlc handled"
+  },
+  {
+    "num": 109,
+    "id": "editions-restore-btn",
+    "type": "button",
+    "cls": "dialog-cancel restore-account-trigger",
+    "text": "🔑 Restore Account",
+    "dialog": "editions-dialog",
+    "section": "guest-window-header",
+    "findings": "ID not referenced in main.ts; data attribute data-open-restore-account handled"
+  },
+  {
+    "num": 110,
+    "id": null,
+    "type": "submit",
+    "cls": "dialog-send",
+    "text": "Done / Close",
+    "dialog": "editions-dialog",
+    "section": "guest-window-header",
+    "findings": ""
+  },
+  {
+    "num": 111,
+    "id": "cancel-add-card",
+    "type": "button",
+    "cls": "dialog-cancel",
+    "text": "Cancel",
+    "dialog": "add-card-dialog",
+    "section": "guest-window-header",
+    "findings": "ID referenced (1 times)"
+  },
+  {
+    "num": 112,
+    "id": null,
+    "type": "submit",
+    "cls": "dialog-send",
+    "text": "Create Post Card ↗",
+    "dialog": "add-card-dialog",
+    "section": "guest-window-header",
+    "findings": ""
+  },
+  {
+    "num": 113,
+    "id": "close-blueprint",
+    "type": "button",
+    "cls": "blueprint-close-btn",
+    "text": "✕",
+    "dialog": "blueprint-dialog",
+    "section": "guest-window-header",
+    "findings": "ID referenced (1 times)"
+  },
+  {
+    "num": 114,
+    "id": null,
+    "type": "button",
+    "cls": "blueprint-tab active",
+    "text": "🧠 System Mindmap",
+    "dialog": "blueprint-dialog",
+    "section": "guest-window-header",
+    "findings": "data attribute data-bp NOT in main.ts"
+  },
+  {
+    "num": 115,
+    "id": null,
+    "type": "button",
+    "cls": "blueprint-tab",
+    "text": "🗄️ Supabase ERD Model",
+    "dialog": "blueprint-dialog",
+    "section": "guest-window-header",
+    "findings": "data attribute data-bp NOT in main.ts"
+  },
+  {
+    "num": 116,
+    "id": null,
+    "type": "button",
+    "cls": "blueprint-tab",
+    "text": "🚀 CI/CD Pipeline",
+    "dialog": "blueprint-dialog",
+    "section": "guest-window-header",
+    "findings": "data attribute data-bp NOT in main.ts"
+  },
+  {
+    "num": 117,
+    "id": null,
+    "type": "button",
+    "cls": "blueprint-tab",
+    "text": "📡 LiDAR UART State Machine",
+    "dialog": "blueprint-dialog",
+    "section": "guest-window-header",
+    "findings": "data attribute data-bp NOT in main.ts"
+  },
+  {
+    "num": 118,
+    "id": null,
+    "type": "button",
+    "cls": "blueprint-tab",
+    "text": "📊 Product Flow",
+    "dialog": "blueprint-dialog",
+    "section": "guest-window-header",
+    "findings": "data attribute data-bp NOT in main.ts"
+  },
+  {
+    "num": 119,
+    "id": "btn-open-blueprint-source",
+    "type": "button",
+    "cls": "dialog-cancel",
+    "text": "Open Raw Spec ↗",
+    "dialog": "blueprint-dialog",
+    "section": "guest-window-header",
+    "findings": "ID referenced (1 times)"
+  },
+  {
+    "num": 120,
+    "id": "btn-blueprint-done",
+    "type": "button",
+    "cls": "dialog-send",
+    "text": "Acknowledge &amp; Return ✓",
+    "dialog": "blueprint-dialog",
+    "section": "guest-window-header",
+    "findings": "ID referenced (1 times)"
+  },
+  {
+    "num": 121,
+    "id": "butler-close",
+    "type": "button",
+    "cls": "butler-close",
+    "text": "×",
+    "dialog": "blueprint-dialog",
+    "section": "guest-window-header",
+    "findings": "ID referenced (1 times)"
+  },
+  {
+    "num": 122,
+    "id": "omni-submit",
+    "type": "submit",
+    "cls": "butler-send",
+    "text": "Ask",
+    "dialog": "blueprint-dialog",
+    "section": "guest-window-header",
+    "findings": "ID not referenced in main.ts"
+  },
+  {
+    "num": 123,
+    "id": "butler-avatar",
+    "type": "button",
+    "cls": "butler-avatar",
+    "text": "🎩",
+    "dialog": "blueprint-dialog",
+    "section": "guest-window-header",
+    "findings": "ID referenced (1 times)"
+  }
+]

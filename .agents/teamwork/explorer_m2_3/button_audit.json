@@ -1,0 +1,1109 @@
+[
+  {
+    "num": 1,
+    "id": null,
+    "cls": "home-primary-button",
+    "type": "button",
+    "wired": false,
+    "details": "UNWIRED",
+    "text": "<span>Open Spatial Studio</span> <span class=\"home"
+  },
+  {
+    "num": 2,
+    "id": "android",
+    "cls": "home-system-card",
+    "type": "button",
+    "wired": true,
+    "details": "#android",
+    "text": "<span class=\"home-system-top\"> <span class=\"home-s"
+  },
+  {
+    "num": 3,
+    "id": "windows",
+    "cls": "home-system-card",
+    "type": "button",
+    "wired": true,
+    "details": "#windows",
+    "text": "<span class=\"home-system-top\"> <span class=\"home-s"
+  },
+  {
+    "num": 4,
+    "id": "linux",
+    "cls": "home-system-card home-system-card-featured",
+    "type": "button",
+    "wired": true,
+    "details": "#linux",
+    "text": "<span class=\"home-system-top\"> <span class=\"home-s"
+  },
+  {
+    "num": 5,
+    "id": "macos",
+    "cls": "home-system-card",
+    "type": "button",
+    "wired": true,
+    "details": "#macos",
+    "text": "<span class=\"home-system-top\"> <span class=\"home-s"
+  },
+  {
+    "num": 6,
+    "id": "kali-red",
+    "cls": "home-system-card",
+    "type": "button",
+    "wired": true,
+    "details": "#kali-red",
+    "text": "<span class=\"home-system-top\"> <span class=\"home-s"
+  },
+  {
+    "num": 7,
+    "id": "tour-button",
+    "cls": "mode-pill tour-pill",
+    "type": "button",
+    "wired": true,
+    "details": "#tour-button",
+    "text": "▷ TOUR"
+  },
+  {
+    "num": 8,
+    "id": "record-tour-button",
+    "cls": "mode-pill record-pill",
+    "type": "button",
+    "wired": true,
+    "details": "#record-tour-button",
+    "text": "⏺ 60FPS"
+  },
+  {
+    "num": 9,
+    "id": "editions-button",
+    "cls": "mode-pill tier-pill",
+    "type": "button",
+    "wired": true,
+    "details": "#editions-button",
+    "text": "💎 EDITIONS"
+  },
+  {
+    "num": 10,
+    "id": "bench-toggle",
+    "cls": "mode-pill",
+    "type": "button",
+    "wired": true,
+    "details": "#bench-toggle",
+    "text": "▣ BENCH · 1 CARD"
+  },
+  {
+    "num": 11,
+    "id": "secops-toggle",
+    "cls": "mode-pill",
+    "type": "button",
+    "wired": true,
+    "details": "#secops-toggle",
+    "text": "🛡️ SECOPS LAB"
+  },
+  {
+    "num": 12,
+    "id": "help-button",
+    "cls": "mode-pill manual-pill",
+    "type": "button",
+    "wired": true,
+    "details": "#help-button",
+    "text": "📖 USER MANUAL"
+  },
+  {
+    "num": 13,
+    "id": "profile-button",
+    "cls": "avatar profile-avatar",
+    "type": "button",
+    "wired": true,
+    "details": "#profile-button",
+    "text": "C"
+  },
+  {
+    "num": 14,
+    "id": "profile-editions-option",
+    "cls": "profile-action",
+    "type": "button",
+    "wired": true,
+    "details": "#profile-editions-option",
+    "text": "<span class=\"profile-action-icon\" aria-hidden=\"tru"
+  },
+  {
+    "num": 15,
+    "id": "profile-restore-option",
+    "cls": "profile-action",
+    "type": "button",
+    "wired": true,
+    "details": "#profile-restore-option",
+    "text": "<span class=\"profile-action-icon\" aria-hidden=\"tru"
+  },
+  {
+    "num": 16,
+    "id": "profile-edit-option",
+    "cls": "profile-action",
+    "type": "button",
+    "wired": true,
+    "details": "#profile-edit-option",
+    "text": "<span class=\"profile-action-icon\" aria-hidden=\"tru"
+  },
+  {
+    "num": 17,
+    "id": "profile-performance-option",
+    "cls": "profile-action",
+    "type": "button",
+    "wired": true,
+    "details": "#profile-performance-option",
+    "text": "<span class=\"profile-action-icon\" aria-hidden=\"tru"
+  },
+  {
+    "num": 18,
+    "id": "profile-help-option",
+    "cls": "profile-action",
+    "type": "button",
+    "wired": true,
+    "details": "#profile-help-option",
+    "text": "<span class=\"profile-action-icon\" aria-hidden=\"tru"
+  },
+  {
+    "num": 19,
+    "id": "profile-about-option",
+    "cls": "profile-action",
+    "type": "button",
+    "wired": true,
+    "details": "#profile-about-option",
+    "text": "<span class=\"profile-action-icon\" aria-hidden=\"tru"
+  },
+  {
+    "num": 20,
+    "id": null,
+    "cls": "facet-pill active",
+    "type": "button",
+    "wired": true,
+    "details": "data-facet",
+    "text": "<span>01</span> DISPLAY"
+  },
+  {
+    "num": 21,
+    "id": null,
+    "cls": "facet-pill",
+    "type": "button",
+    "wired": true,
+    "details": "data-facet",
+    "text": "<span>02</span> SETTINGS"
+  },
+  {
+    "num": 22,
+    "id": null,
+    "cls": "facet-pill",
+    "type": "button",
+    "wired": true,
+    "details": "data-facet",
+    "text": "<span>03</span> SECURITY"
+  },
+  {
+    "num": 23,
+    "id": null,
+    "cls": "facet-pill",
+    "type": "button",
+    "wired": true,
+    "details": "data-facet",
+    "text": "<span>04</span> PLANES"
+  },
+  {
+    "num": 24,
+    "id": null,
+    "cls": "facet-pill",
+    "type": "button",
+    "wired": true,
+    "details": "data-facet",
+    "text": "<span>05</span> ACTIONS"
+  },
+  {
+    "num": 25,
+    "id": null,
+    "cls": "facet-pill",
+    "type": "button",
+    "wired": true,
+    "details": "data-facet",
+    "text": "<span>06</span> TELEMETRY"
+  },
+  {
+    "num": 26,
+    "id": "zoom-button",
+    "cls": "dock-button",
+    "type": "button",
+    "wired": true,
+    "details": "#zoom-button",
+    "text": "<span class=\"button-icon\" aria-hidden=\"true\">🔍</s"
+  },
+  {
+    "num": 27,
+    "id": "performance-button",
+    "cls": "dock-button performance-button",
+    "type": "button",
+    "wired": true,
+    "details": "#performance-button",
+    "text": "<span class=\"button-icon\" aria-hidden=\"true\">⚡</sp"
+  },
+  {
+    "num": 28,
+    "id": "clone-button",
+    "cls": "dock-menu-item",
+    "type": "button",
+    "wired": true,
+    "details": "#clone-button",
+    "text": "<span class=\"button-icon\" aria-hidden=\"true\">⧉</sp"
+  },
+  {
+    "num": 29,
+    "id": "reset-button",
+    "cls": "dock-menu-item",
+    "type": "button",
+    "wired": true,
+    "details": "#reset-button",
+    "text": "<span class=\"button-icon\" aria-hidden=\"true\">↺</sp"
+  },
+  {
+    "num": 30,
+    "id": "custom-iso-button",
+    "cls": "dock-menu-item",
+    "type": "button",
+    "wired": true,
+    "details": "#custom-iso-button",
+    "text": "<span class=\"button-icon\" aria-hidden=\"true\">💿</s"
+  },
+  {
+    "num": 31,
+    "id": "send-button",
+    "cls": "dock-button send-button",
+    "type": "button",
+    "wired": true,
+    "details": "#send-button",
+    "text": "<span class=\"button-icon\" aria-hidden=\"true\">➤</sp"
+  },
+  {
+    "num": 32,
+    "id": null,
+    "cls": "omni-chip",
+    "type": "button",
+    "wired": true,
+    "details": "data-omni-action",
+    "text": "⚡ Recon Ports"
+  },
+  {
+    "num": 33,
+    "id": null,
+    "cls": "omni-chip",
+    "type": "button",
+    "wired": true,
+    "details": "data-omni-action",
+    "text": "🛡️ Priv Audit"
+  },
+  {
+    "num": 34,
+    "id": null,
+    "cls": "omni-chip",
+    "type": "button",
+    "wired": true,
+    "details": "data-omni-action",
+    "text": "🌐 Live Sockets"
+  },
+  {
+    "num": 35,
+    "id": null,
+    "cls": "omni-chip",
+    "type": "button",
+    "wired": true,
+    "details": "data-omni-action",
+    "text": "🔥 Firewall"
+  },
+  {
+    "num": 36,
+    "id": null,
+    "cls": "omni-chip",
+    "type": "button",
+    "wired": true,
+    "details": "data-omni-action",
+    "text": "🕵️ Forensics"
+  },
+  {
+    "num": 37,
+    "id": null,
+    "cls": "omni-chip omni-chip-horizon",
+    "type": "button",
+    "wired": true,
+    "details": "data-omni-action",
+    "text": "⏱️ Savepoint"
+  },
+  {
+    "num": 38,
+    "id": null,
+    "cls": "omni-chip omni-chip-horizon",
+    "type": "button",
+    "wired": true,
+    "details": "data-omni-action",
+    "text": "⏪ Rewind"
+  },
+  {
+    "num": 39,
+    "id": null,
+    "cls": "omni-chip omni-chip-horizon",
+    "type": "button",
+    "wired": true,
+    "details": "data-omni-action",
+    "text": "🐝 Swarm ×2"
+  },
+  {
+    "num": 40,
+    "id": null,
+    "cls": "omni-chip omni-chip-horizon",
+    "type": "button",
+    "wired": true,
+    "details": "data-omni-action",
+    "text": "🔌 Net Mode"
+  },
+  {
+    "num": 41,
+    "id": null,
+    "cls": "omni-chip omni-chip-horizon",
+    "type": "button",
+    "wired": true,
+    "details": "data-omni-action",
+    "text": "🍃 Eco RAM"
+  },
+  {
+    "num": 42,
+    "id": null,
+    "cls": "omni-chip omni-chip-horizon",
+    "type": "button",
+    "wired": true,
+    "details": "data-omni-action",
+    "text": "📦 Drop File"
+  },
+  {
+    "num": 43,
+    "id": null,
+    "cls": "omni-chip omni-chip-horizon",
+    "type": "button",
+    "wired": true,
+    "details": "data-omni-action",
+    "text": "📡 Serial Pipe"
+  },
+  {
+    "num": 44,
+    "id": "add-button",
+    "cls": "add-button",
+    "type": "button",
+    "wired": true,
+    "details": "#add-button",
+    "text": "+"
+  },
+  {
+    "num": 45,
+    "id": "romy-vault-toggle",
+    "cls": "kernel-romy-toggle",
+    "type": "button",
+    "wired": true,
+    "details": "#romy-vault-toggle",
+    "text": "⚡ PA-ROMY"
+  },
+  {
+    "num": 46,
+    "id": "card-guest-action",
+    "cls": "card-action",
+    "type": "button",
+    "wired": true,
+    "details": "#card-guest-action, data-card-action",
+    "text": "<span aria-hidden=\"true\">↗</span> <span class=\"car"
+  },
+  {
+    "num": 47,
+    "id": "card-shutdown-action",
+    "cls": "card-action",
+    "type": "button",
+    "wired": true,
+    "details": "#card-shutdown-action, data-card-action",
+    "text": "<span aria-hidden=\"true\">⏻</span> <span class=\"car"
+  },
+  {
+    "num": 48,
+    "id": "card-settings-action",
+    "cls": "card-action",
+    "type": "button",
+    "wired": true,
+    "details": "#card-settings-action, data-card-action",
+    "text": "<span aria-hidden=\"true\">⚙</span> <span class=\"car"
+  },
+  {
+    "num": 49,
+    "id": null,
+    "cls": "card-action",
+    "type": "button",
+    "wired": true,
+    "details": "data-card-extra",
+    "text": "<span aria-hidden=\"true\">▣</span> <span class=\"car"
+  },
+  {
+    "num": 50,
+    "id": null,
+    "cls": "card-action",
+    "type": "button",
+    "wired": true,
+    "details": "data-card-extra",
+    "text": "<span aria-hidden=\"true\">⌕</span> <span class=\"car"
+  },
+  {
+    "num": 51,
+    "id": null,
+    "cls": "card-action",
+    "type": "button",
+    "wired": true,
+    "details": "data-card-extra",
+    "text": "<span aria-hidden=\"true\">↻</span> <span class=\"car"
+  },
+  {
+    "num": 52,
+    "id": null,
+    "cls": "card-action",
+    "type": "button",
+    "wired": true,
+    "details": "data-card-extra",
+    "text": "<span aria-hidden=\"true\">⧉</span> <span class=\"car"
+  },
+  {
+    "num": 53,
+    "id": null,
+    "cls": "card-action",
+    "type": "button",
+    "wired": true,
+    "details": "data-card-extra",
+    "text": "<span aria-hidden=\"true\">⏱</span> <span class=\"car"
+  },
+  {
+    "num": 54,
+    "id": null,
+    "cls": "card-action",
+    "type": "button",
+    "wired": true,
+    "details": "data-card-extra",
+    "text": "<span aria-hidden=\"true\">⚡</span> <span class=\"car"
+  },
+  {
+    "num": 55,
+    "id": null,
+    "cls": "card-action",
+    "type": "button",
+    "wired": true,
+    "details": "data-card-extra",
+    "text": "<span aria-hidden=\"true\">✦</span> <span class=\"car"
+  },
+  {
+    "num": 56,
+    "id": "card-bin-action",
+    "cls": "card-action card-action-bin",
+    "type": "button",
+    "wired": true,
+    "details": "#card-bin-action, data-card-action",
+    "text": "<span aria-hidden=\"true\">⌄</span> <span class=\"car"
+  },
+  {
+    "num": 57,
+    "id": "card-delete-action",
+    "cls": "card-action card-action-delete",
+    "type": "button",
+    "wired": true,
+    "details": "#card-delete-action, data-card-action",
+    "text": "<span aria-hidden=\"true\">×</span> <span class=\"car"
+  },
+  {
+    "num": 58,
+    "id": "trash-target",
+    "cls": "trash-target",
+    "type": "button",
+    "wired": true,
+    "details": "#trash-target",
+    "text": "<span class=\"trash-basket\" aria-hidden=\"true\"><spa"
+  },
+  {
+    "num": 59,
+    "id": null,
+    "cls": "compass-btn compass-up",
+    "type": "button",
+    "wired": true,
+    "details": "data-compass-facet",
+    "text": "▲<span>05 ACTIONS</span>"
+  },
+  {
+    "num": 60,
+    "id": null,
+    "cls": "compass-btn compass-left",
+    "type": "button",
+    "wired": true,
+    "details": "data-compass-facet",
+    "text": "◀<span>03 SEC</span>"
+  },
+  {
+    "num": 61,
+    "id": "compass-cycle",
+    "cls": "compass-btn compass-center",
+    "type": "button",
+    "wired": true,
+    "details": "#compass-cycle",
+    "text": "↻<span>01/02</span>"
+  },
+  {
+    "num": 62,
+    "id": null,
+    "cls": "compass-btn compass-right",
+    "type": "button",
+    "wired": true,
+    "details": "data-compass-facet",
+    "text": "▶<span>04 PLANES</span>"
+  },
+  {
+    "num": 63,
+    "id": null,
+    "cls": "compass-btn compass-down",
+    "type": "button",
+    "wired": true,
+    "details": "data-compass-facet",
+    "text": "▼<span>06 PORTS</span>"
+  },
+  {
+    "num": 64,
+    "id": "compass-zoom",
+    "cls": "compass-zoom-btn",
+    "type": "button",
+    "wired": true,
+    "details": "#compass-zoom",
+    "text": "🔍 Zoom Into Card (Z)"
+  },
+  {
+    "num": 65,
+    "id": "bin-close",
+    "cls": "dialog-cancel",
+    "type": "button",
+    "wired": true,
+    "details": "#bin-close",
+    "text": "Close bin"
+  },
+  {
+    "num": 66,
+    "id": "trash-cancel",
+    "cls": "dialog-cancel",
+    "type": "button",
+    "wired": true,
+    "details": "#trash-cancel",
+    "text": "Keep card"
+  },
+  {
+    "num": 67,
+    "id": "trash-confirm",
+    "cls": "trash-confirm",
+    "type": "button",
+    "wired": true,
+    "details": "#trash-confirm",
+    "text": "Delete permanently"
+  },
+  {
+    "num": 68,
+    "id": "cancel-share",
+    "cls": "dialog-cancel",
+    "type": "button",
+    "wired": true,
+    "details": "#cancel-share",
+    "text": "Not now"
+  },
+  {
+    "num": 69,
+    "id": "confirm-send",
+    "cls": "dialog-send",
+    "type": "button",
+    "wired": false,
+    "details": "UNWIRED",
+    "text": "Fold &amp; send <span>↗</span>"
+  },
+  {
+    "num": 70,
+    "id": "cancel-performance",
+    "cls": "dialog-cancel",
+    "type": "button",
+    "wired": true,
+    "details": "#cancel-performance",
+    "text": "Cancel"
+  },
+  {
+    "num": 71,
+    "id": null,
+    "cls": "dialog-send",
+    "type": "submit",
+    "wired": true,
+    "details": "form submit",
+    "text": "Save AV &amp; CPU Rack <span>↗</span>"
+  },
+  {
+    "num": 72,
+    "id": null,
+    "cls": "dialog-send",
+    "type": "button",
+    "wired": false,
+    "details": "UNWIRED",
+    "text": "Close Manual"
+  },
+  {
+    "num": 73,
+    "id": "profile-edit-restore-btn",
+    "cls": "dialog-cancel",
+    "type": "button",
+    "wired": true,
+    "details": "data-open-restore-account",
+    "text": "🔑 Restore Account…"
+  },
+  {
+    "num": 74,
+    "id": "cancel-profile-edit",
+    "cls": "dialog-cancel",
+    "type": "button",
+    "wired": true,
+    "details": "#cancel-profile-edit",
+    "text": "Cancel"
+  },
+  {
+    "num": 75,
+    "id": null,
+    "cls": "dialog-send",
+    "type": "submit",
+    "wired": true,
+    "details": "form submit",
+    "text": "Save local profile"
+  },
+  {
+    "num": 76,
+    "id": "restore-copy-key-btn",
+    "cls": "restore-mini-btn",
+    "type": "button",
+    "wired": true,
+    "details": "#restore-copy-key-btn",
+    "text": "Copy Key"
+  },
+  {
+    "num": 77,
+    "id": "restore-license-submit",
+    "cls": "dialog-send",
+    "type": "submit",
+    "wired": true,
+    "details": "form submit",
+    "text": "🔑 Restore License"
+  },
+  {
+    "num": 78,
+    "id": "restore-resync-btn",
+    "cls": "dialog-cancel restore-action-card",
+    "type": "button",
+    "wired": true,
+    "details": "#restore-resync-btn",
+    "text": "<strong>↻ Re-Sync Saved Account</strong> <small>Re"
+  },
+  {
+    "num": 79,
+    "id": "restore-export-btn",
+    "cls": "dialog-cancel restore-action-card",
+    "type": "button",
+    "wired": true,
+    "details": "#restore-export-btn",
+    "text": "<strong>⬇ Export Account Backup (.json)</strong> <"
+  },
+  {
+    "num": 80,
+    "id": "restore-import-btn",
+    "cls": "dialog-cancel restore-action-card",
+    "type": "button",
+    "wired": true,
+    "details": "#restore-import-btn",
+    "text": "<strong>⬆ Import Account Backup (.json)</strong> <"
+  },
+  {
+    "num": 81,
+    "id": "close-restore-account",
+    "cls": "dialog-send",
+    "type": "button",
+    "wired": true,
+    "details": "#close-restore-account",
+    "text": "Done / Close"
+  },
+  {
+    "num": 82,
+    "id": null,
+    "cls": "dialog-send",
+    "type": "button",
+    "wired": false,
+    "details": "UNWIRED",
+    "text": "Close"
+  },
+  {
+    "num": 83,
+    "id": "guest-close",
+    "cls": "guest-close",
+    "type": "button",
+    "wired": true,
+    "details": "#guest-close",
+    "text": "Close display"
+  },
+  {
+    "num": 84,
+    "id": "guest-twist",
+    "cls": "guest-action guest-twist-action",
+    "type": "button",
+    "wired": true,
+    "details": "#guest-twist",
+    "text": "⤢ Twist bigger"
+  },
+  {
+    "num": 85,
+    "id": "guest-custom-iso",
+    "cls": "guest-action",
+    "type": "button",
+    "wired": true,
+    "details": "#guest-custom-iso",
+    "text": "💿 Custom OS ISO"
+  },
+  {
+    "num": 86,
+    "id": "guest-paste-clipboard",
+    "cls": "guest-action",
+    "type": "button",
+    "wired": true,
+    "details": "#guest-paste-clipboard",
+    "text": "📋 Paste to VM"
+  },
+  {
+    "num": 87,
+    "id": "guest-wake-screen",
+    "cls": "guest-action guest-wake-action",
+    "type": "button",
+    "wired": true,
+    "details": "#guest-wake-screen",
+    "text": "Wake screen"
+  },
+  {
+    "num": 88,
+    "id": "guest-install",
+    "cls": "guest-action guest-action-primary",
+    "type": "button",
+    "wired": true,
+    "details": "#guest-install",
+    "text": "Install Debian base"
+  },
+  {
+    "num": 89,
+    "id": "guest-finalize-base",
+    "cls": "guest-action",
+    "type": "button",
+    "wired": true,
+    "details": "#guest-finalize-base",
+    "text": "Finish base installation"
+  },
+  {
+    "num": 90,
+    "id": "guest-boot-disk",
+    "cls": "guest-action",
+    "type": "button",
+    "wired": true,
+    "details": "#guest-boot-disk",
+    "text": "Boot this card"
+  },
+  {
+    "num": 91,
+    "id": "guest-clone-card",
+    "cls": "guest-action",
+    "type": "button",
+    "wired": true,
+    "details": "#guest-clone-card",
+    "text": "⧉ Clone card overlay"
+  },
+  {
+    "num": 92,
+    "id": "guest-reset-overlay",
+    "cls": "guest-action",
+    "type": "button",
+    "wired": true,
+    "details": "#guest-reset-overlay",
+    "text": "↺ Reset disk overlay"
+  },
+  {
+    "num": 93,
+    "id": "guest-inject-plane",
+    "cls": "guest-action",
+    "type": "button",
+    "wired": true,
+    "details": "#guest-inject-plane",
+    "text": "➤ Type paper plane into VM"
+  },
+  {
+    "num": 94,
+    "id": "guest-savepoint",
+    "cls": "guest-action",
+    "type": "button",
+    "wired": true,
+    "details": "#guest-savepoint",
+    "text": "⏱️ Savepoint (RAM + Disk)"
+  },
+  {
+    "num": 95,
+    "id": "guest-rewind",
+    "cls": "guest-action",
+    "type": "button",
+    "wired": true,
+    "details": "#guest-rewind",
+    "text": "⏪ Rewind VM"
+  },
+  {
+    "num": 96,
+    "id": "guest-restore-checkpoint",
+    "cls": "guest-action",
+    "type": "button",
+    "wired": true,
+    "details": "#guest-restore-checkpoint",
+    "text": "🛟 Restore last checkpoint"
+  },
+  {
+    "num": 97,
+    "id": "guest-shutdown",
+    "cls": "guest-action guest-action-stop",
+    "type": "button",
+    "wired": true,
+    "details": "#guest-shutdown",
+    "text": "Request shutdown"
+  },
+  {
+    "num": 98,
+    "id": "guest-force-stop",
+    "cls": "guest-action guest-action-force-stop",
+    "type": "button",
+    "wired": true,
+    "details": "#guest-force-stop",
+    "text": "Force stop · discard unsaved work"
+  },
+  {
+    "num": 99,
+    "id": null,
+    "cls": "billing-opt active",
+    "type": "button",
+    "wired": true,
+    "details": ".billing-opt, .active",
+    "text": "Monthly"
+  },
+  {
+    "num": 100,
+    "id": null,
+    "cls": "billing-opt",
+    "type": "button",
+    "wired": true,
+    "details": ".billing-opt",
+    "text": "Yearly <small>2 months free</small>"
+  },
+  {
+    "num": 101,
+    "id": "editions-restore-top-btn",
+    "cls": "dialog-cancel restore-account-trigger",
+    "type": "button",
+    "wired": true,
+    "details": "data-open-restore-account",
+    "text": "🔑 Restore Account / License"
+  },
+  {
+    "num": 102,
+    "id": null,
+    "cls": "dialog-send edition-action-btn",
+    "type": "button",
+    "wired": true,
+    "details": "data-select-tier",
+    "text": "Subscribe to Pro"
+  },
+  {
+    "num": 103,
+    "id": null,
+    "cls": "dialog-send edition-action-btn",
+    "type": "button",
+    "wired": true,
+    "details": "data-select-tier",
+    "text": "Subscribe to Enterprise"
+  },
+  {
+    "num": 104,
+    "id": "btn-subscribe-ai",
+    "cls": "dialog-send edition-action-btn",
+    "type": "button",
+    "wired": true,
+    "details": "#btn-subscribe-ai, data-select-tier",
+    "text": "Activate AI Butler Sub"
+  },
+  {
+    "num": 105,
+    "id": null,
+    "cls": "dlc-toggle-btn active",
+    "type": "button",
+    "wired": true,
+    "details": "data-dlc",
+    "text": "ACTIVE"
+  },
+  {
+    "num": 106,
+    "id": null,
+    "cls": "dlc-toggle-btn active",
+    "type": "button",
+    "wired": true,
+    "details": "data-dlc",
+    "text": "ACTIVE"
+  },
+  {
+    "num": 107,
+    "id": null,
+    "cls": "dlc-toggle-btn active",
+    "type": "button",
+    "wired": true,
+    "details": "data-dlc",
+    "text": "ACTIVE"
+  },
+  {
+    "num": 108,
+    "id": null,
+    "cls": "dlc-toggle-btn active",
+    "type": "button",
+    "wired": true,
+    "details": "data-dlc",
+    "text": "ACTIVE"
+  },
+  {
+    "num": 109,
+    "id": "editions-restore-btn",
+    "cls": "dialog-cancel restore-account-trigger",
+    "type": "button",
+    "wired": true,
+    "details": "data-open-restore-account",
+    "text": "🔑 Restore Account"
+  },
+  {
+    "num": 110,
+    "id": null,
+    "cls": "dialog-send",
+    "type": "button",
+    "wired": false,
+    "details": "UNWIRED",
+    "text": "Done / Close"
+  },
+  {
+    "num": 111,
+    "id": "cancel-add-card",
+    "cls": "dialog-cancel",
+    "type": "button",
+    "wired": true,
+    "details": "#cancel-add-card",
+    "text": "Cancel"
+  },
+  {
+    "num": 112,
+    "id": null,
+    "cls": "dialog-send",
+    "type": "submit",
+    "wired": true,
+    "details": "form submit",
+    "text": "Create Post Card <span>↗</span>"
+  },
+  {
+    "num": 113,
+    "id": "close-blueprint",
+    "cls": "blueprint-close-btn",
+    "type": "button",
+    "wired": true,
+    "details": "#close-blueprint",
+    "text": "✕"
+  },
+  {
+    "num": 114,
+    "id": null,
+    "cls": "blueprint-tab active",
+    "type": "button",
+    "wired": true,
+    "details": ".blueprint-tab, .active",
+    "text": "🧠 System Mindmap"
+  },
+  {
+    "num": 115,
+    "id": null,
+    "cls": "blueprint-tab",
+    "type": "button",
+    "wired": true,
+    "details": ".blueprint-tab",
+    "text": "🗄️ Supabase ERD Model"
+  },
+  {
+    "num": 116,
+    "id": null,
+    "cls": "blueprint-tab",
+    "type": "button",
+    "wired": true,
+    "details": ".blueprint-tab",
+    "text": "🚀 CI/CD Pipeline"
+  },
+  {
+    "num": 117,
+    "id": null,
+    "cls": "blueprint-tab",
+    "type": "button",
+    "wired": true,
+    "details": ".blueprint-tab",
+    "text": "📡 LiDAR UART State Machine"
+  },
+  {
+    "num": 118,
+    "id": null,
+    "cls": "blueprint-tab",
+    "type": "button",
+    "wired": true,
+    "details": ".blueprint-tab",
+    "text": "📊 Product Flow"
+  },
+  {
+    "num": 119,
+    "id": "btn-open-blueprint-source",
+    "cls": "dialog-cancel",
+    "type": "button",
+    "wired": true,
+    "details": "#btn-open-blueprint-source",
+    "text": "Open Raw Spec ↗"
+  },
+  {
+    "num": 120,
+    "id": "btn-blueprint-done",
+    "cls": "dialog-send",
+    "type": "button",
+    "wired": true,
+    "details": "#btn-blueprint-done",
+    "text": "Acknowledge &amp; Return <span>✓</span>"
+  },
+  {
+    "num": 121,
+    "id": "butler-close",
+    "cls": "butler-close",
+    "type": "button",
+    "wired": true,
+    "details": "#butler-close",
+    "text": "×"
+  },
+  {
+    "num": 122,
+    "id": "omni-submit",
+    "cls": "butler-send",
+    "type": "submit",
+    "wired": true,
+    "details": "form submit",
+    "text": "Ask"
+  },
+  {
+    "num": 123,
+    "id": "butler-avatar",
+    "cls": "butler-avatar",
+    "type": "button",
+    "wired": true,
+    "details": "#butler-avatar",
+    "text": "<span aria-hidden=\"true\">🎩</span>"
+  }
+]
