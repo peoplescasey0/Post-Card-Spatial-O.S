@@ -24,16 +24,8 @@ supabase/.temp/
 # Other projects living beside this one
 micro-host/
 fresh-postcard/
-# Kernel and host files live in the micro-host repo
-/user/
-/Cargo.toml
-/Cargo.lock
-/rust-toolchain.toml
-/.cargo/
-/ramdisk.img
-
-# Kernel build scripts live in the micro-host repo
-/scripts/*.sh
+# The engine lives in kernel/ and its build scripts in scripts/, both in this
+# repo, so nothing under them is ignored.
 
 !.env.example
 !workspace-prototype/.env.example
