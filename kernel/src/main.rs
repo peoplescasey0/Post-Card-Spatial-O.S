@@ -1632,7 +1632,7 @@ pub unsafe extern "C" fn _start(multiboot2_info_addr: usize) -> ! {
     kprintln!("[ok] address spaces: same virtual address, separate memory");
     kprintln!("[ok] PCI + BitVisor/OpenShell VFIO: scanned 00:00.0 host bridge");
     kprintln!("[ok] storage + MBR + I/O spooler: VfsStorageBridge sector mirror (THE BLACK BOX)");
-    // THE BLACK BOX persistence: probe NVMe / SDHCI eMMC / ATA disks and mount FAT32.
+    // THE BLACK BOX persistence: probe NVMe / SDHCI eMMC / ATA / AHCI disks and mount FAT.
     if mb2.storage_disabled {
         kprintln!("[ok] block storage: probe skipped (nostorage)");
     } else {
@@ -1643,7 +1643,7 @@ pub unsafe extern "C" fn _start(multiboot2_info_addr: usize) -> ! {
         } else if fat32::automount().is_some() {
             if let Some((dev, part, label)) = fat32::mounted_summary() {
                 kprintln_emerald!(
-                    "[ok] FAT32 persistence: mounted \"{}\" ({} part {}) -> /{} (write-through)",
+                    "[ok] FAT persistence: mounted \"{}\" ({} part {}) -> /{} (write-through)",
                     label,
                     dev,
                     part,
@@ -1652,7 +1652,7 @@ pub unsafe extern "C" fn _start(multiboot2_info_addr: usize) -> ! {
             }
         } else {
             kprintln!(
-                "[ok] block storage: {} device(s), no FAT32 volume found",
+                "[ok] block storage: {} device(s), no FAT volume found",
                 blockdev::device_count()
             );
         }
@@ -5620,9 +5620,14 @@ unsafe fn handle_shell_command(cmd_bytes: &[u8], mb2: &Multiboot2ParsedInfo) {
                 p.lba,
                 p.sectors,
                 p.sectors / 2048,
-                if p.fat32 { "FAT32 \"" } else { "non-FAT32" },
-                if p.fat32 { p.label_str() } else { "" },
-                if p.fat32 { "\"" } else { "" },
+                match p.fat_bits {
+                    12 => "FAT12 \"",
+                    16 => "FAT16 \"",
+                    32 => "FAT32 \"",
+                    _ => "non-FAT",
+                },
+                if p.fat_bits != 0 { p.label_str() } else { "" },
+                if p.fat_bits != 0 { "\"" } else { "" },
                 if is_mounted { " [MOUNTED]" } else if p.esp { " [ESP]" } else { "" }
             );
         }

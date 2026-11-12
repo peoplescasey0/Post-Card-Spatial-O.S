@@ -36,7 +36,8 @@ pub struct Partition {
     pub lba: u64,
     pub sectors: u64,
     pub scheme: &'static str,
-    pub fat32: bool,
+    /// 0 = no FAT volume, otherwise 12 / 16 / 32.
+    pub fat_bits: u8,
     pub esp: bool,
     pub label: [u8; 11],
 }
@@ -66,21 +67,88 @@ fn le64(b: &[u8], o: usize) -> u64 {
     (le32(b, o) as u64) | ((le32(b, o + 4) as u64) << 32)
 }
 
-fn is_fat32_bpb(s: &[u8; SECTOR_SIZE]) -> bool {
+#[derive(Clone, Copy)]
+struct Bpb {
+    fat_bits: u8,
+    spc: u32,
+    reserved: u32,
+    num_fats: u32,
+    root_entries: u32,
+    total: u64,
+    fat_size: u32,
+    root_cluster: u32,
+    fsinfo_sec: u16,
+    label: [u8; 11],
+}
+
+/// Parses a FAT12/16/32 boot sector. The width is decided from the cluster
+/// count, as the specification requires: the "FAT16" string inside the boot
+/// sector is advisory and is simply wrong in plenty of real images.
+fn parse_bpb(s: &[u8; SECTOR_SIZE]) -> Option<Bpb> {
+    if s[510] != 0x55 || s[511] != 0xAA {
+        return None;
+    }
     let spc = s[13];
-    s[510] == 0x55
-        && s[511] == 0xAA
-        && le16(s, 11) == 512
-        && spc != 0
-        && spc.is_power_of_two()
-        && le16(s, 14) != 0
-        && (1..=2).contains(&s[16])
-        && le16(s, 17) == 0
-        && le16(s, 19) == 0
-        && le16(s, 22) == 0
-        && le32(s, 32) != 0
-        && le32(s, 36) != 0
-        && le32(s, 44) >= 2
+    let reserved = le16(s, 14) as u32;
+    let num_fats = s[16] as u32;
+    let root_entries = le16(s, 17) as u32;
+    let total16 = le16(s, 19) as u64;
+    let fat16 = le16(s, 22) as u32;
+    let total32 = le32(s, 32) as u64;
+    let fat32 = le32(s, 36);
+    let root_cluster32 = le32(s, 44);
+    if le16(s, 11) != 512 || spc == 0 || !spc.is_power_of_two() || reserved == 0 || !(1..=2).contains(&num_fats) {
+        return None;
+    }
+    let total = if total16 != 0 { total16 } else { total32 };
+    if total == 0 {
+        return None;
+    }
+    let (fat_size, root_cluster) = if fat16 != 0 { (fat16, 0) } else { (fat32, root_cluster32) };
+    if fat_size == 0 {
+        return None;
+    }
+    let root_dir_sectors = (root_entries * 32).div_ceil(SECTOR_SIZE as u32);
+    let overhead = reserved as u64 + num_fats as u64 * fat_size as u64 + root_dir_sectors as u64;
+    if total <= overhead {
+        return None;
+    }
+    let clusters = ((total - overhead) / spc as u64) as u32;
+    // The shape of the BPB decides first: only FAT32 leaves the 16-bit root
+    // entry count and 16-bit FAT size at zero. The cluster count then splits
+    // FAT12 from FAT16. Tools do emit volumes whose cluster count sits in
+    // FAT16 territory while the BPB is otherwise pure FAT32 (mtools does),
+    // and those are meant to be read as FAT32.
+    let fat32_shape = fat16 == 0 && root_entries == 0;
+    let fat_bits = if fat32_shape {
+        if root_cluster32 < 2 {
+            return None;
+        }
+        32
+    } else if root_entries == 0 {
+        return None;
+    } else if clusters < 4085 {
+        12
+    } else {
+        16
+    };
+    let mut label = [b' '; 11];
+    let (sig_off, label_off) = if fat_bits == 32 { (66, 71) } else { (38, 43) };
+    if s[sig_off] == 0x29 {
+        label.copy_from_slice(&s[label_off..label_off + 11]);
+    }
+    Some(Bpb {
+        fat_bits,
+        spc: spc as u32,
+        reserved,
+        num_fats,
+        root_entries,
+        total,
+        fat_size,
+        root_cluster,
+        fsinfo_sec: le16(s, 48),
+        label,
+    })
 }
 
 unsafe fn add_partition(dev: usize, index: usize, lba: u64, sectors: u64, scheme: &'static str, esp: bool) {
@@ -88,13 +156,15 @@ unsafe fn add_partition(dev: usize, index: usize, lba: u64, sectors: u64, scheme
         return;
     }
     let mut s = [0u8; SECTOR_SIZE];
-    let mut fat32 = false;
+    let mut fat_bits = 0u8;
     let mut label = *b"           ";
-    if blockdev::read_sector(dev, lba, &mut s).is_ok() && is_fat32_bpb(&s) {
-        fat32 = true;
-        label.copy_from_slice(&s[71..82]);
+    if blockdev::read_sector(dev, lba, &mut s).is_ok() {
+        if let Some(b) = parse_bpb(&s) {
+            fat_bits = b.fat_bits;
+            label = b.label;
+        }
     }
-    PARTS[PART_COUNT] = Some(Partition { dev, index, lba, sectors, scheme, fat32, esp, label });
+    PARTS[PART_COUNT] = Some(Partition { dev, index, lba, sectors, scheme, fat_bits, esp, label });
     PART_COUNT += 1;
 }
 
@@ -144,7 +214,7 @@ pub unsafe fn scan_partitions() {
         if blockdev::read_sector(dev, 0, &mut s).is_err() {
             continue;
         }
-        if is_fat32_bpb(&s) {
+        if parse_bpb(&s).is_some() {
             add_partition(dev, 0, 0, total, "RAW", false);
             continue;
         }
@@ -178,6 +248,12 @@ struct Volume {
     part: usize,
     dev: usize,
     base: u64,
+    fat_bits: u8,
+    /// FAT12/16 keep the root directory in a fixed region instead of a cluster
+    /// chain; it is addressed here as pseudo-cluster 1 so the directory walk
+    /// and the path resolver need no special case.
+    root_region_start: u64,
+    root_sectors: u32,
     spc: u32,
     fat_start: u64,
     fat_size: u32,
@@ -197,6 +273,9 @@ static mut VOL: Volume = Volume {
     part: 0,
     dev: 0,
     base: 0,
+    fat_bits: 32,
+    root_region_start: 0,
+    root_sectors: 0,
     spc: 1,
     fat_start: 0,
     fat_size: 0,
@@ -220,45 +299,54 @@ pub unsafe fn is_mounted() -> bool {
 
 pub unsafe fn mount(part_idx: usize) -> R<()> {
     let p = if part_idx < PART_COUNT { PARTS[part_idx] } else { None }.ok_or("no such partition")?;
-    if !p.fat32 {
-        return Err("partition is not FAT32");
+    if p.fat_bits == 0 {
+        return Err("partition is not a FAT volume");
     }
     let mut s = [0u8; SECTOR_SIZE];
     blockdev::read_sector(p.dev, p.lba, &mut s)?;
-    if !is_fat32_bpb(&s) {
-        return Err("invalid FAT32 boot sector");
-    }
-    let spc = s[13] as u32;
-    let reserved = le16(&s, 14) as u64;
-    let num_fats = s[16] as u32;
-    let total = le32(&s, 32) as u64;
-    let fat_size = le32(&s, 36);
+    let bpb = parse_bpb(&s).ok_or("invalid FAT boot sector")?;
+    let spc = bpb.spc;
+    let num_fats = bpb.num_fats;
+    let fat_size = bpb.fat_size;
+    let reserved = bpb.reserved as u64;
     let fat_start = p.lba + reserved;
-    let data_start = fat_start + num_fats as u64 * fat_size as u64;
-    let data_sectors = total.saturating_sub(data_start - p.lba);
+    let root_sectors = (bpb.root_entries * 32).div_ceil(SECTOR_SIZE as u32);
+    let root_region_start = fat_start + num_fats as u64 * fat_size as u64;
+    let data_start = root_region_start + root_sectors as u64;
+    let data_sectors = bpb.total.saturating_sub(data_start - p.lba);
+    // Clamp to what the FAT can describe: 1.5 bytes per entry for FAT12,
+    // 2 for FAT16, 4 for FAT32.
+    let entries_per_fat = match bpb.fat_bits {
+        12 => fat_size as u64 * SECTOR_SIZE as u64 * 2 / 3,
+        16 => fat_size as u64 * SECTOR_SIZE as u64 / 2,
+        _ => fat_size as u64 * SECTOR_SIZE as u64 / 4,
+    };
     let mut total_clusters = (data_sectors / spc as u64) as u32;
-    // Clamp to what the FAT can describe.
-    total_clusters = total_clusters.min(fat_size.saturating_mul(128).saturating_sub(2));
+    total_clusters = total_clusters.min(entries_per_fat.saturating_sub(2) as u32);
     if total_clusters == 0 {
-        return Err("FAT32 volume has no data clusters");
+        return Err("FAT volume has no data clusters");
     }
 
     VOL.mounted = false;
     VOL.part = part_idx;
     VOL.dev = p.dev;
     VOL.base = p.lba;
+    VOL.fat_bits = bpb.fat_bits;
+    VOL.root_region_start = root_region_start;
+    VOL.root_sectors = root_sectors;
     VOL.spc = spc;
     VOL.fat_start = fat_start;
     VOL.fat_size = fat_size;
     VOL.num_fats = num_fats;
     VOL.data_start = data_start;
-    VOL.root = le32(&s, 44);
+    // FAT12/16 have no root cluster: the fixed root region is pseudo-cluster 1.
+    VOL.root = if bpb.fat_bits == 32 { bpb.root_cluster } else { 1 };
     VOL.total_clusters = total_clusters;
-    VOL.label.copy_from_slice(&s[71..82]);
+    VOL.label.copy_from_slice(&bpb.label);
     VOL.fsinfo_valid = false;
     VOL.free_count = 0xFFFF_FFFF;
     VOL.next_free = 0xFFFF_FFFF;
-    let fsinfo_sec = le16(&s, 48) as u64;
+    let fsinfo_sec = bpb.fsinfo_sec as u64;
     if fsinfo_sec != 0 && fsinfo_sec != 0xFFFF && fsinfo_sec < reserved {
         VOL.fsinfo_lba = p.lba + fsinfo_sec;
         let mut fi = [0u8; SECTOR_SIZE];
@@ -289,12 +377,12 @@ pub unsafe fn unmount() -> R<()> {
     Ok(())
 }
 
-/// Picks the best FAT32 volume: label "POSTCARD" > has /POSTCARD > ESP > any.
+/// Picks the best FAT volume: label "POSTCARD" > has /POSTCARD > ESP > any.
 pub unsafe fn automount() -> Option<usize> {
     let mut best: Option<(usize, u32)> = None;
     for i in 0..PART_COUNT {
         let Some(p) = PARTS[i] else { continue };
-        if !p.fat32 || mount(i).is_err() {
+        if p.fat_bits == 0 || mount(i).is_err() {
             continue;
         }
         let mut score = 1;
@@ -319,12 +407,28 @@ pub unsafe fn automount() -> Option<usize> {
 
 #[inline]
 unsafe fn valid_cluster(c: u32) -> bool {
+    if VOL.fat_bits != 32 && c == 1 {
+        return VOL.root_sectors != 0;
+    }
     c >= 2 && c < VOL.total_clusters + 2
 }
 
 #[inline]
 unsafe fn cluster_lba(c: u32) -> u64 {
+    if VOL.fat_bits != 32 && c == 1 {
+        return VOL.root_region_start;
+    }
     VOL.data_start + (c - 2) as u64 * VOL.spc as u64
+}
+
+/// Sectors occupied by a cluster; pseudo-cluster 1 is the fixed root region.
+#[inline]
+unsafe fn cluster_sectors(c: u32) -> u64 {
+    if VOL.fat_bits != 32 && c == 1 {
+        VOL.root_sectors as u64
+    } else {
+        VOL.spc as u64
+    }
 }
 
 unsafe fn fat_load(lba: u64) -> R<()> {
@@ -336,26 +440,93 @@ unsafe fn fat_load(lba: u64) -> R<()> {
     Ok(())
 }
 
-unsafe fn fat_get(c: u32) -> R<u32> {
-    let off = c as u64 * 4;
-    let rel = off / SECTOR_SIZE as u64;
-    fat_load(VOL.fat_start + rel)?;
-    Ok(le32(&FAT_CACHE, (off % SECTOR_SIZE as u64) as usize) & 0x0FFF_FFFF)
+/// Reads one byte of the first FAT copy (FAT12 entries can straddle a sector).
+unsafe fn fat_byte(off: u64) -> R<u8> {
+    fat_load(VOL.fat_start + off / SECTOR_SIZE as u64)?;
+    Ok(FAT_CACHE[(off % SECTOR_SIZE as u64) as usize])
 }
 
-unsafe fn fat_set(c: u32, val: u32) -> R<()> {
-    let off = c as u64 * 4;
+unsafe fn fat_put_byte(off: u64, v: u8) -> R<()> {
     let rel = off / SECTOR_SIZE as u64;
-    let o = (off % SECTOR_SIZE as u64) as usize;
     fat_load(VOL.fat_start + rel)?;
-    let old = le32(&FAT_CACHE, o);
-    let new = (old & 0xF000_0000) | (val & 0x0FFF_FFFF);
-    FAT_CACHE[o..o + 4].copy_from_slice(&new.to_le_bytes());
+    FAT_CACHE[(off % SECTOR_SIZE as u64) as usize] = v;
     for i in 0..VOL.num_fats {
         let lba = VOL.fat_start + i as u64 * VOL.fat_size as u64 + rel;
         blockdev::write_sector(VOL.dev, lba, &FAT_CACHE)?;
     }
     Ok(())
+}
+
+unsafe fn fat_get(c: u32) -> R<u32> {
+    // The fixed root region is a one-shot chain: report end-of-chain so the
+    // directory walk stops after it.
+    if VOL.fat_bits != 32 && c == 1 {
+        return Ok(if VOL.fat_bits == 12 { 0x0FFF } else { 0xFFFF });
+    }
+    match VOL.fat_bits {
+        12 => {
+            let off = c as u64 + c as u64 / 2;
+            let v = fat_byte(off)? as u32 | ((fat_byte(off + 1)? as u32) << 8);
+            Ok(if c & 1 == 0 { v & 0x0FFF } else { v >> 4 })
+        }
+        16 => {
+            let off = c as u64 * 2;
+            fat_load(VOL.fat_start + off / SECTOR_SIZE as u64)?;
+            Ok(le16(&FAT_CACHE, (off % SECTOR_SIZE as u64) as usize) as u32)
+        }
+        _ => {
+            let off = c as u64 * 4;
+            let rel = off / SECTOR_SIZE as u64;
+            fat_load(VOL.fat_start + rel)?;
+            Ok(le32(&FAT_CACHE, (off % SECTOR_SIZE as u64) as usize) & 0x0FFF_FFFF)
+        }
+    }
+}
+
+unsafe fn fat_set(c: u32, val: u32) -> R<()> {
+    if VOL.fat_bits != 32 && c == 1 {
+        return Err("cannot modify the fixed root directory");
+    }
+    match VOL.fat_bits {
+        12 => {
+            let off = c as u64 + c as u64 / 2;
+            let v = fat_byte(off)? as u32 | ((fat_byte(off + 1)? as u32) << 8);
+            let nv = if c & 1 == 0 {
+                (v & 0xF000) | (val & 0x0FFF)
+            } else {
+                (v & 0x000F) | ((val & 0x0FFF) << 4)
+            };
+            fat_put_byte(off, nv as u8)?;
+            fat_put_byte(off + 1, (nv >> 8) as u8)?;
+            Ok(())
+        }
+        16 => {
+            let off = c as u64 * 2;
+            let rel = off / SECTOR_SIZE as u64;
+            let o = (off % SECTOR_SIZE as u64) as usize;
+            fat_load(VOL.fat_start + rel)?;
+            FAT_CACHE[o..o + 2].copy_from_slice(&((val & 0xFFFF) as u16).to_le_bytes());
+            for i in 0..VOL.num_fats {
+                let lba = VOL.fat_start + i as u64 * VOL.fat_size as u64 + rel;
+                blockdev::write_sector(VOL.dev, lba, &FAT_CACHE)?;
+            }
+            Ok(())
+        }
+        _ => {
+            let off = c as u64 * 4;
+            let rel = off / SECTOR_SIZE as u64;
+            let o = (off % SECTOR_SIZE as u64) as usize;
+            fat_load(VOL.fat_start + rel)?;
+            let old = le32(&FAT_CACHE, o);
+            let new = (old & 0xF000_0000) | (val & 0x0FFF_FFFF);
+            FAT_CACHE[o..o + 4].copy_from_slice(&new.to_le_bytes());
+            for i in 0..VOL.num_fats {
+                let lba = VOL.fat_start + i as u64 * VOL.fat_size as u64 + rel;
+                blockdev::write_sector(VOL.dev, lba, &FAT_CACHE)?;
+            }
+            Ok(())
+        }
+    }
 }
 
 unsafe fn alloc_cluster() -> R<u32> {
@@ -416,7 +587,7 @@ unsafe fn commit() -> R<()> {
 
 pub unsafe fn sync() -> R<()> {
     if !VOL.mounted {
-        return Err("no FAT32 volume mounted");
+        return Err("no FAT volume mounted");
     }
     commit()
 }
@@ -547,7 +718,7 @@ unsafe fn dir_walk<F: FnMut(&DirEntry) -> bool>(dir: u32, mut f: F) -> R<bool> {
     let mut guard = 0u32;
     const LFN_POS: [usize; 13] = [1, 3, 5, 7, 9, 14, 16, 18, 20, 22, 24, 28, 30];
     while valid_cluster(c) {
-        for s in 0..VOL.spc as u64 {
+        for s in 0..cluster_sectors(c) {
             let lba = cluster_lba(c) + s;
             let mut sec = [0u8; SECTOR_SIZE];
             blockdev::read_sector(VOL.dev, lba, &mut sec)?;
@@ -775,7 +946,7 @@ unsafe fn dir_add(dir: u32, raw: &[u8; 32]) -> R<(u64, usize)> {
     let mut last = c;
     let mut guard = 0u32;
     while valid_cluster(c) {
-        for s in 0..VOL.spc as u64 {
+        for s in 0..cluster_sectors(c) {
             let lba = cluster_lba(c) + s;
             let mut sec = [0u8; SECTOR_SIZE];
             blockdev::read_sector(VOL.dev, lba, &mut sec)?;
@@ -794,6 +965,9 @@ unsafe fn dir_add(dir: u32, raw: &[u8; 32]) -> R<(u64, usize)> {
         if guard > VOL.total_clusters {
             return Err("directory chain loop");
         }
+    }
+    if VOL.fat_bits != 32 && last == 1 {
+        return Err("root directory is full");
     }
     let n = alloc_cluster()?;
     fat_set(last, n)?;
@@ -843,7 +1017,7 @@ unsafe fn ensure_home() -> R<u32> {
 }
 
 fn require_mounted() -> R<()> {
-    if unsafe { VOL.mounted } { Ok(()) } else { Err("no FAT32 volume mounted (try `disks` / `mount`)") }
+    if unsafe { VOL.mounted } { Ok(()) } else { Err("no FAT volume mounted (try `disks` / `mount`)") }
 }
 
 // ----------------------------------------------------------------------------
@@ -1080,7 +1254,7 @@ pub unsafe fn status() -> R<()> {
     kprintln_colored(
         0x0E,
         0x00FFB81C,
-        format_args!("FAT32 volume \"{}\" on {} part {} ({} @ LBA {})", label, dev.name_str(), p.index, p.scheme, p.lba),
+        format_args!("FAT{} volume \"{}\" on {} part {} ({} @ LBA {})", VOL.fat_bits, label, dev.name_str(), p.index, p.scheme, p.lba),
     );
     kprintln_colored(
         0x0F,
