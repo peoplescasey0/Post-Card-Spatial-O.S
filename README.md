@@ -7,18 +7,28 @@ operating systems (Windows, Linux, macOS, Kali, AI copilot) as cards in space.
 For comprehensive operating procedures, 3D navigation shortcuts, multi-OS hypervisor profiles, AI Butler orchestration, Freeplane mind mapping, and commercial editions, see the **[Official User Manual & Field Guide](USER_MANUAL.md)** or press `?` inside the running workspace.
 
 ## Layout
+- `kernel/` - the bare-metal `no_std` x86_64 Rust engine. `scripts/create_iso.sh`
+  builds it and wraps it in a bootable Multiboot2 ISO.
 - `workspace-prototype/` - Vite + TypeScript + Three.js front end, noVNC display,
   and `guest-api.mjs`, the QEMU/QMP/VNC backend that starts and manages guests.
 - `supabase/` - Supabase project configuration.
-- `scripts/stripe_sync.mjs` - Stripe catalog sync (reads keys from environment variables).
+- `scripts/` - engine build, boot and test scripts, plus `stripe_sync.mjs`
+  (Stripe catalog sync; reads keys from environment variables).
 
-## Relationship to micro-host
-The bare-metal kernel, user programs and security layer live in a separate repo:
-https://github.com/peoplescasey0/micro-host
+## The engine, and the archived prototype
+This repo holds both halves: `workspace-prototype/` is the interface, and `kernel/`
+is the engine it boots. Build the engine from here:
 
-Spatial OS is the product; micro-host is the engine it is meant to run on.
-Long term the two merge, with the workspace talking to the host through a small,
-versioned VM-control API.
+```bash
+./scripts/create_iso.sh          # kernel -> target/postcard-spatial-os.iso
+```
+
+Then either point `POSTCARD_KERNEL` at the kernel ELF, or load the built ISO into
+a card with "bring your own ISO" - the supported path for the Multiboot2 kernel.
+
+`micro-host` (https://github.com/peoplescasey0/micro-host) is **archived**: it held
+the v0.1.0-alpha prototype of the kernel and stays read-only for history. That
+prototype is not carried here. See `.archive/README.md`.
 
 ## Run
 ```powershell
