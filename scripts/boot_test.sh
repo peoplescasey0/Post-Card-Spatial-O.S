@@ -4,6 +4,21 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
+# The kernel builds to kernel/target, while older builds left the ELF in the
+# repo-root target/. Accept either so the raw-disk path can find it.
+kernel_elf() {
+    local candidate
+    for candidate in \
+        "${REPO_ROOT}/kernel/target/x86_64-unknown-none/release/postcard-minimal-kernel" \
+        "${REPO_ROOT}/target/x86_64-unknown-none/release/postcard-minimal-kernel"; do
+        if [[ -f "${candidate}" ]]; then
+            echo "${candidate}"
+            return 0
+        fi
+    done
+    return 1
+}
+
 TIMEOUT_SECS=12
 ISO_PATH="${REPO_ROOT}/target/postcard-spatial-os.iso"
 DISK_PATH="${REPO_ROOT}/target/postcard-os.raw"
@@ -42,8 +57,19 @@ rm -f "$SERIAL_LOG"
 
 if [[ -n "$USE_DISK" ]]; then
     if [[ ! -f "$DISK_PATH" ]]; then
+        INSTALLER="${SCRIPT_DIR}/install_postcard_os_wsl.sh"
+        if [[ ! -x "$INSTALLER" ]]; then
+            echo "Error: no raw disk at $DISK_PATH, and install_postcard_os_wsl.sh is not in this checkout." >&2
+            echo "Build the disk image first, or drop --disk to test the ISO instead." >&2
+            exit 1
+        fi
+        ELF="$(kernel_elf || true)"
+        if [[ -z "${ELF}" ]]; then
+            echo "Error: kernel ELF not found; run scripts/create_iso.sh first." >&2
+            exit 1
+        fi
         echo "Raw disk not found at $DISK_PATH, building via install_postcard_os_wsl.sh..."
-        "${SCRIPT_DIR}/install_postcard_os_wsl.sh" "$DISK_PATH" "${REPO_ROOT}/target/x86_64-unknown-none/release/postcard-minimal-kernel"
+        "${INSTALLER}" "$DISK_PATH" "${ELF}"
     fi
     echo "Running boot test on raw disk: $DISK_PATH (timeout: ${TIMEOUT_SECS}s)..."
     BOOT_ARGS=(-drive "file=$DISK_PATH,format=raw,if=ide,index=0,snapshot=on" -boot order=c)
