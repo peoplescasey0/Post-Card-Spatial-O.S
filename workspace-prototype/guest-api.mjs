@@ -26,7 +26,11 @@ const WINDOWS_MEMORY_MB = 4096;
 const MAX_GUEST_MEMORY_MB = 8192;
 const MAX_GUEST_VCPUS = 4;
 const EXPECTED_DISK_SIZE = 32 * 1024 * 1024 * 1024;
-const START_TIMEOUT_MS = 20_000;
+// How long a freshly spawned QEMU may take to open its display port. Direct
+// launches answer in well under a second, but on Windows the Linux guest is
+// spawned through `wsl.exe -d <distro> --exec`, and a cold distro start has
+// been seen to eat the old 20s budget on its own.
+const START_TIMEOUT_MS = 60_000;
 const GUEST_RUNTIME_KEY = Symbol.for("post-card-os.guest-runtime");
 const TELEMETRY_SOCKETS_KEY = Symbol.for("post-card-os.telemetry-sockets");
 const KERNEL_HEAP_CAPACITY_KB = 8192;
@@ -162,7 +166,21 @@ async function executableExists(executable) {
       return false;
     }
   }
-  return true;
+  // A bare name has to be resolved through PATH. Returning true unconditionally
+  // made every "was not found" guard below dead code on Linux and macOS, so a
+  // missing QEMU surfaced as a raw spawn ENOENT instead of a usable message.
+  const extensions = process.platform === "win32" ? ["", ".exe", ".cmd", ".bat"] : [""];
+  const directories = (process.env.PATH ?? "").split(path.delimiter).filter(Boolean);
+  for (const directory of directories) {
+    for (const extension of extensions) {
+      try {
+        if ((await stat(path.join(directory, executable + extension))).isFile()) return true;
+      } catch {
+        // keep looking
+      }
+    }
+  }
+  return false;
 }
 
 async function imageInfo(qemuImgPath, diskPath) {
@@ -260,8 +278,14 @@ function wait(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
-async function waitForQemu(child, port) {
-  const deadline = Date.now() + START_TIMEOUT_MS;
+function startTimeoutMs() {
+  const raw = Number(process.env.POSTCARD_START_TIMEOUT_MS);
+  return Number.isFinite(raw) && raw > 0 ? raw : START_TIMEOUT_MS;
+}
+
+async function waitForQemu(child, port, guest) {
+  const budget = startTimeoutMs();
+  const deadline = Date.now() + budget;
   while (Date.now() < deadline) {
     if (child.exitCode !== null) {
       throw new GuestApiError(500, `QEMU exited before its display was ready (exit ${child.exitCode}).`);
@@ -269,7 +293,16 @@ async function waitForQemu(child, port) {
     if (await tcpPortIsOpen(port)) return;
     await wait(150);
   }
-  throw new GuestApiError(504, "QEMU started but its VNC display did not become ready in time.");
+  const seconds = Math.round(budget / 1000);
+  const details = (guest?.stderr ?? "").trim().split(/\r?\n/).slice(-4).join(" ");
+  throw new GuestApiError(
+    504,
+    `QEMU started but its display never opened port ${port} within ${seconds}s.`
+    + (details
+      ? ` QEMU said: ${details}`
+      : " QEMU printed nothing, so it is most likely still starting (a cold WSL launch is slow) or waiting on a locked disk image.")
+    + " Set POSTCARD_START_TIMEOUT_MS to wait longer.",
+  );
 }
 
 function buildNetworkArgs(networkMode = "nat", deviceModel = "virtio-net-pci") {
@@ -288,7 +321,18 @@ function buildNetworkArgs(networkMode = "nat", deviceModel = "virtio-net-pci") {
   ];
 }
 
-function qemuArguments({ bootMode, cardId, diskPath, isoPath, ports, networkMode = "nat", dropDir, memoryMb = 1024, vcpus = 2, isMacOs = false, isAndroid = false, openCorePath = "", macOvmfCode = "", macOvmfVars = "", kernelPath = "", initrdPath = "" }) {
+// Single-threaded TCG is the slowest option QEMU has, and it is what made the
+// Debian golden-image install crawl. Multi-threaded TCG is a strict speed-up and
+// is safe everywhere; set POSTCARD_LINUX_ACCEL=kvm to hand the guest the host CPU
+// instead (much faster again, but only where /dev/kvm is usable by this process).
+function linuxAccelArgs() {
+  if (process.platform === "win32") return ["-accel", "whpx,kernel-irqchip=off"];
+  const override = process.env.POSTCARD_LINUX_ACCEL;
+  if (override) return ["-accel", override];
+  return ["-accel", "tcg,thread=multi"];
+}
+
+export function qemuArguments({ bootMode, cardId, diskPath, isoPath, ports, networkMode = "nat", dropDir, memoryMb = 1024, vcpus = 2, isMacOs = false, isAndroid = false, openCorePath = "", macOvmfCode = "", macOvmfVars = "", kernelPath = "", initrdPath = "" }) {
   if (isMacOs) {
     const args = [
       "-name", `Post Card ${cardId} macOS guest`,
@@ -348,7 +392,7 @@ function qemuArguments({ bootMode, cardId, diskPath, isoPath, ports, networkMode
     "-machine", "q35",
     // WHPX's in-kernel IRQ chip hangs SeaBIOS at "Booting from Hard Disk...";
     // the userspace IRQ chip boots reliably.
-    "-accel", process.platform === "win32" ? "whpx,kernel-irqchip=off" : "tcg",
+    ...linuxAccelArgs(),
     "-cpu", cpuModel,
     "-smp", String(vcpus),
     "-m", String(memoryMb),
@@ -389,7 +433,14 @@ function qemuArguments({ bootMode, cardId, diskPath, isoPath, ports, networkMode
     }
     args.push("-boot", bootMode === "installer" ? "order=d,menu=on" : "order=c,menu=on");
   } else if (bootMode === "installer") {
-    args.push("-cdrom", isoPath, "-boot", "order=d");
+    // A bare `-cdrom` claims IDE index 2, which is exactly where the
+    // paper-plane FAT drive above sits, so QEMU exits 1 with "drive with
+    // bus=2, unit=0 (index=2) exists" and the guest never starts. Pin the CD
+    // to its own free slot instead, the way windowsQemuArguments already does.
+    args.push(
+      "-drive", `file=${isoPath},media=cdrom,readonly=on,if=ide,index=1`,
+      "-boot", "order=d",
+    );
   } else {
     args.push("-boot", "order=c");
   }
@@ -1804,7 +1855,7 @@ export function createGuestApi(options = {}) {
         child.once("spawn", resolve);
         child.once("error", reject);
       });
-      await waitForQemu(child, guest.ports.websocketPort);
+      await waitForQemu(child, guest.ports.websocketPort, guest);
       guest.phase = "running";
       guest.crashMessage = undefined;
       if (os === WINDOWS_OS) startWindowsWatchdog(guest, cardId);
@@ -1876,7 +1927,12 @@ export function createGuestApi(options = {}) {
       const message = error instanceof Error ? error.message : String(error);
       const details = guest.stderr.trim().split(/\r?\n/).slice(-4).join(" ");
       guest.error = details && !message.includes(details) ? `${message} ${details}` : message;
-      throw error;
+      // Re-throw with guest.error so the client sees the same diagnostic that is
+      // stored on the guest; falling through to the raw error dropped QEMU stderr.
+      throw new GuestApiError(
+        error instanceof GuestApiError ? error.status : 500,
+        guest.error,
+      );
     }
   }
 

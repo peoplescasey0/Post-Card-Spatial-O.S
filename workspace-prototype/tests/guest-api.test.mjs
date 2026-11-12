@@ -545,3 +545,30 @@ test("ai-command synthesizes OS-specific SecOps playbooks and snapshot manages T
   assert.equal(memProfilePayload.memoryProfiles["windows-2"], "eco");
   assert.equal(memProfilePayload.maxConcurrentGuests, 6);
 });
+
+test("guest start says QEMU was not found instead of spawning a bare name", async () => {
+  // A bare executable name used to be reported as "present" without ever checking
+  // PATH, so this guard was dead code and a missing QEMU only surfaced later as a
+  // raw `spawn qemu-system-x86_64 ENOENT`.
+  const previousQemu = process.env.POSTCARD_QEMU;
+  process.env.POSTCARD_QEMU = "post-card-no-such-qemu-binary";
+  let api;
+  try {
+    api = createServer(createGuestApi());
+    await new Promise((resolve) => api.listen(0, "127.0.0.1", resolve));
+    const response = await fetch(`http://127.0.0.1:${api.address().port}/api/guest/start`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ os: "linux", bootMode: "installer", cardId: "linux" }),
+    });
+    assert.equal(response.status, 503);
+    assert.match(
+      (await response.json()).error,
+      /QEMU was not found at post-card-no-such-qemu-binary\. Set POSTCARD_QEMU/,
+    );
+  } finally {
+    if (api) await new Promise((resolve) => api.close(resolve));
+    if (previousQemu === undefined) delete process.env.POSTCARD_QEMU;
+    else process.env.POSTCARD_QEMU = previousQemu;
+  }
+});
