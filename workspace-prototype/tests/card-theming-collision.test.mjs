@@ -530,16 +530,23 @@ test("Tier 1.6: Feature 6 — Button Interactivity Safety across all DOM buttons
 });
 
 test("Tier 1.7: Feature 7 — Fedora Remote Workstation Execution & Infrastructure Verification", () => {
-  // Assertion 1: .env or .env.example specifies Fedora host
-  const envPath = fs.existsSync(path.join(workspaceDir, ".env"))
-    ? path.join(workspaceDir, ".env")
-    : path.join(workspaceDir, ".env.example");
+  // Assertion 1: the template declares the Fedora host variable; a real .env fills it in
+  const localEnvPath = path.join(workspaceDir, ".env");
+  const hasLocalEnv = fs.existsSync(localEnvPath);
+  const envPath = hasLocalEnv ? localEnvPath : path.join(workspaceDir, ".env.example");
   const envContent = fs.readFileSync(envPath, "utf-8");
   assert.match(
     envContent,
-    /POSTCARD_KVM_HOST=casey@10\.0\.0\.2/i,
-    "Environment file must specify Fedora KVM host 10.0.0.2"
+    /^POSTCARD_KVM_HOST=/m,
+    "Environment file must declare POSTCARD_KVM_HOST"
   );
+  if (hasLocalEnv) {
+    assert.match(
+      envContent,
+      /^POSTCARD_KVM_HOST=\S+@\S+$/m,
+      "A real .env must point POSTCARD_KVM_HOST at user@host"
+    );
+  }
 
   // Assertion 2: PROJECT.md documents Fedora Workstation utilization
   const projectMd = fs.readFileSync(path.join(repoRoot, "PROJECT.md"), "utf-8");
