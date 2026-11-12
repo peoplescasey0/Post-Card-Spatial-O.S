@@ -481,6 +481,9 @@ pub(crate) unsafe fn serial_try_getc() -> Option<u8> {
     }
 }
 
+/// Shift key state (PS/2 set 1: make 0x2A/0x36, break 0xAA/0xB6).
+static PS2_SHIFT: AtomicBool = AtomicBool::new(false);
+
 pub(crate) unsafe fn ps2_try_getc() -> Option<u8> {
     let status = inb(0x64);
     if (status & 0x01) == 0 {
@@ -492,20 +495,63 @@ pub(crate) unsafe fn ps2_try_getc() -> Option<u8> {
         return None;
     }
     let scancode = inb(0x60);
+    // Shift make/break must be handled before the release filter below.
+    match scancode {
+        0x2A | 0x36 => {
+            PS2_SHIFT.store(true, Ordering::Relaxed);
+            return None;
+        }
+        0xAA | 0xB6 => {
+            PS2_SHIFT.store(false, Ordering::Relaxed);
+            return None;
+        }
+        _ => {}
+    }
     if (scancode & 0x80) != 0 {
         return None; // Key release
     }
-    match scancode {
-        0x1C => Some(b'\n'),
-        0x0E => Some(0x08),
-        0x39 => Some(b' '),
-        0x02..=0x0B => Some(b"1234567890"[(scancode - 0x02) as usize]),
-        0x0C => Some(b'-'),
-        0x10..=0x19 => Some(b"qwertyuiop"[(scancode - 0x10) as usize]),
-        0x1E..=0x26 => Some(b"asdfghjkl"[(scancode - 0x1E) as usize]),
-        0x2C..=0x32 => Some(b"zxcvbnm"[(scancode - 0x2C) as usize]),
-        _ => None,
-    }
+    let shift = PS2_SHIFT.load(Ordering::Relaxed);
+    let ch = match scancode {
+        0x1C => b'\n',
+        0x0E => 0x08,
+        0x39 => b' ',
+        0x02..=0x0B => {
+            let i = (scancode - 0x02) as usize;
+            if shift {
+                *b"!@#$%^&*()".get(i)?
+            } else {
+                *b"1234567890".get(i)?
+            }
+        }
+        // US layout punctuation. Paths and messages need these: without 0x35 and
+        // 0x34 there is no way to type "cat /plane.txt" on a laptop keyboard.
+        0x0C => if shift { b'_' } else { b'-' },
+        0x0D => if shift { b'+' } else { b'=' },
+        0x1A => if shift { b'{' } else { b'[' },
+        0x1B => if shift { b'}' } else { b']' },
+        0x27 => if shift { b':' } else { b';' },
+        0x28 => if shift { b'"' } else { b'\'' },
+        0x29 => if shift { b'~' } else { b'`' },
+        0x2B => if shift { b'|' } else { b'\\' },
+        0x33 => if shift { b'<' } else { b',' },
+        0x34 => if shift { b'>' } else { b'.' },
+        0x35 => if shift { b'?' } else { b'/' },
+        0x10..=0x19 | 0x1E..=0x26 | 0x2C..=0x32 => {
+            let (base, table) = match scancode {
+                0x10..=0x19 => (0x10u8, &b"qwertyuiop"[..]),
+                0x1E..=0x26 => (0x1Eu8, &b"asdfghjkl"[..]),
+                _ => (0x2Cu8, &b"zxcvbnm"[..]),
+            };
+            let c = *table.get((scancode - base) as usize)?;
+            if shift {
+                c.to_ascii_uppercase()
+            } else {
+                c
+            }
+        }
+        _ => return None,
+    };
+    Some(ch)
 }
 
 // Compact 8x8 ASCII bitmap font for UEFI GOP Linear Framebuffer rendering
@@ -559,6 +605,15 @@ pub(crate) fn glyph_8x8(ch: u8) -> [u8; 8] {
         b'>' => [0x60, 0x30, 0x18, 0x0C, 0x18, 0x30, 0x60, 0x00],
         b'+' => [0x00, 0x18, 0x18, 0x7E, 0x18, 0x18, 0x00, 0x00],
         b'_' => [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x7E, 0x00],
+        // Glyphs for keys the PS/2 table now produces but the font lacked.
+        b'`' => [0x30, 0x18, 0x0C, 0x00, 0x00, 0x00, 0x00, 0x00],
+        b'^' => [0x18, 0x3C, 0x66, 0x00, 0x00, 0x00, 0x00, 0x00],
+        b'~' => [0x00, 0x00, 0x00, 0x76, 0xDC, 0x00, 0x00, 0x00],
+        b'$' => [0x18, 0x3E, 0x60, 0x3C, 0x06, 0x7C, 0x18, 0x00],
+        b'&' => [0x38, 0x6C, 0x6C, 0x38, 0x6E, 0x6C, 0x3B, 0x00],
+        b'<' => [0x06, 0x0C, 0x18, 0x30, 0x18, 0x0C, 0x06, 0x00],
+        b'{' => [0x0E, 0x18, 0x18, 0x70, 0x18, 0x18, 0x0E, 0x00],
+        b'}' => [0x70, 0x18, 0x18, 0x0E, 0x18, 0x18, 0x70, 0x00],
         b'!' => [0x18, 0x18, 0x18, 0x18, 0x18, 0x00, 0x18, 0x00],
         b',' => [0x00, 0x00, 0x00, 0x00, 0x00, 0x18, 0x18, 0x30],
         b';' => [0x00, 0x18, 0x18, 0x00, 0x18, 0x18, 0x30, 0x00],
