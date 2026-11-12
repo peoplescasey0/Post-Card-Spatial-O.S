@@ -1081,8 +1081,10 @@ unsafe fn init_vtx_hypervisor() {
             write_volatile(core::ptr::addr_of_mut!(vmxon_region) as *mut u32, rev_id);
             write_volatile(core::ptr::addr_of_mut!(guest_vmcs_region) as *mut u32, rev_id);
 
-            // Execute hardware `vmxon`
-            let mut vmxon_failed: u8 = 1;
+            // Execute hardware `vmxon`. `setbe` always writes the flag, so the
+            // previous value is never read - declaring it uninitialised keeps that
+            // explicit and silences `unused_assignments`.
+            let mut vmxon_failed: u8;
             asm!(
                 "vmxon [{pa}]",
                 "setbe {fail}",
@@ -1094,8 +1096,8 @@ unsafe fn init_vtx_hypervisor() {
             if vmxon_failed == 0 {
                 VTX_STATE.vmx_root_active = true;
 
-                // Initialize and load the active Guest VMCS (`vmclear` + `vmptrld`)
-                let mut vmcs_failed: u8 = 1;
+                // Initialise and load the active Guest VMCS (`vmclear` + `vmptrld`)
+                let mut vmcs_failed: u8;
                 asm!(
                     "vmclear [{pa}]",
                     "vmptrld [{pa}]",
