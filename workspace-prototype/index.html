@@ -213,6 +213,10 @@
                 <span class="profile-action-icon" aria-hidden="true">💎</span>
                 <span><strong>Commercial Editions &amp; Marketplace</strong><small>Pro, Enterprise, AI Butler &amp; Add-On DLCs</small></span>
               </button>
+              <button class="profile-action" id="profile-restore-option" type="button">
+                <span class="profile-action-icon" aria-hidden="true">🔑</span>
+                <span><strong>Restore account &amp; purchases</strong><small>Recover license key, tier, profile &amp; add-ons</small></span>
+              </button>
               <button class="profile-action" id="profile-edit-option" type="button">
                 <span class="profile-action-icon" aria-hidden="true">✎</span>
                 <span><strong>Edit local profile</strong><small>Name and initials on this device</small></span>
@@ -298,12 +302,13 @@
               <span class="button-icon" aria-hidden="true">➤</span>
               <span>Send a paper plane</span>
             </button>
-            <details class="pulldown omni-pulldown" id="omni-pulldown">
+            <!-- Split Pulldown 1: SecOps & Recon Playbooks -->
+            <details class="pulldown omni-pulldown" id="secops-pulldown">
               <summary class="dock-button pulldown-dock-trigger">
-                <span>Playbooks &amp; Ops ▾</span>
+                <span>🛡️ SecOps Playbooks ▾</span>
               </summary>
-              <div class="pulldown-panel pulldown-panel-down" id="omni-chips">
-                <div class="pulldown-section-label">SECOPS &amp; RECON PLAYBOOKS</div>
+              <div class="pulldown-panel pulldown-panel-down" id="secops-chips">
+                <div class="pulldown-section-label">CYBER RANGE &amp; RECON OPS</div>
                 <div class="pulldown-grid">
                   <button class="omni-chip" data-omni-action="recon-ports" type="button" title="Enumerate listening TCP/UDP ports">⚡ Recon Ports</button>
                   <button class="omni-chip" data-omni-action="priv-audit" type="button" title="Audit SUID binaries &amp; privilege posture">🛡️ Priv Audit</button>
@@ -311,7 +316,16 @@
                   <button class="omni-chip" data-omni-action="harden-fw" type="button" title="Audit firewall &amp; SSH hardening">🔥 Firewall</button>
                   <button class="omni-chip" data-omni-action="sys-forensics" type="button" title="Inspect top processes &amp; cron persistence">🕵️ Forensics</button>
                 </div>
-                <div class="pulldown-section-label">HYPERVISOR &amp; HORIZON OPS</div>
+              </div>
+            </details>
+
+            <!-- Split Pulldown 2: Hypervisor & Horizon Virtualization Ops -->
+            <details class="pulldown omni-pulldown" id="horizon-pulldown">
+              <summary class="dock-button pulldown-dock-trigger">
+                <span>⚡ Hypervisor Ops ▾</span>
+              </summary>
+              <div class="pulldown-panel pulldown-panel-down" id="horizon-chips">
+                <div class="pulldown-section-label">SNAPSHOT &amp; SWARM CONTROL</div>
                 <div class="pulldown-grid">
                   <button class="omni-chip omni-chip-horizon" data-omni-action="snapshot-save" type="button" title="Create a Time-Travel Savepoint (RAM + Disk)">⏱️ Savepoint</button>
                   <button class="omni-chip omni-chip-horizon" data-omni-action="snapshot-rewind" type="button" title="Rewind card to last Time-Travel Savepoint">⏪ Rewind</button>
@@ -343,6 +357,39 @@
                 <span class="room-selection-label">IN FOCUS</span>
                 <strong id="room-selected-name">Fedora · Workstation</strong>
                 <span class="room-state" id="room-selected-status">DEMO · DISCONNECTED</span>
+              </div>
+            </div>
+            <div class="kernel-hud-pod" id="kernel-hud-pod" aria-label="Post Card OS // Mission Control Telemetry">
+              <div class="kernel-hud-header">
+                <span class="kernel-hud-title">Post Card OS // Mission Control</span>
+                <button class="kernel-romy-toggle" id="romy-vault-toggle" type="button" title="Toggle PA-Romy Coprocessor Vault Enclave">⚡ PA-ROMY</button>
+              </div>
+              <div class="kernel-romy-row">
+                <span class="kernel-romy-dot" aria-hidden="true"></span>
+                <span class="kernel-romy-state" id="romy-status" data-romy-active="true">VAULT ACTIVE // ENCLAVE LOCKED</span>
+              </div>
+              <div class="kernel-heap-row">
+                <div class="kernel-heap-meta">
+                  <span>KERNEL HEAP PRESSURE</span>
+                  <span id="heap-pressure-label">25% (2048 KB)</span>
+                </div>
+                <div class="kernel-heap-track" role="progressbar" aria-label="Kernel heap pressure" aria-valuemin="0" aria-valuemax="100">
+                  <div class="kernel-heap-fill" id="heap-meter" style="width: 25%;" aria-valuenow="25"></div>
+                </div>
+              </div>
+              <div class="kernel-patent-hud" id="kernel-patent-hud" style="margin-top: 8px; font-size: 11px; color: #94a3b8; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 6px;">
+                <div style="display: flex; justify-content: space-between; margin-bottom: 2px;">
+                  <span style="color: #38bdf8;">NVIDIA MAX-Q:</span>
+                  <span id="maxq-hud-label" style="color: #22c55e;">1500 MHz @ 66W (MAX_EFF)</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; margin-bottom: 2px;">
+                  <span style="color: #ffb81c;">VOYAGER SHM:</span>
+                  <span id="shm-hud-label" style="color: #38bdf8;">3 Topics (Lossless)</span>
+                </div>
+                <div style="display: flex; justify-content: space-between;">
+                  <span style="color: #a855f7;">ARAIS REMOTING:</span>
+                  <span id="arais-hud-label" style="color: #f8fafc;">99.9% Vector Opt</span>
+                </div>
               </div>
             </div>
           </aside>
@@ -628,13 +675,17 @@
             <details class="manual-chapter">
               <summary class="manual-chapter-summary">
                 <span class="manual-chapter-num">CH 02</span>
-                <span class="manual-chapter-title">Multi-OS Hypervisor &amp; Eco RAM Thinning</span>
+                <span class="manual-chapter-title">Multi-OS Hypervisor, Eco RAM Thinning &amp; Split Ops</span>
                 <span class="pulldown-chevron">▾</span>
               </summary>
               <div class="manual-chapter-body">
-                <div class="help-row"><span class="help-key">MULTI-INSTANCE</span><span>Run up to 6 concurrent Windows 11, Linux, and Android cards. Secondary Windows cards auto-clone from your base disk with isolated TPM 2.0 state.</span></div>
-                <div class="help-row"><span class="help-key">🍃 ECO RAM MODE</span><span>Streamlined default allocation: <strong>2 GiB</strong> for Windows, <strong>1 GiB</strong> for Linux &amp; Android (cycle via <em>Playbooks &amp; Ops ▾ → 🍃 Eco RAM</em>).</span></div>
-                <div class="help-row"><span class="help-key">VIRTIO BALLOON</span><span>VMs include <code>virtio-balloon</code> for guest memory reclamation when supported by the guest. Host page merging is disabled for compatibility.</span></div>
+                <div class="help-row"><span class="help-key">MULTI-INSTANCE</span><span>Run up to 6 concurrent Windows 11, Linux, macOS, and Android cards. Secondary Windows cards auto-clone from your base disk with isolated TPM 2.0 state.</span></div>
+                <div class="help-row"><span class="help-key">🍃 ECO RAM MODE</span><span>Streamlined default allocation: <strong>2 GiB</strong> for Windows, <strong>1 GiB</strong> for Linux &amp; Android (cycle via <em>⚡ Hypervisor Ops ▾ → 🍃 Eco RAM Thinning</em>).</span></div>
+                <div class="help-row"><span class="help-key">⚡ REVIOS PLAYBOOK</span><span><strong>Windows 11 VM Optimization Only</strong>: Drop <code>AceSetup.exe</code> and <code>Revi-PB-26.10.apbx</code> via Paper Planes to strip bloat and telemetry, reducing idle RAM to ~1.3 GiB (100% legal local script transformation; not for Android/Linux).</span></div>
+                <div class="help-row"><span class="help-key">📱 ANDROID SANDBOX</span><span>Pure open-source AOSP / Android-x86 (Apache 2.0) with <code>-cpu host</code> and standard VGA. No proprietary GMS pre-bundled; end users can sideload F-Droid / Aurora / MicroG locally.</span></div>
+                <div class="help-row"><span class="help-key">🛡️ SECOPS PLAYBOOKS</span><span>Dedicated security suite: <em>Host Isolation</em> (unplug virtual NICs), <em>RAM Sanitizer</em> (VirtIO balloon scrub), <em>SSH Lockdown</em> (drop remote sessions), and <em>C2 Decoy</em> (spool canary sockets).</span></div>
+                <div class="help-row"><span class="help-key">⚡ HYPERVISOR OPS</span><span>Dedicated infrastructure operations: <em>Emergency Crashdump</em> (core dump extraction), <em>VRAM Compact</em> (defragment host framebuffers), and <em>Cold Evacuate</em> (safe flush and power down).</span></div>
+                <div class="help-row"><span class="help-key">VIRTIO BALLOON</span><span>VMs include <code>virtio-balloon</code> for dynamic guest memory reclamation. Host page merging is disabled for hardware compatibility.</span></div>
               </div>
             </details>
             <details class="manual-chapter">
@@ -700,26 +751,68 @@
             <details class="manual-chapter">
               <summary class="manual-chapter-summary">
                 <span class="manual-chapter-num">CH 08</span>
-                <span class="manual-chapter-title">Custom Manual Placeholder &amp; Operator Notes</span>
-                <span class="pulldown-chevron">▾</span>
-              </summary>
-              <div class="manual-chapter-body">
-                <label for="manual-custom-notes">CUSTOM MANUAL SECTIONS / OPERATOR NOTES (AUTO-SAVED)</label>
-                <textarea id="manual-custom-notes" rows="4" placeholder="Write your own custom manual chapters, onboarding notes, or SOPs here…"></textarea>
-                <p class="dialog-subhint">Saved automatically in local storage so you can expand your official User Manual anytime.</p>
-              </div>
-            </details>
-            <details class="manual-chapter" open>
-              <summary class="manual-chapter-summary">
-                <span class="manual-chapter-num">CH 09</span>
                 <span class="manual-chapter-title">Commercial Editions, Licensing &amp; Add-On Marketplace</span>
                 <span class="pulldown-chevron">▾</span>
               </summary>
               <div class="manual-chapter-body">
                 <div class="help-row"><span class="help-key">🚀 FREEMIUM CORE + PRO</span><span><strong>The Developer Model:</strong> Open-core Rust micro-host, basic QEMU virtualization, and 3D card turntable free forever. Paid Pro ($19/mo or $190/yr) unlocks Pro AV matrix, NVIDIA GPU compute sandbox, and 24-VM concurrent scaling.</span></div>
                 <div class="help-row"><span class="help-key">🛡️ ENTERPRISE B2B</span><span><strong>Security &amp; Forensics Appliance:</strong> Air-gapped compliance workstation for SecOps and corporate IT. Licensed per-seat / per-node with tamper-evident audit logs, isolated snapshot Time-Travel recovery, and golden base locks.</span></div>
-                <div class="help-row"><span class="help-key">🤖 AI BUTLER HYBRID</span><span><strong>Smart Automation Subscription (coming soon):</strong> 100% local hypervisor protects user privacy while cloud-assisted AI co-pilot handles custom agent scripting, automated multi-VM provisioning, intelligent throttling, and predictive diagnostics.</span></div>
-                <div class="help-row"><span class="help-key">🧩 ADD-ON MARKETPLACE</span><span><strong>Modular Micro-DLCs:</strong> Clean empty canvas with modular card slots. Standalone DLCs planned (coming soon): Pro A/V Plugin, Deep-Dive Forensics Pack, Advanced NVIDIA Compute Module, and Swarm DirectLink 10.0.0.2 Gateway.</span></div>
+                <div class="help-row"><span class="help-key">🤖 AI BUTLER HYBRID</span><span><strong>Smart Automation Subscription:</strong> Active at $29/mo ($290/yr). 100% local hypervisor protects privacy while local AI co-pilot handles custom agent scripting, automated multi-VM provisioning, intelligent VirtIO balloon throttling, and predictive diagnostics.</span></div>
+                <div class="help-row"><span class="help-key">🧩 ADD-ON MARKETPLACE</span><span><strong>Modular Micro-DLCs:</strong> Clean canvas with modular card slots. 1-click active micro-DLC slots: 🎛️ The A/V Production Plugin, 🕵️ Deep-Dive Forensics Pack, ⚡ Advanced NVIDIA Compute Module, and 🌐 Swarm DirectLink 10.0.0.2 Gateway.</span></div>
+              </div>
+            </details>
+            <details class="manual-chapter">
+              <summary class="manual-chapter-summary">
+                <span class="manual-chapter-num">CH 09</span>
+                <span class="manual-chapter-title">Dual-Engine AI Butler ("The One") &amp; Blueprint Awareness</span>
+                <span class="pulldown-chevron">▾</span>
+              </summary>
+              <div class="manual-chapter-body">
+                <div class="help-row"><span class="help-key">🤖 DUAL LOCAL MODELS</span><span>Powered by 100% local inference on Fedora Workstation <code>10.0.0.2:11434</code> via Ollama. <code>qwen2.5-coder:1.5b</code> handles terminal commands, scripting, and Freeplane synthesis; <code>llama3.2:1b</code> handles conversational dialog.</span></div>
+                <div class="help-row"><span class="help-key">🔀 SMART AUTO-ROUTING</span><span>Intent-aware classifier automatically dispatches prompts to the optimal engine, with instant manual model override in the AI Butler toolbar.</span></div>
+                <div class="help-row"><span class="help-key">📐 BLUEPRINT INGESTION</span><span>AI Butler is self-aware of system architecture blueprints located in <code>/blueprints/</code>: System Mindmap, ERD Data Model, CI/CD Pipeline, LiDAR Decimation Filter, and Product Development Flowchart.</span></div>
+                <div class="help-row"><span class="help-key">🛠️ VIRTUAL TOOLING</span><span>Equipped with SwiftShader Vulkan software rasterizer ICD for headless GPU rendering and VS Code CLI hook integration (<code>code --install-extension</code>).</span></div>
+              </div>
+            </details>
+            <details class="manual-chapter">
+              <summary class="manual-chapter-summary">
+                <span class="manual-chapter-num">CH 10</span>
+                <span class="manual-chapter-title">Freeplane Mind Map Engine &amp; SpatialNode 3D Topology</span>
+                <span class="pulldown-chevron">▾</span>
+              </summary>
+              <div class="manual-chapter-body">
+                <div class="help-row"><span class="help-key">🧠 FREEPLANE XML (.MM)</span><span>Full FreeMind/Freeplane 1.11+ XML serialization: export workspaces and cards into hierarchical mind maps with clouds, relations, edge styling, and node details.</span></div>
+                <div class="help-row"><span class="help-key">🧮 DYNAMIC FORMULAS</span><span>Evaluate live in-node mathematical calculations (e.g., <code>=3+4</code> evaluates automatically to <code>7</code>) across mind map nodes.</span></div>
+                <div class="help-row"><span class="help-key">🌐 SPATIALNODE 3D</span><span>Every card and mind map node implements <code>SpatialNode</code> with <code>[f32; 3]</code> coordinates, supporting Pinned, Floating (double-click free space), Collapsed, and Active states.</span></div>
+              </div>
+            </details>
+            <details class="manual-chapter">
+              <summary class="manual-chapter-summary">
+                <span class="manual-chapter-num">CH 11</span>
+                <span class="manual-chapter-title">System Architecture, Codenames &amp; Cold Boot Specification (v1.0.4)</span>
+                <span class="pulldown-chevron">▾</span>
+              </summary>
+              <div class="manual-chapter-body">
+                <div class="help-row"><span class="help-key">🛰️ SPACE PLANE CHASSIS</span><span><code>Al-Li 2195 Cryogenic Hull Frame</code> structural aerospace chassis locked under <code>SPACE PLANE AVIONICS v1.0.4</code>.</span></div>
+                <div class="help-row"><span class="help-key">🔥 THE FOUNDRY</span><span><code>LockedHeap</code> dynamic free-list memory allocator managing 16 MB RAM chunks without garbage collection staggers.</span></div>
+                <div class="help-row"><span class="help-key">🚀 THE CATAPULT</span><span><code>ELF64 Loader</code> validating magic bytes (<code>0x7F 'E' 'L' 'F'</code>) and spawning Ring 3 user-space processes at <code>0x400000</code>.</span></div>
+                <div class="help-row"><span class="help-key">⬛ THE BLACK BOX</span><span><code>VfsStorageBridge</code> flushing modified VFS nodes and Freeplane mind-maps to raw LBA sectors via <code>MemoryBlockDevice</code>.</span></div>
+                <div class="help-row"><span class="help-key">❄️ THE RADIATOR</span><span><code>Cryogenic Thermal Control Loop</code> stabilizing the Al-Li 2195 hull frame and PA-Romy neural coprocessor enclave.</span></div>
+                <div class="help-row"><span class="help-key">🎛️ GLASS COCKPIT</span><span><code>render_native_hud</code> immediate-mode framebuffer renderer blitting Obsidian &amp; Amber telemetry straight into VRAM at 60 FPS.</span></div>
+                <div class="help-row"><span class="help-key">📡 THE BEACON &amp; PA-ROMY</span><span>Real-time <code>/telemetry</code> WebSocket stream paired with the hardware-isolated <strong>PA-Romy Coprocessor Vault</strong> (<code>#romy-status</code> &amp; <code>#heap-meter</code>).</span></div>
+                <div class="help-row"><span class="help-key">✈️ FLIGHT DECK &amp; HANGAR</span><span>Queuing buffer on the sending side and persistent staging zone on reception for <strong>Paper Planes</strong>.</span></div>
+              </div>
+            </details>
+            <details class="manual-chapter">
+              <summary class="manual-chapter-summary">
+                <span class="manual-chapter-num">CH 12</span>
+                <span class="manual-chapter-title">Custom Manual Sections &amp; Operator Notes (Auto-Saved)</span>
+                <span class="pulldown-chevron">▾</span>
+              </summary>
+              <div class="manual-chapter-body">
+                <label for="manual-custom-notes">CUSTOM MANUAL SECTIONS / OPERATOR NOTES (AUTO-SAVED)</label>
+                <textarea id="manual-custom-notes" rows="4" placeholder="Write your own custom manual chapters, onboarding notes, or SOPs here…"></textarea>
+                <p class="dialog-subhint">Saved automatically in local storage so you can expand your official User Manual anytime.</p>
               </div>
             </details>
           </div>
@@ -752,10 +845,78 @@
           <p class="profile-field-hint" id="profile-initials-hint">Use one or two letters. They appear in the room header.</p>
           <p class="profile-form-error" id="profile-edit-error" role="status" aria-live="polite"></p>
           <div class="dialog-actions">
+            <button class="dialog-cancel" id="profile-edit-restore-btn" type="button" data-open-restore-account>🔑 Restore Account…</button>
             <button class="dialog-cancel" id="cancel-profile-edit" type="button">Cancel</button>
             <button class="dialog-send" type="submit">Save local profile</button>
           </div>
         </form>
+      </dialog>
+
+      <dialog class="share-dialog profile-dialog restore-account-dialog" id="restore-account-dialog" aria-labelledby="restore-account-title">
+        <div class="restore-account-panel">
+          <div class="dialog-kicker">ACCOUNT VAULT · LICENSE &amp; ENTITLEMENT RECOVERY</div>
+          <h2 id="restore-account-title">Restore Account &amp; Purchases.</h2>
+          <p class="dialog-description">Recover your Pro or Enterprise subscription tier, license key, AI Butler co-pilot, modular DLC add-ons, and local operator profile on this machine.</p>
+
+          <div class="restore-account-summary" aria-label="Current account status">
+            <div class="restore-summary-row">
+              <span class="restore-summary-label">ACTIVE PROFILE</span>
+              <strong id="restore-status-profile">Local profile (C)</strong>
+            </div>
+            <div class="restore-summary-row">
+              <span class="restore-summary-label">ACTIVE EDITION TIER</span>
+              <strong id="restore-status-tier" class="restore-tier-pill">COMMUNITY</strong>
+            </div>
+            <div class="restore-summary-row">
+              <span class="restore-summary-label">SAVED LICENSE KEY</span>
+              <span class="restore-key-group">
+                <code id="restore-current-key">No license key stored on this device</code>
+                <button class="restore-mini-btn" id="restore-copy-key-btn" type="button" title="Copy your license key to clipboard">Copy Key</button>
+              </span>
+            </div>
+          </div>
+
+          <form id="restore-license-form" class="restore-section" novalidate>
+            <label for="restore-license-input">1 · RESTORE BY LICENSE KEY OR STRIPE CHECKOUT SESSION ID</label>
+            <div class="restore-input-row">
+              <input
+                id="restore-license-input"
+                name="licenseOrSession"
+                type="text"
+                maxlength="256"
+                autocomplete="off"
+                placeholder="pcos-a1b2c3d4... or cs_live_... / cs_test_..."
+              />
+              <button class="dialog-send" id="restore-license-submit" type="submit">🔑 Restore License</button>
+            </div>
+            <p class="profile-field-hint">Enter your unguessable <code>pcos-...</code> license key or Stripe <code>cs_...</code> checkout session ID to re-activate your tier.</p>
+          </form>
+
+          <div class="restore-section">
+            <label>2 · 1-CLICK DEVICE ACCOUNT SYNC &amp; SNAPSHOT BACKUP</label>
+            <div class="restore-actions-grid">
+              <button class="dialog-cancel restore-action-card" id="restore-resync-btn" type="button">
+                <strong>↻ Re-Sync Saved Account</strong>
+                <small>Re-verify stored license key, restore DLCs &amp; recover binned cards</small>
+              </button>
+              <button class="dialog-cancel restore-action-card" id="restore-export-btn" type="button">
+                <strong>⬇ Export Account Backup (.json)</strong>
+                <small>Save profile, license key, DLC entitlements &amp; notes to a file</small>
+              </button>
+              <button class="dialog-cancel restore-action-card" id="restore-import-btn" type="button">
+                <strong>⬆ Import Account Backup (.json)</strong>
+                <small>Restore profile, license key, AI Butler &amp; add-ons from backup</small>
+              </button>
+              <input id="restore-import-input" type="file" accept=".json,application/json" hidden />
+            </div>
+          </div>
+
+          <p class="restore-account-status" id="restore-account-status" role="status" aria-live="polite"></p>
+
+          <div class="dialog-actions">
+            <button class="dialog-send" id="close-restore-account" type="button">Done / Close</button>
+          </div>
+        </div>
       </dialog>
 
       <dialog class="share-dialog profile-dialog profile-about-dialog" id="profile-about-dialog" aria-labelledby="profile-about-title">
@@ -826,9 +987,14 @@
           <h2 id="editions-title">Editions, Licensing &amp; Add-On Marketplace.</h2>
           <p class="dialog-description">Deploy Post Card Spatial OS under the developer model, an air-gapped enterprise appliance, an AI Butler co-pilot subscription, or modular micro-DLC card slots.</p>
 
-          <div class="billing-toggle" role="group" aria-label="Billing interval">
-            <button type="button" class="billing-opt active" data-interval="month">Monthly</button>
-            <button type="button" class="billing-opt" data-interval="year">Yearly <small>2 months free</small></button>
+          <div class="editions-toolbar-row">
+            <div class="billing-toggle" role="group" aria-label="Billing interval">
+              <button type="button" class="billing-opt active" data-interval="month">Monthly</button>
+              <button type="button" class="billing-opt" data-interval="year">Yearly <small>2 months free</small></button>
+            </div>
+            <button class="dialog-cancel restore-account-trigger" id="editions-restore-top-btn" type="button" data-open-restore-account>
+              🔑 Restore Account / License
+            </button>
           </div>
 
           <div class="editions-grid">
@@ -884,7 +1050,7 @@
                   <p class="edition-tagline">Intelligent Co-Pilot with 100% Local Privacy</p>
                 </div>
               </div>
-              <div class="edition-price"><span class="price-val">Coming soon</span> <small>pricing to be announced</small></div>
+              <div class="edition-price"><span class="price-val">$29</span> <small>/ month · or $290 / year</small></div>
               <ul class="edition-features">
                 <li><span class="feat-ai">✦ PRIVACY</span> Hypervisor runs 100% locally protecting your data</li>
                 <li><span class="feat-ai">✦ ORCHESTRATE</span> Custom agent scripting &amp; automated multi-VM provisioning</li>
@@ -892,12 +1058,12 @@
                 <li><span class="feat-ai">✦ DIAGNOSE</span> Predictive guest failure healing &amp; self-repair</li>
                 <li><span class="feat-ai">✦ BUTLER</span> Natural language voice &amp; chat terminal operator</li>
               </ul>
-              <button class="dialog-send edition-action-btn" type="button" disabled>Coming soon</button>
+              <button class="dialog-send edition-action-btn" type="button" data-select-tier="AI_BUTLER" id="btn-subscribe-ai">Activate AI Butler Sub</button>
             </article>
 
             <!-- 4. Modular Add-On Marketplace -->
             <article class="edition-card edition-card-marketplace" id="edition-card-marketplace">
-              <div class="edition-badge edition-badge-dlc">MODEL 04 · APP STORE APPROACH</div>
+              <div class="edition-badge edition-badge-dlc">MODEL 04 · MODULAR APP STORE</div>
               <div class="edition-header">
                 <span class="edition-icon">🧩</span>
                 <div>
@@ -905,35 +1071,35 @@
                   <p class="edition-tagline">Clean Canvas + Modular Card Slot Micro-DLCs</p>
                 </div>
               </div>
-              <div class="edition-price"><span class="price-val">Coming soon</span> <small>micro-DLCs, pricing to be announced</small></div>
+              <div class="edition-price"><span class="price-val">Live DLC Slots</span> <small>1-Click Instant Activation</small></div>
               <div class="marketplace-dlc-list">
                 <div class="dlc-item">
                   <div class="dlc-meta">
                     <strong>🎛️ The A/V Production Plugin</strong>
                     <small>Stereo VU peak meters, Intel HDA duplex, low-latency DAC</small>
                   </div>
-                  <button type="button" class="dlc-toggle-btn" data-dlc="av" disabled>SOON</button>
+                  <button type="button" class="dlc-toggle-btn active" data-dlc="av">ACTIVE</button>
                 </div>
                 <div class="dlc-item">
                   <div class="dlc-meta">
                     <strong>🕵️ The Deep-Dive Forensics Pack</strong>
                     <small>SUID privilege auditor, memory dump, live socket tracer</small>
                   </div>
-                  <button type="button" class="dlc-toggle-btn" data-dlc="forensics" disabled>SOON</button>
+                  <button type="button" class="dlc-toggle-btn active" data-dlc="forensics">ACTIVE</button>
                 </div>
                 <div class="dlc-item">
                   <div class="dlc-meta">
                     <strong>⚡ Advanced NVIDIA Compute Module</strong>
                     <small>DirectLink GPU acceleration, CUDA passthrough &amp; vGPU</small>
                   </div>
-                  <button type="button" class="dlc-toggle-btn" data-dlc="nvidia" disabled>SOON</button>
+                  <button type="button" class="dlc-toggle-btn active" data-dlc="nvidia">ACTIVE</button>
                 </div>
                 <div class="dlc-item">
                   <div class="dlc-meta">
                     <strong>🌐 Swarm DirectLink 10.0.0.2 Gateway</strong>
                     <small>1 Gbps direct peer-to-peer Ethernet mesh tunnel</small>
                   </div>
-                  <button type="button" class="dlc-toggle-btn" data-dlc="directlink" disabled>SOON</button>
+                  <button type="button" class="dlc-toggle-btn active" data-dlc="directlink">ACTIVE</button>
                 </div>
               </div>
             </article>
@@ -941,7 +1107,10 @@
 
           <div class="dialog-actions editions-footer">
             <span class="active-tier-status">ACTIVE TIER: <strong id="editions-active-tier-display">COMMUNITY</strong></span>
-            <button class="dialog-send" value="close">Done / Close</button>
+            <div class="editions-footer-actions">
+              <button class="dialog-cancel restore-account-trigger" id="editions-restore-btn" type="button" data-open-restore-account>🔑 Restore Account</button>
+              <button class="dialog-send" value="close">Done / Close</button>
+            </div>
           </div>
         </form>
       </dialog>
@@ -974,11 +1143,62 @@
           </div>
         </form>
       </dialog>
+
+      <!-- Architectural Blueprints HUD for 'The One' AI Butler -->
+      <dialog class="share-dialog blueprint-dialog" id="blueprint-dialog" aria-labelledby="blueprint-title">
+        <form method="dialog" class="blueprint-form">
+          <div class="dialog-kicker">✦ THE ONE AI CO-PILOT · ARCHITECTURAL BLUEPRINTS</div>
+          <div class="blueprint-header-row">
+            <div>
+              <h2 id="blueprint-title">System Blueprints &amp; Mermaid Specifications.</h2>
+              <p class="dialog-description">Verified architecture diagrams, data pipelines, state machines, and system mindmaps directly indexed into the AI Butler.</p>
+            </div>
+            <button class="blueprint-close-btn" id="close-blueprint" type="button" aria-label="Close blueprints">✕</button>
+          </div>
+
+          <div class="blueprint-nav" id="blueprint-nav">
+            <button type="button" class="blueprint-tab active" data-bp="system-mindmap">🧠 System Mindmap</button>
+            <button type="button" class="blueprint-tab" data-bp="erd-data-model">🗄️ Supabase ERD Model</button>
+            <button type="button" class="blueprint-tab" data-bp="ci-cd-pipeline">🚀 CI/CD Pipeline</button>
+            <button type="button" class="blueprint-tab" data-bp="lidar-decimation-filter">📡 LiDAR UART State Machine</button>
+            <button type="button" class="blueprint-tab" data-bp="product-flowchart">📊 Product Flow</button>
+          </div>
+
+          <div class="blueprint-body">
+            <div class="blueprint-meta" id="blueprint-meta">
+              <span class="blueprint-kicker-tag" id="bp-meta-kicker">SPATIAL ARCHITECTURE</span>
+              <h3 id="bp-meta-title">Spatial OS Full System Mindmap</h3>
+              <p id="bp-meta-desc">High-level map connecting the Bare-Metal Rust micro-host kernel, QEMU hypervisor, 3D WebGL card turntable, audio rack, and the AI Butler.</p>
+              <ul class="blueprint-highlights" id="bp-meta-highlights">
+                <li>Bare-metal minimal Rust micro-host</li>
+                <li>3D Spatial carousel with 6-way card flipping</li>
+                <li>DirectLink 10.0.0.2 low-latency tunnel</li>
+                <li>AI Butler co-pilot and automated state recovery</li>
+              </ul>
+            </div>
+            <div class="blueprint-viewer-frame">
+              <img id="blueprint-active-img" src="/blueprints/system-mindmap-overview-mermaid-community.svg" alt="System Blueprint" />
+            </div>
+          </div>
+
+          <div class="blueprint-footer">
+            <button type="button" class="dialog-cancel" id="btn-open-blueprint-source">Open Raw Spec ↗</button>
+            <button type="button" class="dialog-send" id="btn-blueprint-done">Acknowledge &amp; Return <span>✓</span></button>
+          </div>
+        </form>
+      </dialog>
     </div>
     <aside class="butler" id="butler" aria-label="AI butler">
       <div class="butler-bubble" id="butler-bubble" role="status" aria-live="polite" hidden>
         <div class="butler-header">
-          <span class="butler-title">🎩 AI BUTLER</span>
+          <div class="butler-title-group">
+            <span class="butler-title">🎩 THE ONE AI CO-PILOT</span>
+            <select class="butler-model-select" id="butler-model-select" title="Active Local Dual-Engine Model">
+              <option value="auto">⚡ Auto-Switch (Smart Route)</option>
+              <option value="qwen-coder">💻 Qwen 2.5 Coder 1.5B (Tech &amp; Terminal)</option>
+              <option value="llama-chat">💬 Llama 3.2 1B (Conversation &amp; Banter)</option>
+            </select>
+          </div>
           <button class="butler-close" id="butler-close" type="button" aria-label="Dismiss butler">×</button>
         </div>
         <p id="butler-message"></p>

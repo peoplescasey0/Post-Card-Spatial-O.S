@@ -3,6 +3,9 @@
 The spatial workspace: a 3D (Three.js) desktop that runs and displays guest
 operating systems (Windows, Linux, macOS, Kali, AI copilot) as cards in space.
 
+## Documentation & User Manual
+For comprehensive operating procedures, 3D navigation shortcuts, multi-OS hypervisor profiles, AI Butler orchestration, Freeplane mind mapping, and commercial editions, see the **[Official User Manual & Field Guide](USER_MANUAL.md)** or press `?` inside the running workspace.
+
 ## Layout
 - `workspace-prototype/` - Vite + TypeScript + Three.js front end, noVNC display,
   and `guest-api.mjs`, the QEMU/QMP/VNC backend that starts and manages guests.
@@ -17,12 +20,21 @@ Spatial OS is the product; micro-host is the engine it is meant to run on.
 Long term the two merge, with the workspace talking to the host through a small,
 versioned VM-control API.
 
+### Booting the engine
+The workspace does not build the kernel. Build it in the engine repo
+(https://github.com/peoplescasey0/micro-host), then either point
+`POSTCARD_KERNEL` at the kernel ELF, or load the built ISO into a card with
+"bring your own ISO" - the supported path for the Multiboot2 kernel.
+
 ## Run
 ```powershell
 cd workspace-prototype
 npm install
 npm run dev
 ```
+
+The same commands work from the repository root (`npm install && npm run dev`);
+the root `package.json` forwards to `workspace-prototype/run-vite.mjs`.
 
 Guest disk images and overlays live in `workspace-prototype/data/` and are
 **not** tracked in git (they are many GB). Keep them backed up separately.

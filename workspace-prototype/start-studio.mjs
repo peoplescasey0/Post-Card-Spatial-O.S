@@ -53,6 +53,12 @@ const server = createServer((req, res) => {
   });
 });
 
+server.on("upgrade", (req, socket) => {
+  if (!guestApi.handleUpgrade?.(req, socket)) {
+    socket.destroy();
+  }
+});
+
 server.listen(port, host, () => {
   console.log(`Post Card Spatial OS Studio running at http://${host}:${port}`);
 });

@@ -19,6 +19,26 @@ const SIGNATURE_TOLERANCE_SECONDS = 300;
 const PAID_TIERS = ["pro", "enterprise"];
 
 let activeTier = "community";
+const localLicensesBySession = new Map();
+const localLicensesByKey = new Map();
+
+function recordLocalLicense(sessionId, tier) {
+  const normalizedTier = PAID_TIERS.includes(tier) ? tier : "pro";
+  const existing = localLicensesBySession.get(sessionId);
+  const licenseKey = existing?.licenseKey ?? `pcos-${randomBytes(16).toString("hex")}`;
+  const record = {
+    ok: true,
+    licenseKey,
+    sessionId,
+    tier: normalizedTier,
+    status: "active",
+    active: true,
+    validUntil: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+  };
+  localLicensesBySession.set(sessionId, record);
+  localLicensesByKey.set(licenseKey, record);
+  return record;
+}
 
 class StripeApiError extends Error {
   constructor(status, message) {
@@ -166,11 +186,55 @@ async function handleLicense(request, response) {
   }
   const body = parseJson(await readRawBody(request));
   const payload = {};
-  if (typeof body?.sessionId === "string") payload.sessionId = body.sessionId.slice(0, 256);
-  else if (typeof body?.licenseKey === "string") payload.licenseKey = body.licenseKey.slice(0, 128);
-  else throw new StripeApiError(400, "Provide sessionId or licenseKey.");
-  const { status, data } = await callLicenseApi("license-check", payload);
-  sendJson(response, status, data);
+  const rawQuery = typeof body?.query === "string" ? body.query.trim() : "";
+  if (typeof body?.sessionId === "string" && body.sessionId.trim()) {
+    payload.sessionId = body.sessionId.trim().slice(0, 256);
+  } else if (typeof body?.licenseKey === "string" && body.licenseKey.trim()) {
+    payload.licenseKey = body.licenseKey.trim().slice(0, 128);
+  } else if (rawQuery) {
+    if (rawQuery.startsWith("cs_") || rawQuery.startsWith("sim_")) {
+      payload.sessionId = rawQuery.slice(0, 256);
+    } else {
+      payload.licenseKey = rawQuery.slice(0, 128);
+    }
+  } else {
+    throw new StripeApiError(400, "Provide sessionId or licenseKey.");
+  }
+
+  if (licenseApiBase()) {
+    const { status, data } = await callLicenseApi("license-check", payload);
+    sendJson(response, status, data);
+    return;
+  }
+
+  // Local / offline fallback for simulated checkouts and local webhook sessions
+  const localRecord = payload.sessionId
+    ? localLicensesBySession.get(payload.sessionId)
+    : localLicensesByKey.get(payload.licenseKey);
+  if (localRecord) {
+    sendJson(response, 200, {
+      ok: true,
+      licenseKey: localRecord.licenseKey,
+      tier: localRecord.tier,
+      status: localRecord.status,
+      active: localRecord.active,
+      validUntil: localRecord.validUntil,
+    });
+    return;
+  }
+  if (PAID_TIERS.includes(activeTier)) {
+    const record = recordLocalLicense(payload.sessionId ?? "cs_local_active", activeTier);
+    sendJson(response, 200, {
+      ok: true,
+      licenseKey: payload.licenseKey || record.licenseKey,
+      tier: activeTier,
+      status: "active",
+      active: true,
+      validUntil: record.validUntil,
+    });
+    return;
+  }
+  sendJson(response, 404, { ok: false, error: "Unknown license or checkout session." });
 }
 
 async function handleCheckout(request, response) {
@@ -216,12 +280,14 @@ async function handleCheckout(request, response) {
   }
 
   const sessionId = `sim_test_${randomBytes(8).toString("hex")}`;
+  const simRecord = PAID_TIERS.includes(tier) ? recordLocalLicense(sessionId, tier) : null;
   sendJson(response, 200, {
     ok: true,
     mode: "simulated",
     tier,
     interval,
     sessionId,
+    ...(simRecord ? { licenseKey: simRecord.licenseKey } : {}),
     checkoutUrl: `/?checkout=simulated&session=${sessionId}`,
   });
 }
@@ -266,12 +332,18 @@ async function handleWebhook(request, response) {
 
   if (type === "checkout.session.completed") {
     const tier = String(event?.data?.object?.metadata?.tier ?? "").toLowerCase();
+    const sessionId = String(event?.data?.object?.id ?? "").trim();
     if (PAID_TIERS.includes(tier)) {
       activeTier = tier;
+      if (sessionId) recordLocalLicense(sessionId, tier);
       handled = true;
     }
   } else if (type === "customer.subscription.deleted") {
     activeTier = "community";
+    for (const record of localLicensesByKey.values()) {
+      record.active = false;
+      record.status = "canceled";
+    }
     handled = true;
   }
 
@@ -287,7 +359,10 @@ export async function handleStripeRequest(request, response) {
       sendJson(response, 200, publicConfig());
     } else if (request.method === "POST" && url.pathname === "/api/stripe/checkout-session") {
       await handleCheckout(request, response);
-    } else if (request.method === "POST" && url.pathname === "/api/stripe/license") {
+    } else if (
+      request.method === "POST" &&
+      (url.pathname === "/api/stripe/license" || url.pathname === "/api/stripe/restore")
+    ) {
       await handleLicense(request, response);
     } else if (request.method === "POST" && url.pathname === "/api/stripe/webhook") {
       await handleWebhook(request, response);
