@@ -421,6 +421,23 @@ try:
         ("syscall 39", ["[SYSCALL] nr=39 dispatched"]),
         ("install", ["POST CARD SPATIAL OS - BARE-METAL DISK INSTALLER", "EFI Bootloader: /EFI/BOOT/BOOTX64.EFI [READY]"]),
         ("install test", ["[INSTALL COMPLETE] Post Card Spatial OS successfully installed to disk", "Protective MBR with 0x55AA boot signature"]),
+        # PA-Romy failsafe: she walks the ladder, keeps the step that worked, uses
+        # it first next time, and escalates a fault she cannot actually fix.
+        ("romy selftest", ["romy selftest: 10/10 checks passed"]),
+        ("romy", ["PA-ROMY FAILSAFE // SUPERVISOR", "vault: LOCKED", r"re:probes:\ 4/4 healthy"]),
+        ("romy scan", ["PA-ROMY FAILSAFE SCAN", "scan: 4/4 healthy"]),
+        ("romy sabotage storage", ["injected fault: storage will fail until `romy heal`"]),
+        ("romy scan", ["[!!] storage - injected fault", "scan: 3/4 healthy"]),
+        ("romy heal", ["    -> trying Retry", "    -> trying FlushBuffers", "[ok] repaired at RescanDevices - remembered for next time", "heal: repaired 1 | still failing 0"]),
+        ("romy sabotage storage", ["injected fault: storage"]),
+        ("romy heal", ["learned fix first: RescanDevices", "[ok] repaired at RescanDevices using the learned fix"]),
+        ("romy sabotage storage", ["injected fault: storage"]),
+        ("romy heal", ["[ok] repaired at RescanDevices using the learned fix", "heal: repaired 1 | still failing 0"]),
+        ("romy ledger", ["PA-ROMY FAILSAFE LEDGER", r"re:\[storage\] sig=0x[0-9a-f]{16} step=RescanDevices seen=\d+ fixes=\d+ misses=\d+"]),
+        ("romy sabotage trust", ["injected fault: trust"]),
+        ("romy heal", ["escalated: trust keeps failing", "heal: repaired 0 | still failing 1"]),
+        ("romy clear", ["injected faults cleared"]),
+        ("romy status", ["vault: LOCKED", r"re:probes:\ 4/4 healthy", "last repair: trust at Escalate"]),
         ("foobar_unknown_cmd", ["unknown command: foobar_unknown_cmd"])
     ]
 

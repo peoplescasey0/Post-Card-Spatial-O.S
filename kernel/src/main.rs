@@ -6,7 +6,9 @@ use core::arch::{asm, global_asm};
 use core::fmt::{self, Write};
 use core::panic::PanicInfo;
 use core::ptr::{read_volatile, write_volatile};
-use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use core::cell::UnsafeCell;
+use core::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
+use romy_failsafe::{Failsafe, Probe, Step};
 
 // ============================================================================
 // 1. BARE-METAL MULTIBOOT2 HEADER + 32->64 BIT BOOTSTRAP STUB (.text.boot)
@@ -919,6 +921,7 @@ mod provenance_pvm_protect;
 mod diov_streams_ehas;
 mod slm_kernel_share;
 mod cross_adapt_orom_sandbox;
+mod romy_failsafe;
 
 // ============================================================================
 // 5. HARDWARE VT-x (VMXON / VMCS) & MICRO-VM CAPSULE HYPERVISOR ENGINE
@@ -1994,6 +1997,7 @@ pub unsafe extern "C" fn _start(multiboot2_info_addr: usize) -> ! {
                 b'\r' | b'\n' => {
                     console_putc(b'\n', 0x0F, 0x00F4F5F7);
                     handle_shell_command(&line_buf[..line_len], &mb2);
+                    romy_tick();
                     line_len = 0;
                     kprint!("spatial> ");
                 }
@@ -2020,13 +2024,389 @@ pub unsafe extern "C" fn _start(multiboot2_info_addr: usize) -> ! {
     }
 }
 
+// ============================================================================
+// 4b. PA-ROMY FAILSAFE
+// ============================================================================
+//
+// The probes read state this kernel already keeps, and every step only touches
+// something it can put back. The learning rules themselves live in
+// kernel/src/romy_failsafe.rs; this is the part that looks at the hardware and
+// drives the shell.
+
+struct RomyCell(UnsafeCell<Failsafe>);
+
+// The command loop is the only caller and it never hands out a borrow, so a raw
+// cell is enough here.
+unsafe impl Sync for RomyCell {}
+
+static ROMY_FAILSAFE: RomyCell = RomyCell(UnsafeCell::new(Failsafe::new()));
+/// Diagnostic hook: a set bit forces that probe to fail so the repair ladder
+/// can be demonstrated on demand. The kernel never sets one by itself.
+static ROMY_SABOTAGE: AtomicU8 = AtomicU8::new(0);
+static ROMY_VAULT_LOCKED: AtomicBool = AtomicBool::new(true);
+static ROMY_MIRROR_LIVE: AtomicBool = AtomicBool::new(true);
+static ROMY_LAST_TICK: AtomicU64 = AtomicU64::new(0);
+static ROMY_DEV_COUNT: AtomicU8 = AtomicU8::new(0);
+static ROMY_STALL: AtomicU8 = AtomicU8::new(0);
+
+fn romy() -> &'static mut Failsafe {
+    unsafe { &mut *ROMY_FAILSAFE.0.get() }
+}
+
+fn romy_bit(p: Probe) -> u8 {
+    match p {
+        Probe::Vault => 1,
+        Probe::Storage => 2,
+        Probe::Trust => 4,
+        Probe::Telemetry => 8,
+    }
+}
+
+fn romy_sabotaged(p: Probe) -> bool {
+    ROMY_SABOTAGE.load(Ordering::Relaxed) & romy_bit(p) != 0
+}
+
+fn romy_set_sabotage(p: Probe, on: bool) {
+    let bit = romy_bit(p);
+    let old = ROMY_SABOTAGE.load(Ordering::Relaxed);
+    let new = if on { old | bit } else { old & !bit };
+    ROMY_SABOTAGE.store(new, Ordering::Relaxed);
+}
+
+/// (healthy, why-not)
+unsafe fn romy_probe(p: Probe) -> (bool, &'static str) {
+    if romy_sabotaged(p) {
+        return (false, "injected fault");
+    }
+    match p {
+        Probe::Vault => {
+            if ROMY_VAULT_LOCKED.load(Ordering::Relaxed) {
+                (true, "")
+            } else {
+                (false, "vault lock cleared")
+            }
+        }
+        Probe::Storage => {
+            // Having no storage at all is a valid configuration - the boot
+            // ramdisk runs the whole system - so it is not a fault. A device
+            // that was there and is gone is the fault worth repairing, and
+            // rescanning the controllers is the fix.
+            let count = blockdev::device_count() as u8;
+            let before = ROMY_DEV_COUNT.swap(count, Ordering::Relaxed);
+            if count < before {
+                (false, "a block device disappeared")
+            } else {
+                (true, "")
+            }
+        }
+        Probe::Trust => {
+            let mut i = 0;
+            let count = trust_graph::TRUST_GRAPH.node_count;
+            while i < count {
+                if trust_graph::TRUST_GRAPH.nodes[i].quarantined {
+                    return (false, "card quarantined");
+                }
+                i += 1;
+            }
+            (true, "")
+        }
+        Probe::Telemetry => {
+            let now = TICKS.load(Ordering::Relaxed);
+            let before = ROMY_LAST_TICK.swap(now, Ordering::Relaxed);
+            if !ROMY_MIRROR_LIVE.load(Ordering::Relaxed) {
+                (false, "telemetry mirror detached")
+            } else if before != 0 && now == before {
+                // Two checks inside one timer tick are not a stall, so only the
+                // second repeat in a row counts.
+                if ROMY_STALL.fetch_add(1, Ordering::Relaxed) + 1 >= 2 {
+                    (false, "no forward progress")
+                } else {
+                    (true, "")
+                }
+            } else {
+                ROMY_STALL.store(0, Ordering::Relaxed);
+                (true, "")
+            }
+        }
+    }
+}
+
+/// Apply one step. Each step clears only the fault it is meant to address, so a
+/// step that cannot help this probe is seen to fail rather than look effective.
+unsafe fn romy_apply(step: Step) -> bool {
+    match step {
+        Step::Retry => {}
+        Step::FlushBuffers => {
+            let count = blockdev::device_count();
+            let mut i = 0;
+            while i < count {
+                let _ = blockdev::flush(i);
+                i += 1;
+            }
+        }
+        Step::RescanDevices => {
+            blockdev::init();
+            romy_set_sabotage(Probe::Storage, false);
+        }
+        Step::RelockVault => {
+            ROMY_VAULT_LOCKED.store(true, Ordering::Relaxed);
+            romy_set_sabotage(Probe::Vault, false);
+        }
+        Step::SafeMode => {
+            ROMY_MIRROR_LIVE.store(true, Ordering::Relaxed);
+            romy_set_sabotage(Probe::Telemetry, false);
+        }
+        Step::Escalate => return false,
+    }
+    true
+}
+
+unsafe fn romy_scan(verbose: bool) -> (u8, u8) {
+    let mut healthy = 0u8;
+    let total = Probe::ALL.len() as u8;
+    romy().record_scan();
+    for p in Probe::ALL {
+        let (ok, reason) = romy_probe(p);
+        if ok {
+            healthy += 1;
+            if verbose {
+                kprintln!("  [ok] {}", p.name());
+            }
+        } else if verbose {
+            kprintln_amber!("  [!!] {} - {}", p.name(), reason);
+        }
+    }
+    (healthy, total)
+}
+
+/// Walk the ladder for one failing probe. Returns whether she ended healthy.
+unsafe fn romy_heal_probe(p: Probe, reason: &str, verbose: bool) -> bool {
+    let (ok, _) = romy_probe(p);
+    if ok {
+        return true;
+    }
+    if romy().exhausted(p, reason) {
+        // Announced and counted once: a fault she cannot fix must not fill the
+        // console every time the watchdog looks at it.
+        if romy().mark_reported(p, reason) {
+            romy().record_escalation();
+            if verbose {
+                kprintln_amber!(
+                    "    [xx] {} has been seen {} times this boot - stopped repairing, operator action needed",
+                    p.name(),
+                    romy_failsafe::MAX_ROUNDS_PER_SIG
+                );
+            }
+        }
+        return false;
+    }
+    romy().begin_round(p, reason);
+    let learned = romy().preferred(p, reason);
+    let mut plan = [Step::Retry; 6];
+    let n = romy().plan(p, reason, &mut plan);
+    if verbose {
+        match learned {
+            Some(s) => kprintln_cyan!(
+                "  {} -> learned fix first: {} ({} steps on the ladder)",
+                p.name(),
+                s.name(),
+                n
+            ),
+            None => kprintln!("  {} -> {} steps on the ladder", p.name(), n),
+        }
+    }
+    let mut i = 0;
+    while i < n {
+        let step = plan[i];
+        if verbose {
+            kprintln!("    -> trying {}", step.name());
+        }
+        let applied = romy_apply(step);
+        let (now_ok, _) = romy_probe(p);
+        let fixed = applied && now_ok;
+        romy().note(p, reason, step, fixed);
+        romy().record_heal(p, step, learned == Some(step), fixed);
+        if fixed {
+            if verbose {
+                if learned == Some(step) {
+                    kprintln_emerald!("    [ok] repaired at {} using the learned fix", step.name());
+                } else {
+                    kprintln_emerald!("    [ok] repaired at {} - remembered for next time", step.name());
+                }
+            }
+            return true;
+        }
+        if step == Step::Escalate {
+            let first = romy().mark_reported(p, reason);
+            if first {
+                romy().record_escalation();
+            }
+            if first && verbose {
+                kprintln_amber!("    [xx] escalated: {} keeps failing - {}", p.name(), reason);
+            }
+            return false;
+        }
+        i += 1;
+    }
+    false
+}
+
+/// The watchdog itself: called after every command, repairs quietly.
+unsafe fn romy_tick() {
+    romy().record_scan();
+    for p in Probe::ALL {
+        // An injected fault is a demonstration, not a fault: it waits for
+        // `romy heal` so the ladder can be watched step by step.
+        if romy_sabotaged(p) {
+            continue;
+        }
+        let (ok, reason) = romy_probe(p);
+        if !ok {
+            if romy().seen(p, reason) == 0 {
+                kprintln_amber!(
+                    "[PA-ROMY FAILSAFE] {} is failing ({}) - repairing",
+                    p.name(),
+                    reason
+                );
+            }
+            romy_heal_probe(p, reason, true);
+        }
+    }
+}
+
+unsafe fn romy_command(arg: &str) {
+    let (word, rest) = match arg.find(' ') {
+        Some(i) => (&arg[..i], arg[i + 1..].trim()),
+        None => (arg, ""),
+    };
+    match word {
+        "" | "status" => {
+            kprintln_emerald!("=== PA-ROMY FAILSAFE // SUPERVISOR ===");
+            let (healthy, total) = romy_scan(true);
+            let s = romy().stats();
+            kprintln!(
+                "vault: {} | telemetry mirror: {}",
+                if ROMY_VAULT_LOCKED.load(Ordering::Relaxed) { "LOCKED" } else { "OPEN" },
+                if ROMY_MIRROR_LIVE.load(Ordering::Relaxed) { "LIVE" } else { "DETACHED" }
+            );
+            kprintln!(
+                "probes: {}/{} healthy | scans: {} | healed: {} | escalated: {} | ledger: {}",
+                healthy,
+                total,
+                s.scans,
+                s.healed,
+                s.escalated,
+                s.tracked
+            );
+            let (last_probe, last_step, learned, fixed) = romy().last();
+            match last_step {
+                Some(st) => kprintln!(
+                    "last repair: {} at {} ({})",
+                    last_probe.name(),
+                    st.name(),
+                    match (fixed, learned) {
+                        (false, _) => "no effect",
+                        (true, true) => "learned fix",
+                        (true, false) => "new fix",
+                    }
+                ),
+                None => kprintln!("last repair: none yet"),
+            }
+        }
+        "scan" => {
+            kprintln_emerald!("=== PA-ROMY FAILSAFE SCAN ===");
+            let (healthy, total) = romy_scan(true);
+            kprintln!("scan: {}/{} healthy", healthy, total);
+        }
+        "heal" => {
+            kprintln_emerald!("=== PA-ROMY FAILSAFE HEAL ===");
+            let mut repaired = 0u8;
+            let mut failing = 0u8;
+            for p in Probe::ALL {
+                let (ok, reason) = romy_probe(p);
+                if ok {
+                    kprintln!("  [ok] {}", p.name());
+                    continue;
+                }
+                if romy_heal_probe(p, reason, true) {
+                    repaired += 1;
+                } else {
+                    failing += 1;
+                }
+            }
+            kprintln!("heal: repaired {} | still failing {}", repaired, failing);
+        }
+        "ledger" => {
+            kprintln_emerald!("=== PA-ROMY FAILSAFE LEDGER ===");
+            let s = romy().stats();
+            kprintln!(
+                "ledger: {} tracked | scans {} | healed {} | escalated {}",
+                s.tracked,
+                s.scans,
+                s.healed,
+                s.escalated
+            );
+            let mut i = 0;
+            while i < romy_failsafe::MAX_LEDGER {
+                if let Some(inc) = romy().incident(i) {
+                    kprintln!(
+                        "  [{}] sig={:#018x} step={} seen={} fixes={} misses={}",
+                        inc.probe.name(),
+                        inc.sig,
+                        inc.step.name(),
+                        inc.seen,
+                        inc.fixes,
+                        inc.misses
+                    );
+                }
+                i += 1;
+            }
+        }
+        "forget" => {
+            let only = if rest.is_empty() { None } else { Probe::by_name(rest) };
+            if !rest.is_empty() && only.is_none() {
+                kprintln!("romy: unknown probe '{}' (vault, storage, trust, telemetry)", rest);
+                return;
+            }
+            romy().forget(only);
+            kprintln!("[PA-ROMY FAILSAFE] ledger cleared");
+        }
+        "sabotage" | "inject" => match Probe::by_name(rest) {
+            Some(p) => {
+                romy_set_sabotage(p, true);
+                kprintln_amber!(
+                    "[PA-ROMY FAILSAFE] injected fault: {} will fail until `romy heal`",
+                    p.name()
+                );
+            }
+            None => kprintln!("romy: name a probe to sabotage (vault, storage, trust, telemetry)"),
+        },
+        "clear" => {
+            ROMY_SABOTAGE.store(0, Ordering::Relaxed);
+            kprintln!("[PA-ROMY FAILSAFE] injected faults cleared");
+        }
+        "selftest" => {
+            let (passed, total) = Failsafe::selftest();
+            if passed == total {
+                kprintln_emerald!("romy selftest: {}/{} checks passed", passed, total);
+            } else {
+                kprintln_amber!("romy selftest: {}/{} checks passed", passed, total);
+            }
+        }
+        _ => kprintln!(
+            "romy: unknown action '{}' (status, scan, heal, ledger, forget, sabotage, clear, selftest)",
+            word
+        ),
+    }
+}
+
 unsafe fn handle_shell_command(cmd_bytes: &[u8], mb2: &Multiboot2ParsedInfo) {
     let cmd = core::str::from_utf8(cmd_bytes).unwrap_or("").trim();
     if cmd.is_empty() {
         return;
     }
     if cmd == "help" {
-        kprintln!("commands: help, gui, deck, mouse, routes, route [bind/free], usbc, sec, hsm [auth/lock], trust/graph, span [kick/ipi/rebalance], rootvmm [enter/exit/verify], snvme [read/write/target], hyos, dock, undock, pats [lba], shrink [mb], sva [activate/morph/dma/priv], latehv [step/trap], muse [fast/slow/mdev], coreiso [dispatch/pf], vgpu [tx/bounds], sriov [trigger/error/reset], vmsec [io/snap/bounds], ppt [ecall/aex/exit], vam [profile/bench], hvm [rma/poll/info], wasm [test/fuel/status], maxq [opt/step/tdp], shm [pub/sub], arais [level/flush], astguard [test], kwasm [test/call], mddma [burst/5d], dtree [eval/test], panda [test/parse], fortinet [test/eos], nudt [test/rule], snic [test/rule], afxdp [test/bind], mesh [test/arp], soundhound [test/move], ericsson [test/move], astound [test/bypass], vcr [test/query], fsm [test/audit], mongo [test/workload], enclave [test/seal], metal [test/pipeline], kunlun [test/broadcast/drm/attest/cache/info], antmem [test/info], quantum [test/route/solve/status], socbridge [test/status], forensics [test/status/chain/ebpf], anjuna [test/status], gpuslide [test/status/slide], provenance [test/status], diov [test/status], slmshare [test/status], kadapt [test/status], oromsandbox [test/status], browse [url], bookmarks, http [get], email [inbox/read/send/outbox/test], cxl, scibuf, ltssm/margin, hud, net, stream, flynet [slot], fly [0..3], land, cpu, vmx, vms, vmrun, spawn, exec, elf, sched, syscall, ls, echo, uptime, mem, ps, pci, disks, sandbox, avionics, radiator, install, halt, reboot");
+        kprintln!("commands: help, gui, deck, mouse, routes, route [bind/free], usbc, sec, hsm [auth/lock], trust/graph, span [kick/ipi/rebalance], rootvmm [enter/exit/verify], snvme [read/write/target], hyos, dock, undock, pats [lba], shrink [mb], sva [activate/morph/dma/priv], latehv [step/trap], muse [fast/slow/mdev], coreiso [dispatch/pf], vgpu [tx/bounds], sriov [trigger/error/reset], vmsec [io/snap/bounds], ppt [ecall/aex/exit], vam [profile/bench], hvm [rma/poll/info], wasm [test/fuel/status], maxq [opt/step/tdp], shm [pub/sub], arais [level/flush], astguard [test], kwasm [test/call], mddma [burst/5d], dtree [eval/test], panda [test/parse], fortinet [test/eos], nudt [test/rule], snic [test/rule], afxdp [test/bind], mesh [test/arp], soundhound [test/move], ericsson [test/move], astound [test/bypass], vcr [test/query], fsm [test/audit], mongo [test/workload], enclave [test/seal], metal [test/pipeline], kunlun [test/broadcast/drm/attest/cache/info], antmem [test/info], quantum [test/route/solve/status], socbridge [test/status], forensics [test/status/chain/ebpf], anjuna [test/status], gpuslide [test/status/slide], provenance [test/status], diov [test/status], slmshare [test/status], kadapt [test/status], oromsandbox [test/status], browse [url], bookmarks, http [get], email [inbox/read/send/outbox/test], cxl, scibuf, ltssm/margin, hud, net, stream, flynet [slot], fly [0..3], land, cpu, vmx, vms, vmrun, spawn, exec, elf, sched, syscall, ls, echo, uptime, mem, ps, pci, disks, sandbox, avionics, radiator, romy [status/scan/heal/ledger/forget/sabotage/selftest], install, halt, reboot");
         kprintln!("storage:  disks, mount [pN], umount, df, ls [dir], cat <file>, write <file> <text>, append <file> <text>, touch <file>, mkdir <dir>, rm <path>, sync, blk <dev> <lba>");
     } else if cmd == "gui" || cmd == "deck" || cmd == "desktop" {
         if let Some(ref fb) = GOP_FB {
@@ -5686,6 +6066,9 @@ unsafe fn handle_shell_command(cmd_bytes: &[u8], mb2: &Multiboot2ParsedInfo) {
                 if is_mounted { " [MOUNTED]" } else if p.esp { " [ESP]" } else { "" }
             );
         }
+    } else if cmd == "romy" || cmd.starts_with("romy ") {
+        let arg = cmd.strip_prefix("romy").unwrap_or("").trim();
+        romy_command(arg);
     } else if cmd == "sandbox" {
         kprintln!("sandbox identity: PA-Romy Coprocessor Vault [ACTIVE // ENCLAVE LOCKED]");
     } else if cmd == "avionics" || cmd == "radiator" {
