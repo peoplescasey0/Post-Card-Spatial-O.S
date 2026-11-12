@@ -30,6 +30,42 @@ npm run dev
 Guest disk images and overlays live in `workspace-prototype/data/` and are
 **not** tracked in git (they are many GB). Keep them backed up separately.
 
+## Storage and tests
+The kernel reaches its disk over either transport the app uses:
+
+- `-machine pc` - legacy ATA (PIO) on the primary channel.
+- `-machine q35` - SATA/AHCI, which is what `workspace-prototype/guest-api.mjs`
+  starts. The AHCI transport reuses one command slot per request, polls for
+  completion and never takes an interrupt, so an odd controller cannot hang the
+  boot or the shell.
+
+Either transport can mount FAT12, FAT16 and FAT32. The width comes from the BPB
+shape first (only FAT32 leaves the 16-bit root-entry count and the 16-bit FAT
+size at zero) and from the cluster count otherwise, because QEMU's vvfat
+paper-plane volume is FAT16 while mtools can emit a FAT32 volume whose cluster
+count sits in FAT16 range.
+
+| script | what it proves |
+| --- | --- |
+| `scripts/boot_test.sh` | the ISO reaches the shell and prints its banner |
+| `scripts/shell_test.sh` | the serial shell suite (commands, VMX invariants, network) |
+| `scripts/fat_test.sh` | the app's own topology: q35 + AHCI + FAT16 paper-plane volume mounts, lists and reads the dropped plane, and a guest write reaches the host volume; plus FAT12/FAT16/FAT32 images over ATA |
+
+```bash
+./scripts/create_iso.sh        # rebuilds the kernel, then the ISO
+./scripts/boot_test.sh
+./scripts/shell_test.sh
+./scripts/fat_test.sh          # add --no-images to skip the mtools cases
+```
+
+`fat_test.sh` only means something with the app's drive topology: the
+paper-plane directory is attached as `if=ide,index=2` on `-machine q35` and the
+installer CD as `if=ide,index=1`, so the CD can never claim the index the
+paper-plane volume uses. The `--disk` mode of `boot_test.sh` and
+`shell_test.sh` builds `target/postcard-os.raw` with
+`scripts/install_postcard_os_wsl.sh`; that script is not in this repository, so
+those modes stop with a clear message unless you add it.
+
 ## Secrets
 Never commit keys. Use environment variables (for example `STRIPE_SECRET_KEY`).
 
