@@ -1,5 +1,5 @@
 // ============================================================================
-// THE BLACK BOX // RAW BLOCK-DEVICE LAYER (PCI + NVMe + SDHCI eMMC/SD + ATA PIO)
+// THE BLACK BOX // RAW BLOCK-DEVICE LAYER (PCI + NVMe + SDHCI eMMC/SD + AHCI + ATA PIO)
 // ============================================================================
 // Real hardware storage path for the Dell Latitude 3120 (64 GB eMMC on the Intel
 // Jasper Lake SDHCI controller, or an M.2 NVMe SSD on other SKUs), plus a legacy
@@ -342,6 +342,7 @@ unsafe fn mw64(base: u64, off: usize, v: u64) {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum DevKind {
     Ata,
+    Ahci,
     Nvme,
     Sdhci,
 }
@@ -368,6 +369,8 @@ pub struct BlockDevice {
     lba_shift: u32,
     block_addressing: bool,
     rca: u32,
+    // AHCI: port index within the HBA the drive sits on
+    ahci_port: u8,
 }
 
 impl BlockDevice {
@@ -380,6 +383,7 @@ impl BlockDevice {
     pub fn kind_str(&self) -> &'static str {
         match self.kind {
             DevKind::Ata => "ATA-PIO",
+            DevKind::Ahci => "AHCI",
             DevKind::Nvme => "NVMe",
             DevKind::Sdhci => "SDHCI",
         }
@@ -451,6 +455,7 @@ fn blank_device(kind: DevKind) -> BlockDevice {
         lba_shift: 9,
         block_addressing: true,
         rca: 0,
+        ahci_port: 0,
     }
 }
 
@@ -479,6 +484,14 @@ pub unsafe fn init() {
                 match sdhci_init(&p) {
                     Ok(idx) => log_device(idx),
                     Err(e) => kprintln_colored(0x0E, 0x00FFB81C, format_args!("[warn] sdhci {:02x}:{:02x}.{}: {}", p.bus, p.dev, p.func, e)),
+                }
+            }
+            (0x01, 0x06) => {
+                let bar = pci_mem_bar(&p, 5);
+                kprintln_colored(0x0B, 0x0038BDF8, format_args!("[probe] -> SATA/AHCI controller identified at {:02x}:{:02x}.{} (ABAR={:#x}). Initializing...", p.bus, p.dev, p.func, bar));
+                match ahci_init(&p) {
+                    Ok(n) => kprintln_colored(0x0A, 0x0022C55E, format_args!("[probe] <- AHCI controller ready: {} drive(s)", n)),
+                    Err(e) => kprintln_colored(0x0E, 0x00FFB81C, format_args!("[warn] ahci {:02x}:{:02x}.{}: {}", p.bus, p.dev, p.func, e)),
                 }
             }
             (0x01, 0x01) => {
@@ -530,6 +543,7 @@ pub unsafe fn read_sector(idx: usize, lba: u64, buf: &mut [u8; SECTOR_SIZE]) -> 
     }
     let r = match dev.kind {
         DevKind::Ata => ata_rw(dev, lba, buf.as_mut_ptr(), false),
+        DevKind::Ahci => ahci_rw(dev, lba, buf.as_mut_ptr(), false),
         DevKind::Nvme => nvme_read_512(dev, lba, buf),
         DevKind::Sdhci => sdhci_read_block(dev, lba, buf),
     };
@@ -549,6 +563,7 @@ pub unsafe fn write_sector(idx: usize, lba: u64, buf: &[u8; SECTOR_SIZE]) -> Res
     }
     let r = match dev.kind {
         DevKind::Ata => ata_rw(dev, lba, buf.as_ptr() as *mut u8, true),
+        DevKind::Ahci => ahci_rw(dev, lba, buf.as_ptr() as *mut u8, true),
         DevKind::Nvme => nvme_write_512(dev, lba, buf),
         DevKind::Sdhci => sdhci_write_block(dev, lba, buf),
     };
@@ -565,6 +580,7 @@ pub unsafe fn flush(idx: usize) -> Result<(), &'static str> {
     };
     match dev.kind {
         DevKind::Ata => ata_flush(dev),
+        DevKind::Ahci => ahci_flush(dev),
         DevKind::Nvme => nvme_flush(),
         DevKind::Sdhci => Ok(()), // CMD24 completes only after the card leaves programming state
     }
@@ -720,6 +736,324 @@ unsafe fn ata_flush(dev: &BlockDevice) -> Result<(), &'static str> {
         return Err("ata: flush error");
     }
     Ok(())
+}
+
+// ============================================================================
+// AHCI (SATA, polled, slot 0 reused for every command)
+// ============================================================================
+// QEMU `-machine q35` (ich9-ahci) and real SATA laptops route `if=ide` drives
+// through this controller, where the legacy 0x1F0 PIO path cannot see them:
+// the drive is behind a PCI BAR, not behind the legacy command block, and
+// no amount of index/geometry fiddling makes the PIO driver find it.
+//
+// One HBA, up to MAX_AHCI_PORTS drives, one command slot, no interrupts. Every
+// wait is bounded by the shared TSC deadline, so a controller that never
+// answers costs a timeout rather than a hang.
+
+const AHCI_PORT_BASE: usize = 0x100;
+const AHCI_PORT_STRIDE: usize = 0x80;
+const MAX_AHCI_PORTS: usize = 6;
+
+// Generic host control
+const HBA_CAP: usize = 0x00;
+const HBA_GHC: usize = 0x04;
+const HBA_PI: usize = 0x0C;
+
+// Port register block
+const PX_CLB: usize = 0x00;
+const PX_FB: usize = 0x08;
+const PX_IS: usize = 0x10;
+const PX_IE: usize = 0x14;
+const PX_CMD: usize = 0x18;
+const PX_TFD: usize = 0x20;
+const PX_SIG: usize = 0x24;
+const PX_SSTS: usize = 0x28;
+const PX_SERR: usize = 0x30;
+const PX_CI: usize = 0x38;
+
+const PXCMD_ST: u32 = 1 << 0;
+const PXCMD_FRE: u32 = 1 << 4;
+const PXCMD_FR: u32 = 1 << 14;
+const PXCMD_CR: u32 = 1 << 15;
+
+const PXTFD_ERR: u32 = 1 << 0;
+const PXTFD_BSY: u32 = 1 << 7;
+const PXTFD_DRQ: u32 = 1 << 3;
+const PXIS_TFES: u32 = 1 << 30;
+
+/// PxSIG for a plain ATA disk (not ATAPI, not a port multiplier, not SEMB).
+const AHCI_SIG_ATA: u32 = 0x0000_0101;
+/// PxSSTS DET/IPM values meaning "device present and PHY established".
+const SSTS_DET_PRESENT: u32 = 3;
+const SSTS_IPM_ACTIVE: u32 = 1;
+
+const ATA_CMD_IDENTIFY: u8 = 0xEC;
+const ATA_CMD_READ_DMA_EXT: u8 = 0x25;
+const ATA_CMD_WRITE_DMA_EXT: u8 = 0x35;
+const ATA_CMD_FLUSH_CACHE_EXT: u8 = 0xEA;
+
+/// Command list + received FIS + command table + bounce page, one set per port.
+/// Identity-mapped .bss below 4 GiB, so these addresses are valid DMA targets.
+#[repr(C, align(1024))]
+struct AhciDma {
+    /// 32 command headers of 32 bytes (1 KiB, 1 KiB-aligned as the spec requires).
+    cmd_list: [[u8; 1024]; MAX_AHCI_PORTS],
+    /// Received FIS area (256 bytes, 256-byte aligned).
+    fis: [[u8; 256]; MAX_AHCI_PORTS],
+    /// Command table: 64-byte CFIS, 48 reserved, PRDT from 0x80 (128-byte aligned).
+    table: [[u8; 256]; MAX_AHCI_PORTS],
+    /// Sector data is copied through here: a PRDT descriptor needs a physical
+    /// address, and the caller's buffer may be a stack local that straddles pages.
+    bounce: [u8; SECTOR_SIZE],
+}
+
+static mut AHCI_DMA: AhciDma = AhciDma {
+    cmd_list: [[0; 1024]; MAX_AHCI_PORTS],
+    fis: [[0; 256]; MAX_AHCI_PORTS],
+    table: [[0; 256]; MAX_AHCI_PORTS],
+    bounce: [0; SECTOR_SIZE],
+};
+
+#[inline(always)]
+fn ahci_port_off(port: usize, off: usize) -> usize {
+    AHCI_PORT_BASE + port * AHCI_PORT_STRIDE + off
+}
+
+/// Command list/table live in cacheable .bss while the HBA doorbell (PxCI) is
+/// uncached MMIO. A compiler fence only stops the compiler: x86 also needs a
+/// real store barrier so the HBA cannot fetch a half-written descriptor.
+#[inline(always)]
+unsafe fn dma_barrier() {
+    compiler_fence(Ordering::SeqCst);
+    asm!("mfence", options(nostack, preserves_flags));
+}
+
+unsafe fn ahci_port_stop(mmio: u64, port: usize) -> Result<(), &'static str> {
+    let cmd = ahci_port_off(port, PX_CMD);
+    mw32(mmio, cmd, mr32(mmio, cmd) & !PXCMD_ST);
+    if !wait_until(2_000_000, || mr32(mmio, cmd) & PXCMD_CR == 0) {
+        return Err("ahci: command list would not stop");
+    }
+    mw32(mmio, cmd, mr32(mmio, cmd) & !PXCMD_FRE);
+    if !wait_until(2_000_000, || mr32(mmio, cmd) & PXCMD_FR == 0) {
+        return Err("ahci: FIS receive would not stop");
+    }
+    Ok(())
+}
+
+unsafe fn ahci_port_start(mmio: u64, port: usize) -> Result<(), &'static str> {
+    ahci_port_stop(mmio, port)?;
+    let cl = addr_of_mut!(AHCI_DMA.cmd_list[port]) as u64;
+    let fb = addr_of_mut!(AHCI_DMA.fis[port]) as u64;
+    // Both areas must be zeroed before the port is enabled.
+    core::ptr::write_bytes(addr_of_mut!(AHCI_DMA.cmd_list[port]) as *mut u8, 0, 1024);
+    core::ptr::write_bytes(addr_of_mut!(AHCI_DMA.fis[port]) as *mut u8, 0, 256);
+    mw32(mmio, ahci_port_off(port, PX_CLB), cl as u32);
+    mw32(mmio, ahci_port_off(port, PX_CLB + 4), (cl >> 32) as u32);
+    mw32(mmio, ahci_port_off(port, PX_FB), fb as u32);
+    mw32(mmio, ahci_port_off(port, PX_FB + 4), (fb >> 32) as u32);
+    mw32(mmio, ahci_port_off(port, PX_IE), 0); // polled
+    mw32(mmio, ahci_port_off(port, PX_IS), 0xFFFF_FFFF);
+    mw32(mmio, ahci_port_off(port, PX_SERR), 0xFFFF_FFFF);
+    let cmd = ahci_port_off(port, PX_CMD);
+    mw32(mmio, cmd, mr32(mmio, cmd) | PXCMD_FRE);
+    mw32(mmio, cmd, mr32(mmio, cmd) | PXCMD_ST);
+    Ok(())
+}
+
+/// Waits for slot 0 to be free and the task file to be idle.
+unsafe fn ahci_port_idle(mmio: u64, port: usize) -> Result<(), &'static str> {
+    let ci = ahci_port_off(port, PX_CI);
+    let tfd = ahci_port_off(port, PX_TFD);
+    if !wait_until(
+        2_000_000,
+        || mr32(mmio, ci) == 0 && mr32(mmio, tfd) & (PXTFD_BSY | PXTFD_DRQ) == 0,
+    ) {
+        return Err("ahci: port stayed busy");
+    }
+    Ok(())
+}
+
+/// Issues one command in slot 0. `bytes` is `Some` for a one-sector data
+/// transfer (READ/WRITE DMA EXT, IDENTIFY) and `None` for FLUSH CACHE EXT.
+unsafe fn ahci_run(
+    mmio: u64,
+    port: usize,
+    opcode: u8,
+    lba: u64,
+    write: bool,
+    bytes: Option<u32>,
+) -> Result<(), &'static str> {
+    ahci_port_idle(mmio, port)?;
+
+    let table = addr_of_mut!(AHCI_DMA.table[port]) as *mut u8;
+    let cl = addr_of_mut!(AHCI_DMA.cmd_list[port]) as *mut u8;
+    let bounce = addr_of_mut!(AHCI_DMA.bounce) as u64;
+    let prdtl: u32 = if bytes.is_some() { 1 } else { 0 };
+
+    // Command header: 5-dword register FIS, write direction, PRDT entry count.
+    write_volatile(cl as *mut u32, 5 | ((write as u32) << 6) | (prdtl << 16));
+    write_volatile(cl.add(4) as *mut u32, 0); // PRDBC, written back by the HBA
+    write_volatile(cl.add(8) as *mut u32, table as u64 as u32);
+    write_volatile(cl.add(12) as *mut u32, (table as u64 >> 32) as u32);
+    for dw in 4..8 {
+        write_volatile(cl.add(dw * 4) as *mut u32, 0);
+    }
+
+    // Host-to-device register FIS, LBA48 field layout.
+    core::ptr::write_bytes(table, 0, 0x80);
+    write_volatile(table, 0x27u8); // FIS type: register H2D
+    write_volatile(table.add(1), 0x80u8); // C = 1: update the command register
+    write_volatile(table.add(2), opcode);
+    write_volatile(table.add(4), lba as u8);
+    write_volatile(table.add(5), (lba >> 8) as u8);
+    write_volatile(table.add(6), (lba >> 16) as u8);
+    write_volatile(table.add(7), 0x40u8); // Device: LBA mode, drive 0
+    write_volatile(table.add(8), (lba >> 24) as u8);
+    write_volatile(table.add(9), (lba >> 32) as u8);
+    write_volatile(table.add(10), (lba >> 40) as u8);
+    write_volatile(table.add(12), 1u8); // sector count (low)
+
+    if let Some(n) = bytes {
+        let prdt = table.add(0x80);
+        write_volatile(prdt as *mut u32, bounce as u32);
+        write_volatile(prdt.add(4) as *mut u32, (bounce >> 32) as u32);
+        write_volatile(prdt.add(8) as *mut u32, 0);
+        write_volatile(prdt.add(12) as *mut u32, (n - 1) & 0x3F_FFFF);
+    }
+
+    dma_barrier();
+    let ci = ahci_port_off(port, PX_CI);
+    let is = ahci_port_off(port, PX_IS);
+    mw32(mmio, ci, 1); // issue slot 0
+    let completed = wait_until(5_000_000, || mr32(mmio, ci) & 1 == 0);
+    compiler_fence(Ordering::SeqCst);
+    let irq_status = mr32(mmio, is);
+    let tfd = mr32(mmio, ahci_port_off(port, PX_TFD));
+    mw32(mmio, is, 0xFFFF_FFFF);
+    if !completed {
+        return Err("ahci: command timed out");
+    }
+    if irq_status & PXIS_TFES != 0 {
+        return Err("ahci: task-file error");
+    }
+    if tfd & PXTFD_ERR != 0 {
+        return Err("ahci: device error");
+    }
+    Ok(())
+}
+
+/// IDENTIFY DEVICE -> (capacity in 512-byte sectors, model string).
+unsafe fn ahci_identify(mmio: u64, port: usize) -> Result<(u64, [u8; 40]), &'static str> {
+    ahci_run(mmio, port, ATA_CMD_IDENTIFY, 0, false, Some(SECTOR_SIZE as u32))?;
+    let id = addr_of!(AHCI_DMA.bounce) as *const u16;
+    // Words 27..46 hold the model, high byte first in each word.
+    let mut model = [b' '; 40];
+    for w in 0..20usize {
+        let v = read_volatile(id.add(27 + w));
+        model[w * 2] = (v >> 8) as u8;
+        model[w * 2 + 1] = (v & 0xFF) as u8;
+    }
+    let lba48 = read_volatile(id.add(83)) & (1 << 10) != 0;
+    let sectors = if lba48 {
+        (read_volatile(id.add(100)) as u64)
+            | ((read_volatile(id.add(101)) as u64) << 16)
+            | ((read_volatile(id.add(102)) as u64) << 32)
+            | ((read_volatile(id.add(103)) as u64) << 48)
+    } else {
+        (read_volatile(id.add(60)) as u64) | ((read_volatile(id.add(61)) as u64) << 16)
+    };
+    if sectors == 0 {
+        return Err("ahci: IDENTIFY reported 0 sectors");
+    }
+    Ok((sectors, model))
+}
+
+unsafe fn ahci_init(p: &PciDevice) -> Result<usize, &'static str> {
+    let bar = pci_mem_bar(p, 5); // ABAR lives in BAR5
+    if bar == 0 {
+        return Err("no ABAR in BAR5");
+    }
+    let Some(mmio) = map_mmio(bar, 0x2000) else {
+        return Err("ABAR could not be mapped");
+    };
+    pci_enable(p); // MMIO decode + bus mastering for DMA
+
+    let cap = mr32(mmio, HBA_CAP);
+    if cap == 0 || cap == 0xFFFF_FFFF {
+        return Err("ABAR does not read back as an AHCI HBA");
+    }
+    // GHC.AE: take the controller out of legacy IDE emulation.
+    let ghc = mr32(mmio, HBA_GHC);
+    if ghc & (1 << 31) == 0 {
+        mw32(mmio, HBA_GHC, ghc | (1 << 31));
+    }
+
+    let n_ports = (((cap & 0x1F) + 1) as usize).min(32);
+    let implemented = mr32(mmio, HBA_PI);
+    let mut registered = 0usize;
+    for port in 0..n_ports.min(MAX_AHCI_PORTS) {
+        if implemented & (1 << port) == 0 {
+            continue;
+        }
+        let ssts = mr32(mmio, ahci_port_off(port, PX_SSTS));
+        if ssts & 0x0F != SSTS_DET_PRESENT || (ssts >> 8) & 0x0F != SSTS_IPM_ACTIVE {
+            continue; // empty bay, or the PHY never came up
+        }
+        let sig = mr32(mmio, ahci_port_off(port, PX_SIG));
+        if sig != AHCI_SIG_ATA {
+            kprintln_colored(
+                0x03,
+                0x0006B6D4,
+                format_args!("[probe]    ahci port {}: signature {:#010x} is not an ATA disk, skipping", port, sig),
+            );
+            continue;
+        }
+        if let Err(e) = ahci_port_start(mmio, port) {
+            kprintln_colored(0x0E, 0x00FFB81C, format_args!("[warn] ahci port {}: {}", port, e));
+            continue;
+        }
+        let (sectors, model) = match ahci_identify(mmio, port) {
+            Ok(v) => v,
+            Err(e) => {
+                kprintln_colored(0x0E, 0x00FFB81C, format_args!("[warn] ahci port {}: {}", port, e));
+                continue;
+            }
+        };
+        let mut dev = blank_device(DevKind::Ahci);
+        dev.mmio = mmio;
+        dev.ahci_port = port as u8;
+        dev.sectors = sectors;
+        dev.lba48 = true;
+        dev.model_len = fill_name(&mut dev.model, &model);
+        if let Some(idx) = register(dev, b"ahci") {
+            registered += 1;
+            log_device(idx);
+        }
+    }
+    if registered == 0 {
+        return Err("no ATA disk on any implemented AHCI port");
+    }
+    Ok(registered)
+}
+
+unsafe fn ahci_rw(dev: &BlockDevice, lba: u64, ptr: *mut u8, write: bool) -> Result<(), &'static str> {
+    let mmio = dev.mmio;
+    let port = dev.ahci_port as usize;
+    let bounce = addr_of_mut!(AHCI_DMA.bounce) as *mut u8;
+    if write {
+        core::ptr::copy_nonoverlapping(ptr as *const u8, bounce, SECTOR_SIZE);
+        compiler_fence(Ordering::SeqCst);
+        ahci_run(mmio, port, ATA_CMD_WRITE_DMA_EXT, lba, true, Some(SECTOR_SIZE as u32))
+    } else {
+        ahci_run(mmio, port, ATA_CMD_READ_DMA_EXT, lba, false, Some(SECTOR_SIZE as u32))?;
+        core::ptr::copy_nonoverlapping(bounce as *const u8, ptr, SECTOR_SIZE);
+        Ok(())
+    }
+}
+
+unsafe fn ahci_flush(dev: &BlockDevice) -> Result<(), &'static str> {
+    ahci_run(dev.mmio, dev.ahci_port as usize, ATA_CMD_FLUSH_CACHE_EXT, 0, false, None)
 }
 
 // ============================================================================
