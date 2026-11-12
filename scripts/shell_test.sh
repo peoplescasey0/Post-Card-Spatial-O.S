@@ -63,10 +63,20 @@ mkdir -p "$(dirname "$LOG_PATH")"
 
 if [[ -n "$USE_DISK" ]]; then
     if [[ ! -f "$DISK_PATH" ]]; then
-        INSTALLER="${SCRIPT_DIR}/install_postcard_os_wsl.sh"
-        if [[ ! -x "$INSTALLER" ]]; then
-            echo "Error: no raw disk at $DISK_PATH, and install_postcard_os_wsl.sh is not in this checkout." >&2
-            echo "Build the disk image first, or drop --disk to test the ISO instead." >&2
+        # The installer lives in the micro-host checkout, which usually sits
+        # beside this one; it is not always executable, so run it through bash.
+        INSTALLER=""
+        for candidate in \
+            "${SCRIPT_DIR}/install_postcard_os_wsl.sh" \
+            "${REPO_ROOT}/../micro-host/install_postcard_os_wsl.sh"; do
+            if [[ -f "${candidate}" ]]; then
+                INSTALLER="${candidate}"
+                break
+            fi
+        done
+        if [[ -z "${INSTALLER}" ]]; then
+            echo "Error: no raw disk at $DISK_PATH, and install_postcard_os_wsl.sh was not found." >&2
+            echo "It lives in the micro-host checkout; put that beside this one, or drop --disk to test the ISO." >&2
             exit 1
         fi
         ELF="$(kernel_elf || true)"
@@ -75,7 +85,7 @@ if [[ -n "$USE_DISK" ]]; then
             exit 1
         fi
         echo "Raw disk not found at $DISK_PATH, building via install_postcard_os_wsl.sh..."
-        "${INSTALLER}" "$DISK_PATH" "${ELF}"
+        bash "${INSTALLER}" "$DISK_PATH" "${ELF}"
     fi
     MEDIA_ARG="--disk $DISK_PATH"
 else

@@ -63,8 +63,9 @@ paper-plane directory is attached as `if=ide,index=2` on `-machine q35` and the
 installer CD as `if=ide,index=1`, so the CD can never claim the index the
 paper-plane volume uses. The `--disk` mode of `boot_test.sh` and
 `shell_test.sh` builds `target/postcard-os.raw` with
-`scripts/install_postcard_os_wsl.sh`; that script is not in this repository, so
-those modes stop with a clear message unless you add it.
+`install_postcard_os_wsl.sh`, which lives in the micro-host checkout rather than
+here. Those modes use a copy beside this repository (the usual `micro-host/`
+layout) and stop with a clear message when they cannot find one.
 
 ## Secrets
 Never commit keys. Use environment variables (for example `STRIPE_SECRET_KEY`).
