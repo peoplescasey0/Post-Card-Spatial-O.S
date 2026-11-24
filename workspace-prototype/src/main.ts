@@ -45,6 +45,12 @@ import {
   type CardThemeDefinition,
   type CardThemeId,
 } from "./card-themes";
+import {
+  getRoomEnvironment,
+  loadPersistedRoomEnvironment,
+  persistRoomEnvironment,
+  type RoomEnvironmentId,
+} from "./room-environments";
 
 /**
  * Windows "Animation effects: off" makes browsers report prefers-reduced-motion,
@@ -575,7 +581,8 @@ renderer.domElement.setAttribute(
 );
 container.appendChild(renderer.domElement);
 
-scene.add(new THREE.HemisphereLight("#d9e7ff", "#11162d", 1.35));
+const hemiLight = new THREE.HemisphereLight("#d9e7ff", "#11162d", 1.35);
+scene.add(hemiLight);
 const keyLight = new THREE.DirectionalLight("#8fe3e2", 2.2);
 keyLight.position.set(-4, 9, 6);
 keyLight.castShadow = true;
@@ -800,8 +807,9 @@ const starMaterial = new THREE.PointsMaterial({
   opacity: 0.95,
   depthWrite: false,
 });
+const starfieldGroup = new THREE.Group();
 const cosmicStarfield = new THREE.Points(starGeometry, starMaterial);
-scene.add(cosmicStarfield);
+starfieldGroup.add(cosmicStarfield);
 
 // Distant soft nebula glow in deep space
 for (const [x, y, z, color, opacity, radius] of [
@@ -819,8 +827,9 @@ for (const [x, y, z, color, opacity, radius] of [
     }),
   );
   nebulaGlow.position.set(x, y, z);
-  scene.add(nebulaGlow);
+  starfieldGroup.add(nebulaGlow);
 }
+scene.add(starfieldGroup);
 
 const dais = new THREE.Mesh(
   new THREE.CylinderGeometry(7.7, 8.05, 0.2, 96, 1, false),
@@ -886,6 +895,10 @@ for (const [innerR, tubeR, ringColor, emissiveHex] of [
   scene.add(innerRing);
 }
 
+// Thematic props: cyber-monoliths, library-shelves, studio-frames, botanical-baffles
+const cyberMonolithsGroup = new THREE.Group();
+scene.add(cyberMonolithsGroup);
+
 // 12 radial turntable compass ticks on the dais floor
 const tickMaterial = new THREE.MeshStandardMaterial({
   color: "#77d2e8",
@@ -897,7 +910,7 @@ for (let i = 0; i < 12; i++) {
   const tick = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.01, 0.55), tickMaterial);
   tick.position.set(Math.sin(angle) * 6.2, 0.104, -0.25 + Math.cos(angle) * 6.2);
   tick.rotation.y = angle;
-  scene.add(tick);
+  cyberMonolithsGroup.add(tick);
 }
 
 // Twin Neural Monolith Racks flanking the back studio corners
@@ -949,8 +962,113 @@ for (const side of [-1, 1] as const) {
 
   towerGroup.position.set(side * 8.6, 0, -6.5);
   towerGroup.rotation.y = side * -0.26;
-  scene.add(towerGroup);
+  cyberMonolithsGroup.add(towerGroup);
 }
+
+// Procedural props for Sunset Amber Library (warm wooden shelves and book fins)
+const libraryGroup = new THREE.Group();
+const libraryWoodMat = new THREE.MeshStandardMaterial({
+  color: "#5c3317",
+  roughness: 0.7,
+  metalness: 0.1,
+});
+const libraryBookMat1 = new THREE.MeshStandardMaterial({ color: "#8b263e", roughness: 0.8 });
+const libraryBookMat2 = new THREE.MeshStandardMaterial({ color: "#2b4c7e", roughness: 0.8 });
+const libraryBookMat3 = new THREE.MeshStandardMaterial({ color: "#c28b38", roughness: 0.7 });
+
+for (const side of [-1, 1] as const) {
+  const shelfUnit = new THREE.Group();
+  for (const xOff of [-0.9, 0, 0.9]) {
+    const upright = new THREE.Mesh(new THREE.BoxGeometry(0.08, 5.2, 0.65), libraryWoodMat);
+    upright.position.set(xOff, 2.6, 0);
+    upright.castShadow = true;
+    shelfUnit.add(upright);
+  }
+  for (let s = 0; s < 5; s++) {
+    const shelf = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.06, 0.62), libraryWoodMat);
+    shelf.position.set(0, 0.8 + s * 1.05, 0);
+    shelf.receiveShadow = true;
+    shelfUnit.add(shelf);
+
+    const bookColors = [libraryBookMat1, libraryBookMat2, libraryBookMat3];
+    for (let b = -0.7; b <= 0.7; b += 0.22) {
+      const bMat = bookColors[Math.abs(Math.round(b * 10)) % bookColors.length];
+      const bookH = 0.55 + ((Math.sin(b * 5) + 1) * 0.15);
+      const book = new THREE.Mesh(new THREE.BoxGeometry(0.14, bookH, 0.42), bMat);
+      book.position.set(b, 0.8 + s * 1.05 + bookH / 2 + 0.03, 0);
+      shelfUnit.add(book);
+    }
+  }
+  shelfUnit.position.set(side * 8.6, 0, -6.5);
+  shelfUnit.rotation.y = side * -0.26;
+  libraryGroup.add(shelfUnit);
+}
+scene.add(libraryGroup);
+
+// Procedural props for Pixel Studio (clean studio display frames on stands)
+const studioGroup = new THREE.Group();
+const studioFrameMat = new THREE.MeshStandardMaterial({
+  color: "#d0d5dd",
+  roughness: 0.4,
+  metalness: 0.3,
+});
+const studioCanvasMat1 = new THREE.MeshStandardMaterial({ color: "#f8f9fa", roughness: 0.9 });
+const studioCanvasMat2 = new THREE.MeshStandardMaterial({ color: "#eaecf0", roughness: 0.9 });
+
+for (const side of [-1, 1] as const) {
+  const frameUnit = new THREE.Group();
+  const frameBorder = new THREE.Mesh(new THREE.BoxGeometry(1.8, 2.6, 0.08), studioFrameMat);
+  frameBorder.position.set(0, 3.2, 0);
+  frameBorder.castShadow = true;
+  frameUnit.add(frameBorder);
+
+  const artCanvas = new THREE.Mesh(
+    new THREE.BoxGeometry(1.6, 2.4, 0.09),
+    side < 0 ? studioCanvasMat1 : studioCanvasMat2,
+  );
+  artCanvas.position.set(0, 3.2, 0.01);
+  frameUnit.add(artCanvas);
+
+  const legMat = new THREE.MeshStandardMaterial({ color: "#98a2b3", roughness: 0.5, metalness: 0.5 });
+  const standLegLeft = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 3.4), legMat);
+  standLegLeft.position.set(-0.6, 1.6, 0.2);
+  standLegLeft.rotation.z = 0.08;
+  frameUnit.add(standLegLeft);
+
+  const standLegRight = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 3.4), legMat);
+  standLegRight.position.set(0.6, 1.6, 0.2);
+  standLegRight.rotation.z = -0.08;
+  frameUnit.add(standLegRight);
+
+  frameUnit.position.set(side * 8.6, 0, -6.5);
+  frameUnit.rotation.y = side * -0.26;
+  studioGroup.add(frameUnit);
+}
+scene.add(studioGroup);
+
+// Procedural props for Forest Emerald (botanical bamboo/slate baffles)
+const botanicalGroup = new THREE.Group();
+const botanicalBaffleMat = new THREE.MeshStandardMaterial({ color: "#1c3829", roughness: 0.8, metalness: 0.1 });
+const botanicalStalkMat = new THREE.MeshStandardMaterial({ color: "#2d5a3f", roughness: 0.7, metalness: 0.1 });
+
+for (const side of [-1, 1] as const) {
+  const baffleUnit = new THREE.Group();
+  for (let i = 0; i < 5; i++) {
+    const baffle = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 4.6, 12), botanicalStalkMat);
+    baffle.position.set((i - 2) * 0.35, 2.3, 0);
+    baffle.castShadow = true;
+    baffleUnit.add(baffle);
+  }
+  const planter = new THREE.Mesh(new THREE.BoxGeometry(2.0, 0.5, 0.6), botanicalBaffleMat);
+  planter.position.set(0, 0.25, 0);
+  planter.castShadow = true;
+  baffleUnit.add(planter);
+
+  baffleUnit.position.set(side * 8.6, 0, -6.5);
+  baffleUnit.rotation.y = side * -0.26;
+  botanicalGroup.add(baffleUnit);
+}
+scene.add(botanicalGroup);
 
 // Suspended Overhead Halo Chandelier Rig
 const overheadHaloGroup = new THREE.Group();
@@ -4789,6 +4907,66 @@ export function applyCardTheme(themeId: CardThemeId): void {
   }
 }
 
+export let activeRoomEnvironmentId: RoomEnvironmentId = loadPersistedRoomEnvironment();
+
+export function getActiveRoomEnvironment(): RoomEnvironmentId {
+  return activeRoomEnvironmentId;
+}
+
+/**
+ * Applies a 3D room environment, updating scene backdrop, fog, floor PBR material,
+ * primary lighting rigs, and procedural thematic props.
+ */
+export function applyRoomEnvironment(envId: string): void {
+  const env = getRoomEnvironment(envId);
+  activeRoomEnvironmentId = env.id;
+  persistRoomEnvironment(env.id);
+
+  // 1. Scene background and fog
+  scene.background = new THREE.Color(env.background);
+  if (scene.fog) {
+    scene.fog.color.set(env.fog.color);
+    (scene.fog as THREE.FogExp2).density = env.fog.density;
+  } else {
+    scene.fog = new THREE.FogExp2(env.fog.color, env.fog.density);
+  }
+
+  // 2. Floor PBR material
+  const floorMat = floor.material as THREE.MeshStandardMaterial;
+  floorMat.color.set(env.floor.color);
+  floorMat.roughness = env.floor.roughness;
+  floorMat.metalness = env.floor.metalness;
+  floorMat.needsUpdate = true;
+
+  // 3. Primary directional, fill, rim, and dusk lights
+  hemiLight.color.set(env.lighting.ambientColor);
+  hemiLight.intensity = env.lighting.ambientIntensity;
+
+  keyLight.color.set(env.lighting.keyColor);
+  keyLight.intensity = env.lighting.keyIntensity;
+  keyLight.position.set(env.lighting.keyPosition[0], env.lighting.keyPosition[1], env.lighting.keyPosition[2]);
+
+  fillLight.color.set(env.lighting.fillColor);
+  fillLight.intensity = env.lighting.fillIntensity;
+
+  rimLight.color.set(env.lighting.fillColor);
+  rimLight.intensity = env.lighting.fillIntensity * 0.75;
+
+  duskLight.color.set(env.lighting.duskColor);
+  duskLight.intensity = env.lighting.duskIntensity;
+
+  // 4. Thematic prop groups
+  cyberMonolithsGroup.visible = env.props === "cyber-monoliths";
+  libraryGroup.visible = env.props === "library-shelves";
+  studioGroup.visible = env.props === "studio-frames";
+  botanicalGroup.visible = env.props === "botanical-baffles";
+
+  // 5. Cosmic starfield
+  starfieldGroup.visible = !!env.showCosmicStarfield;
+}
+
+export const setCardTheme = applyCardTheme;
+
 /**
  * Initializes click handlers for card theme selector chips and seed pickers across
  * #home-view and #studio-view.
@@ -8528,6 +8706,7 @@ initKernelTelemetryBridge();
 initViewRouter();
 initCardThemePicker();
 applyCardTheme(loadPersistedTheme());
+applyRoomEnvironment(loadPersistedRoomEnvironment());
 animate();
 
 
