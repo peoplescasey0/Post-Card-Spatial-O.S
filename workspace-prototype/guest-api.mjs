@@ -3,8 +3,8 @@ import { createConnection, isIP } from "node:net";
 import { availableParallelism } from "node:os";
 import { createHash, randomUUID } from "node:crypto";
 import { promisify } from "node:util";
-import { copyFile, lstat, mkdir, readdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
-import { constants as fsConstants, existsSync } from "node:fs";
+import { copyFile, lstat, mkdir, open, readdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
+import { accessSync, constants as fsConstants, existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { handleStripeRequest } from "./stripe-api.mjs";
@@ -56,6 +56,19 @@ class GuestApiError extends Error {
   }
 }
 
+/**
+ * Addresses a paper plane must never deliver to: link-local ranges and the
+ * cloud metadata endpoints that live there. Loopback stays allowed because the
+ * documented local flow is a plane to another instance on this machine.
+ */
+export function isBlockedPaperPlaneTarget(hostname) {
+  const host = String(hostname ?? "").trim().toLowerCase().replace(/^\[|\]$/g, "");
+  if (!host) return true;
+  if (host === "metadata.google.internal" || host === "metadata") return true;
+  if (host === "169.254.169.254" || host === "fd00:ec2::254") return true;
+  return /^169\.254\./.test(host);
+}
+
 function isLoopback(address) {
   if (!address) return false;
   if (address.startsWith("::ffff:")) address = address.slice(7);
@@ -70,6 +83,32 @@ function sendJson(response, status, body) {
     "x-content-type-options": "nosniff",
   });
   response.end(JSON.stringify(body));
+}
+
+/**
+ * Writes a JSON state file atomically.
+ *
+ * Every reader in this service treats a corrupt file as "empty", so a crash or
+ * power loss mid-write used to silently reset saved settings. Writing to a
+ * synced temporary file and renaming it makes the live file either old or new,
+ * never half-written.
+ */
+export async function writeJsonAtomically(filePath, value, label) {
+  const temporaryPath = `${filePath}.${process.pid}.${randomUUID()}.tmp`;
+  let handle;
+  try {
+    await mkdir(path.dirname(filePath), { recursive: true });
+    handle = await open(temporaryPath, "wx");
+    await handle.writeFile(JSON.stringify(value, null, 2), "utf8");
+    await handle.sync();
+    await handle.close();
+    handle = undefined;
+    await rename(temporaryPath, filePath);
+  } catch (error) {
+    if (handle) await handle.close().catch(() => undefined);
+    await rm(temporaryPath, { force: true }).catch(() => undefined);
+    throw new GuestApiError(500, `Could not save ${label}: ${error.message}`);
+  }
 }
 
 async function readJson(request, maxBytes = 2048) {
@@ -173,6 +212,44 @@ function butlerStateLine(context) {
   else if (context.guestRunning) parts.push("guest running");
   return parts.length ? `State: ${parts.join(", ")}.` : "";
 }
+
+/**
+ * Which hardware accelerator this host can actually give QEMU.
+ *
+ * Before this existed, non-Windows hosts passed `-accel tcg` unconditionally, so a
+ * Linux machine with /dev/kvm ran every guest in software emulation. The probe is
+ * pure so it can be tested without touching the host.
+ */
+export function resolveAcceleration({ platform = process.platform, kvmAvailable = false } = {}) {
+  if (platform === "win32") {
+    return { mode: "whpx", reason: "Windows Hypervisor Platform" };
+  }
+  if (platform === "darwin") {
+    return { mode: "hvf", reason: "macOS Hypervisor.framework" };
+  }
+  if (platform === "linux") {
+    return kvmAvailable
+      ? { mode: "kvm", reason: "/dev/kvm is available" }
+      : { mode: "tcg", reason: "/dev/kvm is unavailable; guests run in software emulation" };
+  }
+  return { mode: "tcg", reason: `${platform} has no supported hardware accelerator` };
+}
+
+/** QEMU arguments for a resolved mode. WHPX needs its userspace IRQ chip. */
+export function accelerationArgument(mode) {
+  return mode === "whpx" ? "whpx,kernel-irqchip=off" : mode;
+}
+
+function kvmDeviceUsable() {
+  try {
+    accessSync("/dev/kvm", fsConstants.R_OK | fsConstants.W_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+const guestAcceleration = resolveAcceleration({ kvmAvailable: kvmDeviceUsable() });
 
 function findExecutable(environmentKey, defaultPath, executableName) {
   const configuredPath = process.env[environmentKey];
@@ -325,7 +402,7 @@ function qemuArguments({ bootMode, cardId, diskPath, isoPath, ports, networkMode
     const args = [
       "-name", `Post Card ${cardId} macOS guest`,
       "-machine", "q35",
-      "-accel", process.platform === "win32" ? "whpx,kernel-irqchip=off" : "tcg",
+      "-accel", accelerationArgument(guestAcceleration.mode),
       "-cpu", "Penryn,vendor=GenuineIntel,+invtsc,vmware-cpuid-freq=on,+ssse3,+sse4.2,+popcnt,+avx,+aes,+xsave,+xsaveopt",
       "-smp", String(vcpus),
       "-m", String(memoryMb),
@@ -376,8 +453,8 @@ function qemuArguments({ bootMode, cardId, diskPath, isoPath, ports, networkMode
     "-name", `Post Card ${cardId} Linux guest`,
     "-machine", "q35",
     // WHPX's in-kernel IRQ chip hangs SeaBIOS at "Booting from Hard Disk...";
-    // the userspace IRQ chip boots reliably.
-    "-accel", process.platform === "win32" ? "whpx,kernel-irqchip=off" : "tcg",
+    // the userspace IRQ chip boots reliably. KVM/HVF are used when the probe finds them.
+    "-accel", accelerationArgument(guestAcceleration.mode),
     "-cpu", "max",
     "-smp", String(vcpus),
     "-m", String(memoryMb),
@@ -1277,6 +1354,8 @@ export function createGuestApi(options = {}) {
       baseReady,
       baseDiskExists: existsSync(baseDiskPath),
       baseDiskPath,
+      acceleration: guestAcceleration.mode,
+      accelerationReason: guestAcceleration.reason,
       deletedCardIds: (await readCardIdRegistry()).deletedIds,
       preparedCardIds: await preparedCardIds(),
       preparedWindowsCardIds: await preparedWindowsCardIds(),
@@ -2000,7 +2079,7 @@ export function createGuestApi(options = {}) {
       if (!currentPath || currentPath.path !== update.path) {
         throw new GuestApiError(409, "Card metadata changed during deletion; no success was reported.");
       }
-      await writeFile(currentPath.path, JSON.stringify(update.value, null, 2), "utf8");
+      await writeJsonAtomically(currentPath.path, update.value, "card metadata");
     }
 
     guests.delete(key);
@@ -2100,9 +2179,9 @@ export function createGuestApi(options = {}) {
   }
 
   async function writePaperPlanes(planes) {
-    await mkdir(dataDirectory, { recursive: true });
-    const trimmed = planes.slice(-64);
-    await writeFile(paperPlanesPath, JSON.stringify(trimmed, null, 2), "utf8");
+    // Keep the newest 64 planes; the write is atomic so a crash cannot empty
+    // the ledger the room reads on every status poll.
+    await writeJsonAtomically(paperPlanesPath, planes.slice(-64), "the paper-plane ledger");
   }
 
   async function deliverToRemoteComputer(remoteTarget, payload) {
@@ -2118,6 +2197,9 @@ export function createGuestApi(options = {}) {
       const port = Number(parsed.port);
       if (!host || !Number.isInteger(port) || port < 1 || port > 65535) {
         throw new GuestApiError(400, "tcp:// remoteTarget must include a valid host and port.");
+      }
+      if (isBlockedPaperPlaneTarget(host)) {
+        throw new GuestApiError(400, "Paper planes refuse link-local and cloud metadata addresses.");
       }
       await new Promise((resolve, reject) => {
         const socket = createConnection({ host, port });
@@ -2150,6 +2232,12 @@ export function createGuestApi(options = {}) {
         "remoteTarget must be a valid HTTP(S) URL, host:port, or tcp://host:port.",
       );
     }
+    if (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:") {
+      throw new GuestApiError(400, "remoteTarget must use http, https, or tcp.");
+    }
+    if (isBlockedPaperPlaneTarget(parsedUrl.hostname)) {
+      throw new GuestApiError(400, "Paper planes refuse link-local and cloud metadata addresses.");
+    }
     if (parsedUrl.pathname === "/" || parsedUrl.pathname === "") {
       parsedUrl.pathname = "/api/guest/paper-plane/inbox";
     }
@@ -2160,11 +2248,20 @@ export function createGuestApi(options = {}) {
         headers: { "content-type": "application/json" },
         body: JSON.stringify(payload),
         signal: AbortSignal.timeout(3500),
+        // Never follow a redirect: a hostname check is worthless if one 302
+        // can forward the note to an internal service.
+        redirect: "manual",
       });
     } catch (error) {
       throw new GuestApiError(
         502,
         `Could not reach live computer at ${parsedUrl.origin}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+    if (response.status >= 300 && response.status < 400) {
+      throw new GuestApiError(
+        502,
+        `Live computer at ${parsedUrl.origin} redirected the paper plane; it was not delivered.`,
       );
     }
     if (!response.ok) {
@@ -2345,8 +2442,7 @@ export function createGuestApi(options = {}) {
   }
 
   async function writeCheckpoints(checkpoints) {
-    await mkdir(dataDirectory, { recursive: true });
-    await writeFile(checkpointsPath, JSON.stringify(checkpoints, null, 2), "utf8");
+    await writeJsonAtomically(checkpointsPath, checkpoints, "card checkpoints");
   }
 
   async function snapshotCard({ action = "save", cardId, os = LINUX_OS, tag = "time-travel" }) {
@@ -2563,8 +2659,7 @@ export function createGuestApi(options = {}) {
   }
 
   async function writeNetworkModes(modes) {
-    await mkdir(dataDirectory, { recursive: true });
-    await writeFile(networkModesPath, JSON.stringify(modes, null, 2), "utf8");
+    await writeJsonAtomically(networkModesPath, modes, "network modes");
   }
 
   async function setNetworkMode({ cardId, networkMode = "nat" }) {
@@ -2591,8 +2686,7 @@ export function createGuestApi(options = {}) {
   }
 
   async function writeMemoryProfiles(profiles) {
-    await mkdir(dataDirectory, { recursive: true });
-    await writeFile(memoryProfilesPath, JSON.stringify(profiles, null, 2), "utf8");
+    await writeJsonAtomically(memoryProfilesPath, profiles, "memory profiles");
   }
 
   async function setMemoryProfile({ cardId, memoryProfile = "eco" }) {
@@ -2627,8 +2721,7 @@ export function createGuestApi(options = {}) {
     }
     const profiles = await readCpuProfiles();
     profiles[cardId] = cpuProfile;
-    await mkdir(dataDirectory, { recursive: true });
-    await writeFile(cpuProfilesPath, JSON.stringify(profiles, null, 2), "utf8");
+    await writeJsonAtomically(cpuProfilesPath, profiles, "the CPU profile");
     return status();
   }
 
@@ -2659,8 +2752,7 @@ export function createGuestApi(options = {}) {
     } else {
       isos[cardId] = trimmed;
     }
-    await mkdir(dataDirectory, { recursive: true });
-    await writeFile(customIsosPath, JSON.stringify(isos, null, 2), "utf8");
+    await writeJsonAtomically(customIsosPath, isos, "the custom ISO list");
     return status();
   }
 

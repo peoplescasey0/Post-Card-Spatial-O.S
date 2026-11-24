@@ -77,6 +77,15 @@ from another host receives `403` and every prompt goes through keyword matching.
 Prompts are only sent to `POSTCARD_OLLAMA_URL`, so keep it pointed at a local
 Ollama unless you intend to send that text elsewhere.
 
+## Guest acceleration
+
+The guest service uses the fastest accelerator the host offers: KVM on Linux when
+`/dev/kvm` is readable and writable, Hypervisor.framework on macOS, and Windows
+Hypervisor Platform on Windows. If none is available it falls back to QEMU's
+software emulation (`tcg`), which is dramatically slower. The Performance dialog
+shows which mode your cards are using. Windows guests run inside WSL and try KVM
+there first.
+
 ## Connect the Linux guest
 
 The guest service is part of the Vite development and preview servers; it

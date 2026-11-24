@@ -139,6 +139,9 @@ type GuestServiceStatus = {
   baseReady: boolean;
   baseDiskExists: boolean;
   baseDiskPath: string;
+  /** Hardware accelerator the guest service resolved for this host. */
+  acceleration?: "kvm" | "hvf" | "whpx" | "tcg";
+  accelerationReason?: string;
   deletedCardIds: string[];
   allocatedCardId?: string;
   preparedCardIds: string[];
@@ -3123,10 +3126,19 @@ function openPerformanceDialog(): void {
       applyStudioLighting();
     };
   }
+  const acceleration = guestServiceStatus?.acceleration;
+  const accelerationNote = acceleration
+    ? ` Guest acceleration: ${acceleration.toUpperCase()}${
+        acceleration === "tcg"
+          ? " (software emulation — enable KVM or WHPX for full speed)"
+          : ""
+      }.`
+    : "";
   performanceGpuInfoElement.textContent =
-    selectedCard.os === "WINDOWS"
+    (selectedCard.os === "WINDOWS"
       ? "Virtual graphics: QEMU Standard VGA over VNC. Linux/other cards use virtual virtio-vga. Neither path exposes the host GPU."
-      : "Virtual graphics: QEMU virtio-vga over VNC. This is a virtual display adapter, not direct access to your host GPU.";
+      : "Virtual graphics: QEMU virtio-vga over VNC. This is a virtual display adapter, not direct access to your host GPU.") +
+    accelerationNote;
   const guest = guestServiceStatus?.guests.find(
     (item) => item.cardId === selectedCard?.id && item.os === cardToGuestOs(selectedCard),
   );
@@ -5025,6 +5037,8 @@ function isGuestServiceStatus(value: unknown): value is GuestServiceStatus {
     typeof value.baseReady === "boolean" &&
     typeof value.baseDiskExists === "boolean" &&
     typeof value.baseDiskPath === "string" &&
+    (value.acceleration === undefined ||
+      ["kvm", "hvf", "whpx", "tcg"].includes(String(value.acceleration))) &&
     Array.isArray(value.deletedCardIds) &&
     value.deletedCardIds.every((id) => typeof id === "string") &&
     Array.isArray(value.preparedCardIds) &&
