@@ -248,6 +248,8 @@
           <button class="mode-pill" id="bench-toggle" type="button" title="Pull 1, 2, or 3 cards to the front workbench (B)">▣ BENCH · 1 CARD</button>
           <button class="mode-pill" id="secops-toggle" type="button" aria-pressed="false" title="Toggle SecOps &amp; Pen-Test Cyber Range Mode">🛡️ SECOPS LAB</button>
           <button class="mode-pill" id="secure-room-button" type="button" aria-pressed="false" title="Secure Now (hide live screens) · Shift+Click or Ctrl+Shift+L for Lockdown">🔒 SECURE NOW</button>
+          <button class="mode-pill" id="journal-button" type="button" title="View Action Journal &amp; Fork Card">📜 JOURNAL</button>
+          <button class="mode-pill" id="instrument-panel-button" type="button" title="Flat List, Disk Ledger &amp; Readiness Check">📊 DECK</button>
           <button class="mode-pill manual-pill" id="help-button" type="button" aria-label="Open User Manual" title="Open Post Card OS User Manual (?)">📖 USER MANUAL</button>
           <!-- Studio Theme Selector Pulldown -->
           <details class="pulldown studio-theme-pulldown" id="studio-theme-pulldown">
@@ -338,7 +340,7 @@
               <div class="profile-divider"></div>
               <button class="profile-action" id="profile-editions-option" type="button">
                 <span class="profile-action-icon" aria-hidden="true">💎</span>
-                <span><strong>Commercial Editions &amp; Marketplace</strong><small>Pro, Enterprise, AI Butler &amp; Add-On DLCs</small></span>
+                <span><strong>Commercial Editions &amp; Marketplace</strong><small>Pro, Enterprise, Seneschal &amp; Add-On DLCs</small></span>
               </button>
               <button class="profile-action" id="profile-restore-option" type="button">
                 <span class="profile-action-icon" aria-hidden="true">🔑</span>
@@ -573,7 +575,7 @@
               <span aria-hidden="true">⚡</span>
               <span class="card-action-label">Perf</span>
             </button>
-            <button class="card-action" data-card-extra="butler" type="button" title="Ask the butler for help">
+            <button class="card-action" data-card-extra="butler" type="button" title="Ask Seneschal for help">
               <span aria-hidden="true">✦</span>
               <span class="card-action-label">Help</span>
             </button>
@@ -1324,18 +1326,18 @@
         </form>
       </dialog>
     </div>
-    <aside class="butler" id="butler" aria-label="AI butler">
+    <aside class="butler" id="butler" aria-label="Seneschal AI co-pilot">
       <div class="butler-bubble" id="butler-bubble" role="status" aria-live="polite" hidden>
         <div class="butler-header">
           <div class="butler-title-group">
-            <span class="butler-title">🎩 THE ONE AI CO-PILOT</span>
+            <span class="butler-title">🎩 SENESCHAL PROTOCOL</span>
             <select class="butler-model-select" id="butler-model-select" title="Active Local Dual-Engine Model">
               <option value="auto">⚡ Auto-Switch (Smart Route)</option>
               <option value="qwen-coder">💻 Qwen 2.5 Coder 1.5B (Tech &amp; Terminal)</option>
               <option value="llama-chat">💬 Llama 3.2 1B (Conversation &amp; Banter)</option>
             </select>
           </div>
-          <button class="butler-close" id="butler-close" type="button" aria-label="Dismiss butler">×</button>
+          <button class="butler-close" id="butler-close" type="button" aria-label="Dismiss Seneschal">×</button>
         </div>
         <p id="butler-message"></p>
         <div class="butler-choices" id="butler-choices"></div>
@@ -1345,13 +1347,13 @@
             id="omni-input"
             type="text"
             maxlength="160"
-            placeholder="Ask your butler or run a command on this card…"
-            aria-label="Ask the AI butler or run a card command"
+            placeholder="Ask Seneschal or run a command on this card…"
+            aria-label="Ask Seneschal or run a card command"
           />
           <button class="butler-send" id="omni-submit" type="submit">Ask</button>
         </form>
       </div>
-      <button class="butler-avatar" id="butler-avatar" type="button" aria-label="Call the butler" title="Your butler (Ctrl+K or /). Click for help.">
+      <button class="butler-avatar" id="butler-avatar" type="button" aria-label="Call Seneschal" title="Seneschal (Ctrl+K or /). Click for help.">
         <span aria-hidden="true">🎩</span>
       </button>
     </aside>
@@ -1366,8 +1368,40 @@
           aria-label="Command palette search"
         />
         <ul class="command-palette-list" id="command-palette-list" role="listbox"></ul>
-        <div class="command-palette-hint">↑↓ select · Enter run (or send to Butler) · Esc close</div>
+        <div class="command-palette-hint">↑↓ select · Enter run (or send to Seneschal) · Esc close</div>
       </div>
+    </dialog>
+    <dialog class="bin-dialog" id="journal-dialog" aria-label="Action Journal">
+      <div class="dialog-header">
+        <div>
+          <p class="dialog-eyebrow">AUDIT TIMELINE · HUMAN &amp; AGENT ACTIONS</p>
+          <h2>Action Journal</h2>
+        </div>
+        <button class="dialog-close" id="journal-close-btn" type="button" aria-label="Close Action Journal">×</button>
+      </div>
+      <p class="dialog-description">Append-only record of boots, snapshots, network changes, Lockdown toggles, and forks.</p>
+      <div style="display:flex;gap:8px;margin-top:14px;">
+        <button class="mode-pill" id="journal-refresh-btn" type="button">↻ Refresh</button>
+        <button class="mode-pill" id="journal-fork-btn" type="button">⑂ Fork Selected Card</button>
+      </div>
+      <ul class="bin-card-list" id="journal-list"></ul>
+    </dialog>
+    <dialog class="bin-dialog" id="instrument-dialog" aria-label="Workspace Deck, Disk Ledger &amp; Readiness">
+      <div class="dialog-header">
+        <div>
+          <p class="dialog-eyebrow">FLAT INSTRUMENT PANEL · ACCESSIBLE DECK</p>
+          <h2>Workspace Deck &amp; Readiness</h2>
+        </div>
+        <button class="dialog-close" id="instrument-close-btn" type="button" aria-label="Close Workspace Deck">×</button>
+      </div>
+      <div id="instrument-readiness-summary" class="bin-empty" style="margin-top:8px;">Probing QEMU, acceleration, and ISOs…</div>
+      <div id="instrument-disk-summary" class="bin-empty" style="margin-top:10px;">Calculating disk usage…</div>
+      <div style="display:flex;gap:8px;align-items:center;margin-top:12px;flex-wrap:wrap;">
+        <input id="instrument-share-path" type="text" placeholder="Shared folder host path for selected card…" style="flex:1;min-width:180px;padding:7px 10px;border-radius:6px;border:1px solid rgba(148,173,210,0.3);background:#0c1322;color:#eef3ff;" />
+        <label style="font-size:12px;display:flex;align-items:center;gap:4px;"><input id="instrument-share-ro" type="checkbox" checked /> Read-only</label>
+        <button class="mode-pill" id="instrument-share-save" type="button">📁 Mount Folder</button>
+      </div>
+      <ul class="bin-card-list" id="instrument-card-list"></ul>
     </dialog>
     <script type="module" src="/src/main.ts"></script>
   </body>

@@ -713,4 +713,39 @@ test("exposes action journal, disk usage ledger, SSH key provisioning, and MCP t
   const listResp = await handleMcpRequest({ jsonrpc: "2.0", id: 2, method: "tools/list" });
   assert.ok(listResp.result.tools.some((t) => t.name === "guest_status"));
   assert.ok(listResp.result.tools.some((t) => t.name === "guest_lockdown"));
+  assert.ok(listResp.result.tools.some((t) => t.name === "guest_fork_card"));
+
+  const forkRes = await fetch(`${baseUrl}/api/guest/fork-card`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ sourceCardId: "linux", os: "linux" }),
+  });
+  assert.equal(forkRes.status, 200);
+  const forkPayload = await forkRes.json();
+  assert.match(forkPayload.forkedCardId, /^linux-\d+$/);
+
+  const readinessRes = await fetch(`${baseUrl}/api/guest/readiness`);
+  assert.equal(readinessRes.status, 200);
+  const readinessPayload = await readinessRes.json();
+  assert.equal(typeof readinessPayload.nextAction, "string");
+  assert.ok(readinessPayload.qemu && typeof readinessPayload.qemu.ok === "boolean");
+
+  const shareFolderRes = await fetch(`${baseUrl}/api/guest/shared-folder`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ cardId: "linux", hostPath: testDataDirectory, readOnly: true }),
+  });
+  assert.equal(shareFolderRes.status, 200);
+  const shareFolderPayload = await shareFolderRes.json();
+  assert.equal(shareFolderPayload.sharedFolders.linux.readOnly, true);
+
+  const butlerRes = await fetch(`${baseUrl}/api/guest/butler-chat`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ prompt: "check status", model: "qwen-coder", cardId: "linux" }),
+  });
+  assert.equal(butlerRes.status, 200);
+  const butlerPayload = await butlerRes.json();
+  assert.equal(butlerPayload.ok, true);
+  assert.equal(butlerPayload.model, "qwen2.5-coder:1.5b");
 });

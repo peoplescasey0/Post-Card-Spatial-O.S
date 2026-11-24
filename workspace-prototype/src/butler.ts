@@ -34,8 +34,20 @@ export type ButlerChoiceId =
   | "freeplane"
   | "vscode"
   | "swiftshader"
+  | "approve-playbook"
+  | "journal"
   | "snooze"
   | "dismiss";
+
+export type ButlerPlaybookStep =
+  | { kind: "snapshot-save"; label: string }
+  | { kind: "network-mode"; mode: "nat" | "cyber-range" | "airgap"; label: string }
+  | { kind: "ai-command"; prompt: string; label: string };
+
+export type ButlerPlaybook = {
+  title: string;
+  steps: ButlerPlaybookStep[];
+};
 
 export type ButlerNote = {
   key: string;
@@ -87,18 +99,66 @@ export function butlerCheckIn(context: ButlerContext): ButlerNote | undefined {
     }
     return {
       key: "idle",
-      message: "I am 'The One' AI Butler. I have indexed your system architecture blueprints, OPML outliner, and hypervisor tooling. What shall we coordinate?",
+      message: "I am Seneschal. I have indexed your system architecture blueprints, OPML outliner, and hypervisor tooling. What shall we coordinate?",
       choices: ["blueprints", "opml", "tour", "snooze"],
     };
   }
   return undefined;
 }
 
+export function parseOllamaButlerReply(raw: string): { reply: string; playbook: ButlerPlaybook | null } {
+  const jsonMatch = /\{[\s\S]*"playbook"[\s\S]*\}/.exec(raw);
+  if (jsonMatch) {
+    try {
+      const parsed = JSON.parse(jsonMatch[0]) as { playbook?: ButlerPlaybook };
+      if (parsed.playbook && typeof parsed.playbook.title === "string" && Array.isArray(parsed.playbook.steps)) {
+        const cleanedReply = raw.replace(jsonMatch[0], "").trim();
+        return { reply: cleanedReply || parsed.playbook.title, playbook: parsed.playbook };
+      }
+    } catch {
+      // Fall back to plain reply text.
+    }
+  }
+  return { reply: raw.trim(), playbook: null };
+}
+
+export function buildButlerPlaybook(prompt: string, cardName = "this card"): ButlerPlaybook | null {
+  const q = prompt.trim().toLowerCase();
+  if (!q) return null;
+  if (/(sandbox|quarantine|isolate|airgap)/.test(q) && /(inspect|check|run|recon|audit|test|safe)/.test(q)) {
+    return {
+      title: `Safe Sandbox Playbook · ${cardName}`,
+      steps: [
+        { kind: "snapshot-save", label: "Save Time-Travel checkpoint" },
+        { kind: "network-mode", mode: "airgap", label: "Switch card to Airgap Vault" },
+        { kind: "ai-command", prompt, label: `Run "${prompt.trim()}"` },
+      ],
+    };
+  }
+  if (/(playbook|plan|recon|audit)/.test(q) && q.split(/\s+/).length >= 2) {
+    return {
+      title: `SecOps Audit Playbook · ${cardName}`,
+      steps: [
+        { kind: "snapshot-save", label: "Save Time-Travel checkpoint" },
+        { kind: "network-mode", mode: "cyber-range", label: "Switch card to Cyber-Range VLAN" },
+        { kind: "ai-command", prompt, label: `Run "${prompt.trim()}"` },
+      ],
+    };
+  }
+  return null;
+}
+
 export function butlerGreeting(context: ButlerContext): ButlerNote {
+  const choices: ButlerChoiceId[] =
+    context.model === "qwen-coder"
+      ? ["journal", "blueprints", "vscode", "display"]
+      : context.model === "llama-chat"
+        ? ["tour", "opml", "journal", "settings"]
+        : ["journal", "blueprints", "display", "settings"];
   return {
-    key: "greeting",
-    message: `At your service, Operator. I am 'The One' spatial AI co-pilot${context.cardName ? ` — standing by on ${context.cardName}` : ""}. Ready for multi-OS hypervisor orchestration, architecture blueprints, OPML outline synthesis, or VS Code remote hooks.`,
-    choices: ["blueprints", "opml", "vscode", "tour", "display", "settings"],
+    key: `greeting:${context.model ?? "auto"}`,
+    message: `At your service, Operator. I am Seneschal, your spatial AI co-pilot${context.cardName ? ` — standing by on ${context.cardName}` : ""}.`,
+    choices,
   };
 }
 
@@ -108,6 +168,8 @@ export const BUTLER_CHOICE_LABELS: Record<ButlerChoiceId, string> = {
   freeplane: "🧠 Freeplane Mind Map",
   vscode: "💻 VS Code Remote Hook",
   swiftshader: "⚡ SwiftShader / Vulkan",
+  "approve-playbook": "▶ Approve & Run Plan",
+  journal: "📜 Action Journal",
   tour: "Show me around",
   display: "Make the screen bigger",
   stuck: "I'm stuck / Fix",
@@ -132,6 +194,10 @@ export function butlerAnswer(choice: ButlerChoiceId, context: ButlerContext): st
     case "swiftshader": {
       return `SwiftShader status: HARDWARE mode. Native GPU acceleration (DirectLink / WebGL2).`;
     }
+    case "approve-playbook":
+      return "Executing approved multi-step playbook on the selected card.";
+    case "journal":
+      return "Opening the live Action Journal timeline.";
     case "tour":
       return "Scroll or use arrow keys to spin the 3D carousel. Spin the ring and the selected card faces you. Its controls are on the card itself: Launch, Stop, Zoom, Settings, Clone, Save, Perf, and Bin.";
     case "display":
@@ -155,7 +221,7 @@ export function butlerAnswer(choice: ButlerChoiceId, context: ButlerContext): st
     case "snooze":
       return "Understood, Operator. I will hold quiet unless a critical VM fault occurs.";
     case "dismiss":
-      return "Very good. 'The One' is always active in the background.";
+      return "Very good. Seneschal is always active in the background.";
   }
 }
 

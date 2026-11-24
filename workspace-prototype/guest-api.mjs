@@ -325,7 +325,7 @@ function buildNetworkArgs(networkMode = "nat", deviceModel = "virtio-net-pci", p
   ];
 }
 
-function qemuArguments({ bootMode, cardId, diskPath, isoPath, ports, networkMode = "nat", dropDir, memoryMb = 1024, vcpus = 2, accelArgs = null, isMacOs = false, isAndroid = false, openCorePath = "", macOvmfCode = "", macOvmfVars = "", kernelPath = "", initrdPath = "" }) {
+function qemuArguments({ bootMode, cardId, diskPath, isoPath, ports, networkMode = "nat", dropDir, sharedFolder = null, memoryMb = 1024, vcpus = 2, accelArgs = null, isMacOs = false, isAndroid = false, openCorePath = "", macOvmfCode = "", macOvmfVars = "", kernelPath = "", initrdPath = "" }) {
   const resolvedAccelArgs = Array.isArray(accelArgs) && accelArgs.length > 0
     ? accelArgs
     : ["-accel", process.platform === "win32" ? "whpx,kernel-irqchip=off" : "tcg"];
@@ -404,6 +404,9 @@ function qemuArguments({ bootMode, cardId, diskPath, isoPath, ports, networkMode
     "-device", "intel-hda",
     "-device", "hda-duplex",
     ...(dropDir ? ["-drive", `file=fat:rw:${dropDir},if=ide,index=2,format=raw`] : []),
+    ...(sharedFolder?.hostPath && process.platform === "linux"
+      ? ["-virtfs", `local,path=${sharedFolder.hostPath},mount_tag=postcard_share,security_model=mapped-xattr${sharedFolder.readOnly !== false ? ",readonly=on" : ""}`]
+      : []),
     ...buildNetworkArgs(networkMode, "e1000", ports),
     ...(ports.serialPort
       ? [
@@ -487,6 +490,9 @@ function windowsQemuArguments({ bootMode, cardId, diskPath, isoPath, firmwarePat
     "-device", "usb-kbd",
     "-device", "usb-tablet",
     ...(dropDir ? ["-drive", `file=fat:rw:${dropDir},if=ide,index=2,format=raw`] : []),
+    ...(sharedFolder?.hostPath && process.platform === "linux"
+      ? ["-virtfs", `local,path=${sharedFolder.hostPath},mount_tag=postcard_share,security_model=mapped-xattr${sharedFolder.readOnly !== false ? ",readonly=on" : ""}`]
+      : []),
     ...buildNetworkArgs(networkMode, "e1000", ports),
     ...(ports.serialPort
       ? [
@@ -807,6 +813,7 @@ export function createGuestApi(options = {}) {
   const customIsosPath = path.join(dataDirectory, "custom-isos.json");
   const actionJournalPath = path.join(dataDirectory, "action-journal.json");
   const sshKeysPath = path.join(dataDirectory, "ssh-keys.json");
+  const sharedFoldersPath = path.join(dataDirectory, "shared-folders.json");
   const androidIsoPath = process.env.POSTCARD_ANDROID_ISO
     ? path.resolve(process.env.POSTCARD_ANDROID_ISO)
     : path.join(projectDirectory, "archive", "guest-vm-setup", "android-x86_64.iso");
@@ -935,6 +942,71 @@ export function createGuestApi(options = {}) {
 
   async function readSshKeys() {
     return readJsonSafe(sshKeysPath, {});
+  }
+
+  async function readSharedFolders() {
+    return readJsonSafe(sharedFoldersPath, {});
+  }
+
+  async function setSharedFolder({ cardId, hostPath = "", readOnly = true }) {
+    if (typeof cardId !== "string" || !/^[a-z0-9][a-z0-9_-]{0,63}$/.test(cardId)) {
+      throw new GuestApiError(400, "cardId must be a lowercase card identifier.");
+    }
+    const folders = await readSharedFolders();
+    const cleanPath = typeof hostPath === "string" ? hostPath.trim() : "";
+    if (!cleanPath) {
+      delete folders[cardId];
+      await writeJsonAtomic(sharedFoldersPath, folders);
+      await appendJournalEntry({ actor: "user", action: "shared-folder-clear", cardId, outcome: "ok" });
+      return status();
+    }
+    const resolved = path.resolve(cleanPath);
+    let info;
+    try {
+      info = await stat(resolved);
+    } catch {
+      throw new GuestApiError(400, `Shared folder does not exist: ${resolved}`);
+    }
+    if (!info.isDirectory()) {
+      throw new GuestApiError(400, `Shared folder path must be a directory: ${resolved}`);
+    }
+    folders[cardId] = { hostPath: resolved, readOnly: readOnly !== false };
+    await writeJsonAtomic(sharedFoldersPath, folders);
+    await appendJournalEntry({
+      actor: "user",
+      action: "shared-folder-set",
+      cardId,
+      outcome: "ok",
+      detail: `${resolved} (${readOnly !== false ? "ro" : "rw"})`,
+    });
+    return status();
+  }
+
+  async function probeReadiness() {
+    const [qemuOk, qemuImgOk, baseReady, hostAcceleration] = await Promise.all([
+      executableExists(qemuPath),
+      executableExists(qemuImgPath),
+      isBaseReady(),
+      detectHostAcceleration(),
+    ]);
+    const debianIsoOk = existsSync(isoPath);
+    const androidIsoOk = existsSync(androidIsoPath);
+    const portBusy = await tcpPortIsOpen(DEFAULT_WEBSOCKET_PORT);
+    let nextAction = "Ready to boot guests.";
+    if (!qemuOk) nextAction = `Install QEMU or set POSTCARD_QEMU (checked ${qemuPath}).`;
+    else if (!qemuImgOk) nextAction = `Install qemu-img or set POSTCARD_QEMU_IMG (checked ${qemuImgPath}).`;
+    else if (!baseReady && !debianIsoOk) nextAction = `Supply Debian ISO at ${isoPath} or load a custom OS ISO per card.`;
+    else if (!baseReady) nextAction = "Run Debian installer or load a prebuilt .qcow2 via Load custom OS ISO.";
+    return {
+      qemu: { ok: qemuOk, path: qemuPath },
+      qemuImg: { ok: qemuImgOk, path: qemuImgPath },
+      debianIso: { ok: debianIsoOk, path: isoPath },
+      androidIso: { ok: androidIsoOk, path: androidIsoPath },
+      baseReady,
+      hostAcceleration,
+      primaryPortAvailable: !portBusy,
+      nextAction,
+    };
   }
 
   async function setSshPublicKey({ cardId, publicKey }) {
@@ -1673,6 +1745,7 @@ export function createGuestApi(options = {}) {
       memoryProfiles: await readMemoryProfiles(),
       cpuProfiles: await readCpuProfiles(),
       customIsos: await readCustomIsos(),
+      sharedFolders: await readSharedFolders(),
       cpuCapacity: availableParallelism(),
       maxConcurrentGuests: MAX_CONCURRENT_GUESTS,
       lockdownActive,
@@ -3328,6 +3401,19 @@ export function createGuestApi(options = {}) {
         sendJson(response, 200, await collectDiskUsage());
         return;
       }
+      if (request.method === "GET" && url.pathname === "/api/guest/readiness") {
+        sendJson(response, 200, await probeReadiness());
+        return;
+      }
+      if (request.method === "POST" && url.pathname === "/api/guest/shared-folder") {
+        const body = await readJson(request);
+        sendJson(response, 200, await setSharedFolder({
+          cardId: body?.cardId,
+          hostPath: body?.hostPath ?? "",
+          readOnly: body?.readOnly !== false,
+        }));
+        return;
+      }
       if (request.method === "POST" && url.pathname === "/api/guest/ssh-key") {
         const body = await readJson(request);
         sendJson(response, 200, await setSshPublicKey({
@@ -3429,6 +3515,23 @@ export function createGuestApi(options = {}) {
           200,
           await cloneOverlay(body?.sourceCardId, body?.targetCardId, body?.os ?? LINUX_OS),
         );
+        return;
+      }
+      if (request.method === "POST" && url.pathname === "/api/guest/fork-card") {
+        const body = await readJson(request);
+        const sourceCardId = body?.sourceCardId;
+        const os = body?.os ?? LINUX_OS;
+        let targetCardId = typeof body?.targetCardId === "string" && body.targetCardId.trim()
+          ? body.targetCardId.trim()
+          : "";
+        if (!targetCardId) {
+          const prefix = typeof sourceCardId === "string" ? sourceCardId.slice(0, 16) : "fork";
+          const alloc = await allocateCardId({ prefix, existingIds: [] });
+          targetCardId = alloc.allocatedCardId;
+        }
+        const nextStatus = await cloneOverlay(sourceCardId, targetCardId, os);
+        await appendJournalEntry({ actor: "user", action: "fork-card", cardId: targetCardId, os, outcome: "ok", detail: `from ${sourceCardId}` });
+        sendJson(response, 200, { ...nextStatus, forkedCardId: targetCardId, sourceCardId });
         return;
       }
       if (request.method === "POST" && url.pathname === "/api/guest/paper-plane") {
@@ -3562,6 +3665,41 @@ export function createGuestApi(options = {}) {
             os: body?.os ?? LINUX_OS,
           }),
         );
+        return;
+      }
+      if (request.method === "POST" && url.pathname === "/api/guest/butler-chat") {
+        assertNotLockedDown("butler AI chat");
+        const body = await readJson(request);
+        const prompt = typeof body?.prompt === "string" ? body.prompt.trim().slice(0, 500) : "";
+        if (!prompt) throw new GuestApiError(400, "prompt is required.");
+        const modelChoice = body?.model === "llama-chat" ? "llama3.2:1b" : "qwen2.5-coder:1.5b";
+        const ollamaBase = (process.env.POSTCARD_OLLAMA_URL ?? "http://127.0.0.1:11434").replace(/\/+$/, "");
+        const systemPrompt = [
+          "You are Seneschal, the Post Card OS hypervisor co-pilot.",
+          `Active card: ${body?.cardName ?? "none"} (${body?.cardId ?? "linux"}).`,
+          "Respond concisely in 1-2 sentences. If the user asks to run a multi-step VM task (snapshot, airgap/cyber-range, command), include a JSON block: {\"playbook\":{\"title\":\"...\",\"steps\":[{\"kind\":\"snapshot-save\",\"label\":\"...\"},{\"kind\":\"network-mode\",\"mode\":\"airgap\",\"label\":\"...\"},{\"kind\":\"ai-command\",\"prompt\":\"...\",\"label\":\"...\"}]}}.",
+        ].join(" ");
+        try {
+          const ollamaRes = await fetch(`${ollamaBase}/api/chat`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              model: modelChoice,
+              stream: false,
+              messages: [
+                { role: "system", content: systemPrompt },
+                { role: "user", content: prompt },
+              ],
+            }),
+            signal: AbortSignal.timeout(4000),
+          });
+          if (!ollamaRes.ok) throw new Error(`HTTP ${ollamaRes.status}`);
+          const data = await ollamaRes.json();
+          const content = data?.message?.content?.trim() ?? "";
+          sendJson(response, 200, { ok: true, live: true, model: modelChoice, reply: content });
+        } catch {
+          sendJson(response, 200, { ok: true, live: false, model: modelChoice, reply: "" });
+        }
         return;
       }
       if (request.method === "POST" && url.pathname === "/api/guest/ai-command") {

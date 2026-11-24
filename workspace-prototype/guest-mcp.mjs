@@ -116,6 +116,37 @@ const TOOLS = [
     description: "Read the append-only guest action journal.",
     inputSchema: { type: "object", properties: {} },
   },
+  {
+    name: "guest_fork_card",
+    description: "Non-destructively fork a card's disk into a new card ID so risky work doesn't touch the original.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        sourceCardId: { type: "string" },
+        targetCardId: { type: "string", description: "Optional target card ID; auto-allocated if omitted." },
+        os: { type: "string", enum: ["linux", "windows", "android", "macos"], default: "linux" },
+      },
+      required: ["sourceCardId"],
+    },
+  },
+  {
+    name: "guest_readiness",
+    description: "Probe QEMU, qemu-img, ISOs, host acceleration, and get the single next setup action.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "guest_shared_folder",
+    description: "Mount or clear a host directory for a card (read-only by default).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        cardId: { type: "string" },
+        hostPath: { type: "string", description: "Host directory path; empty to clear." },
+        readOnly: { type: "boolean", default: true },
+      },
+      required: ["cardId"],
+    },
+  },
 ];
 
 async function callGuestApi(pathname, method = "GET", body = undefined) {
@@ -212,6 +243,23 @@ export async function handleMcpRequest(request) {
           break;
         case "guest_journal":
           data = await callGuestApi("/api/guest/journal");
+          break;
+        case "guest_fork_card":
+          data = await callGuestApi("/api/guest/fork-card", "POST", {
+            sourceCardId: args.sourceCardId,
+            targetCardId: args.targetCardId,
+            os: args.os ?? "linux",
+          });
+          break;
+        case "guest_readiness":
+          data = await callGuestApi("/api/guest/readiness");
+          break;
+        case "guest_shared_folder":
+          data = await callGuestApi("/api/guest/shared-folder", "POST", {
+            cardId: args.cardId,
+            hostPath: args.hostPath ?? "",
+            readOnly: args.readOnly !== false,
+          });
           break;
         default:
           return {

@@ -21,9 +21,12 @@ import {
   butlerCheckIn,
   butlerGreeting,
   butlerInterpretPrompt,
+  buildButlerPlaybook,
+  parseOllamaButlerReply,
   generateDeckOpml,
   type ButlerChoiceId,
   type ButlerContext,
+  type ButlerPlaybook,
 } from "./butler";
 import { BLUEPRINTS } from "./blueprints";
 import { createFreeplaneTutorialMindMap, stringifyFreeplaneMap } from "./freeplane-engine";
@@ -2026,7 +2029,11 @@ function butlerSay(note: { message: string; choices: ButlerChoiceId[] }, autoHid
   if (!butlerBubble || !butlerMessage || !butlerChoices) return;
   butlerMessage.textContent = note.message;
   butlerChoices.replaceChildren();
-  for (const id of note.choices) {
+  const visibleChoices =
+    roomSecurityMode !== "open"
+      ? note.choices.filter((id) => id === "dismiss" || id === "snooze")
+      : note.choices;
+  for (const id of visibleChoices) {
     const choice = document.createElement("button");
     choice.type = "button";
     choice.className = "butler-choice";
@@ -2114,9 +2121,44 @@ function downloadTextFile(filename: string, content: string, mimeType = "applica
   URL.revokeObjectURL(url);
 }
 
+let pendingButlerPlaybook: { playbook: ButlerPlaybook; card: SystemCard } | null = null;
+
+async function executePendingPlaybook(): Promise<void> {
+  const pending = pendingButlerPlaybook;
+  pendingButlerPlaybook = null;
+  if (!pending) return;
+  const { playbook, card } = pending;
+  const os = cardToGuestOs(card);
+  for (const step of playbook.steps) {
+    if (roomSecurityMode === "lockdown") {
+      showToast("Playbook aborted: Room is in Lockdown.");
+      return;
+    }
+    showToast(`${playbook.title}: ${step.label}…`);
+    if (step.kind === "snapshot-save") {
+      await runTimeTravelSnapshot("save", card);
+    } else if (step.kind === "network-mode") {
+      const nextStatus = await requestGuestApi("/api/guest/network-mode", { cardId: card.id, networkMode: step.mode });
+      updateGuestCardStatus(nextStatus);
+    } else if (step.kind === "ai-command") {
+      await runAiOrSecOpsCommand(step.prompt, card);
+    }
+  }
+  showToast(`✓ Playbook complete on ${card.name} (${os}).`);
+}
+
 function butlerChoose(id: ButlerChoiceId): void {
   if (roomSecurityMode === "lockdown" && id !== "dismiss" && id !== "snooze") {
-    showToast("Room is in Lockdown; butler routing is blocked.");
+    showToast("Room is in Lockdown; Seneschal routing is blocked.");
+    return;
+  }
+  if (id === "journal") {
+    void openActionJournalDialog();
+    return;
+  }
+  if (id === "approve-playbook") {
+    void executePendingPlaybook().catch(reportGuestError);
+    if (butlerBubble) butlerBubble.hidden = true;
     return;
   }
   const context = butlerContext();
@@ -2510,11 +2552,54 @@ omniFormElement.addEventListener("submit", (event) => {
     return;
   }
   const target = selectedCard ?? cards[0];
+  const playbook = target ? buildButlerPlaybook(prompt, target.name) : null;
+  if (playbook && target) {
+    pendingButlerPlaybook = { playbook, card: target };
+    const stepLines = playbook.steps.map((s, i) => `${i + 1}. ${s.label}`).join(" → ");
+    butlerSay({
+      message: `${playbook.title}: ${stepLines}`,
+      choices: ["approve-playbook", "dismiss"],
+    });
+    return;
+  }
   butlerSay({
-    message: `Right away — sending "${prompt}" to ${target?.name ?? "the selected card"}.`,
+    message: `Asking ${context.model === "llama-chat" ? "Llama 3.2" : "Qwen 2.5 Coder"} about "${prompt}"…`,
     choices: ["dismiss"],
   });
-  void runAiOrSecOpsCommand(prompt, selectedCard ?? undefined);
+  void (async () => {
+    try {
+      const res = await fetch("/api/guest/butler-chat", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          prompt,
+          model: context.model ?? "auto",
+          cardId: target?.id ?? "linux",
+          cardName: target?.name ?? "",
+        }),
+      });
+      if (res.ok) {
+        const data = (await res.json()) as { live?: boolean; reply?: string; model?: string };
+        if (data.live && data.reply) {
+          const parsed = parseOllamaButlerReply(data.reply);
+          if (parsed.playbook && target) {
+            pendingButlerPlaybook = { playbook: parsed.playbook, card: target };
+            const stepLines = parsed.playbook.steps.map((s, i) => `${i + 1}. ${s.label}`).join(" → ");
+            butlerSay({
+              message: `[${data.model}] ${parsed.reply} — Plan: ${stepLines}`,
+              choices: ["approve-playbook", "dismiss"],
+            });
+            return;
+          }
+          butlerSay({ message: `[${data.model}] ${parsed.reply}`, choices: ["dismiss"] });
+          return;
+        }
+      }
+    } catch {
+      // Fall back to deterministic guest command router when Ollama is offline.
+    }
+    void runAiOrSecOpsCommand(prompt, selectedCard ?? undefined);
+  })();
 });
 
 function handleChipAction(event: MouseEvent): void {
@@ -8941,6 +9026,8 @@ function getPaletteCommands(): PaletteCommand[] {
       },
     },
     { id: "manual", label: "Open User Manual", hint: "?", run: () => { if (helpDialog && !helpDialog.open) helpDialog.showModal(); } },
+    { id: "journal", label: "Open Action Journal", hint: "Audit", run: () => { void openActionJournalDialog(); } },
+    { id: "deck", label: "Open Flat Deck, Disk Ledger & Readiness", hint: "Access", run: () => { void openInstrumentDialog(); } },
     { id: "home", label: "Return to Workspace Home", hint: "H", run: () => showHome() },
   );
   for (const card of cards) {
@@ -8967,7 +9054,7 @@ function renderCommandPalette(query: string): void {
   if (paletteFiltered.length === 0) {
     const empty = document.createElement("li");
     empty.className = "command-palette-empty";
-    empty.textContent = `Press Enter to send "${query.trim()}" to AI Butler`;
+    empty.textContent = `Press Enter to send "${query.trim()}" to Seneschal`;
     commandPaletteList.append(empty);
     return;
   }
@@ -9032,6 +9119,188 @@ commandPaletteInput?.addEventListener("keydown", (event) => {
 
 commandPaletteDialog?.addEventListener("click", (event) => {
   if (event.target === commandPaletteDialog) commandPaletteDialog.close();
+});
+
+const journalDialog = document.querySelector<HTMLDialogElement>("#journal-dialog");
+const journalList = document.querySelector<HTMLUListElement>("#journal-list");
+const journalButton = document.querySelector<HTMLButtonElement>("#journal-button");
+const journalCloseBtn = document.querySelector<HTMLButtonElement>("#journal-close-btn");
+const journalRefreshBtn = document.querySelector<HTMLButtonElement>("#journal-refresh-btn");
+const journalForkBtn = document.querySelector<HTMLButtonElement>("#journal-fork-btn");
+
+type JournalEntry = {
+  id: string;
+  at: string;
+  actor: string;
+  action: string;
+  cardId: string;
+  os: string;
+  outcome: string;
+  detail: string;
+};
+
+async function refreshActionJournalList(): Promise<void> {
+  if (!journalList) return;
+  journalList.replaceChildren();
+  try {
+    const res = await fetch("/api/guest/journal");
+    const payload = (await res.json()) as { entries?: JournalEntry[] };
+    const entries = (payload.entries ?? []).slice(-40).reverse();
+    if (entries.length === 0) {
+      const empty = document.createElement("li");
+      empty.className = "bin-card-entry";
+      empty.textContent = "No actions recorded yet.";
+      journalList.append(empty);
+      return;
+    }
+    for (const entry of entries) {
+      const li = document.createElement("li");
+      li.className = "bin-card-entry";
+      const left = document.createElement("div");
+      const title = document.createElement("strong");
+      title.textContent = `${entry.action}${entry.cardId ? ` · ${entry.cardId}` : ""}`;
+      const meta = document.createElement("small");
+      meta.style.display = "block";
+      meta.textContent = `${entry.at.slice(11, 19)} · ${entry.actor}${entry.detail ? ` · ${entry.detail}` : ""}`;
+      left.append(title, meta);
+      const badge = document.createElement("span");
+      badge.textContent = entry.outcome.toUpperCase();
+      li.append(left, badge);
+      journalList.append(li);
+    }
+  } catch {
+    const err = document.createElement("li");
+    err.className = "bin-card-entry";
+    err.textContent = "Could not load action journal (guest service offline).";
+    journalList.append(err);
+  }
+}
+
+async function openActionJournalDialog(): Promise<void> {
+  if (!journalDialog) return;
+  if (!journalDialog.open) journalDialog.showModal();
+  await refreshActionJournalList();
+}
+
+journalButton?.addEventListener("click", () => { void openActionJournalDialog(); });
+journalCloseBtn?.addEventListener("click", () => journalDialog?.close());
+journalRefreshBtn?.addEventListener("click", () => { void refreshActionJournalList(); });
+journalForkBtn?.addEventListener("click", () => {
+  const card = selectedCard ?? cards[0];
+  if (!card) return;
+  void requestGuestApi("/api/guest/fork-card", { sourceCardId: card.id, os: cardToGuestOs(card) })
+    .then((status) => {
+      updateGuestCardStatus(status);
+      const forkedId = (status as GuestServiceStatus & { forkedCardId?: string }).forkedCardId ?? "fork";
+      showToast(`⑂ Forked ${card.id} → ${forkedId}`);
+      return refreshActionJournalList();
+    })
+    .catch(reportGuestError);
+});
+journalDialog?.addEventListener("click", (event) => {
+  if (event.target === journalDialog) journalDialog.close();
+});
+
+const instrumentDialog = document.querySelector<HTMLDialogElement>("#instrument-dialog");
+const instrumentPanelButton = document.querySelector<HTMLButtonElement>("#instrument-panel-button");
+const instrumentCloseBtn = document.querySelector<HTMLButtonElement>("#instrument-close-btn");
+const instrumentReadinessEl = document.querySelector<HTMLElement>("#instrument-readiness-summary");
+const instrumentDiskEl = document.querySelector<HTMLElement>("#instrument-disk-summary");
+const instrumentCardList = document.querySelector<HTMLUListElement>("#instrument-card-list");
+const instrumentSharePath = document.querySelector<HTMLInputElement>("#instrument-share-path");
+const instrumentShareRo = document.querySelector<HTMLInputElement>("#instrument-share-ro");
+const instrumentShareSave = document.querySelector<HTMLButtonElement>("#instrument-share-save");
+
+async function refreshInstrumentDialog(): Promise<void> {
+  if (instrumentReadinessEl) {
+    try {
+      const res = await fetch("/api/guest/readiness");
+      const r = (await res.json()) as {
+        qemu?: { ok: boolean };
+        qemuImg?: { ok: boolean };
+        baseReady?: boolean;
+        hostAcceleration?: { mode: string };
+        nextAction?: string;
+      };
+      instrumentReadinessEl.textContent =
+        `QEMU: ${r.qemu?.ok ? "OK" : "MISSING"} · qemu-img: ${r.qemuImg?.ok ? "OK" : "MISSING"} · Accel: ${r.hostAcceleration?.mode ?? "?"} · Base: ${r.baseReady ? "READY" : "NEEDS INSTALL"} — ${r.nextAction ?? ""}`;
+    } catch {
+      instrumentReadinessEl.textContent = "Guest service offline — readiness unavailable.";
+    }
+  }
+  if (instrumentDiskEl) {
+    try {
+      const res = await fetch("/api/guest/disk-usage");
+      const d = (await res.json()) as { totalBytes: number; cards: { cardId: string; os: string; sizeBytes: number }[] };
+      const totalGb = (d.totalBytes / (1024 ** 3)).toFixed(2);
+      const breakdown = d.cards.slice(0, 6).map((c) => `${c.cardId} (${(c.sizeBytes / (1024 ** 2)).toFixed(0)} MB)`).join(", ");
+      instrumentDiskEl.textContent = `Disk Ledger: ${totalGb} GiB across ${d.cards.length} image(s)${breakdown ? ` · ${breakdown}` : ""}`;
+    } catch {
+      instrumentDiskEl.textContent = "Disk ledger unavailable.";
+    }
+  }
+  if (instrumentCardList) {
+    instrumentCardList.replaceChildren();
+    for (const card of cards) {
+      const guest = guestServiceStatus?.guests.find((g) => g.cardId === card.id);
+      const li = document.createElement("li");
+      li.className = "bin-card-entry";
+      const left = document.createElement("div");
+      const title = document.createElement("strong");
+      title.textContent = `${card.name} (${card.os})`;
+      const meta = document.createElement("small");
+      meta.style.display = "block";
+      meta.textContent = `${guest?.status ?? "offline"}${guest?.sshPort ? ` · SSH 127.0.0.1:${guest.sshPort}` : ""}`;
+      left.append(title, meta);
+
+      const actions = document.createElement("div");
+      actions.style.display = "flex";
+      actions.style.gap = "6px";
+      const selBtn = document.createElement("button");
+      selBtn.className = "mode-pill";
+      selBtn.type = "button";
+      selBtn.textContent = card === selectedCard ? "Selected" : "Select";
+      selBtn.addEventListener("click", () => {
+        selectCard(card);
+        void refreshInstrumentDialog();
+      });
+      const zoomBtn = document.createElement("button");
+      zoomBtn.className = "mode-pill";
+      zoomBtn.type = "button";
+      zoomBtn.textContent = "2D";
+      zoomBtn.addEventListener("click", () => {
+        instrumentDialog?.close();
+        runCardExtra("display", card);
+      });
+      actions.append(selBtn, zoomBtn);
+      li.append(left, actions);
+      instrumentCardList.append(li);
+    }
+  }
+}
+
+async function openInstrumentDialog(): Promise<void> {
+  if (!instrumentDialog) return;
+  if (!instrumentDialog.open) instrumentDialog.showModal();
+  await refreshInstrumentDialog();
+}
+
+instrumentPanelButton?.addEventListener("click", () => { void openInstrumentDialog(); });
+instrumentCloseBtn?.addEventListener("click", () => instrumentDialog?.close());
+instrumentDialog?.addEventListener("click", (event) => {
+  if (event.target === instrumentDialog) instrumentDialog.close();
+});
+instrumentShareSave?.addEventListener("click", () => {
+  const card = selectedCard ?? cards[0];
+  if (!card) return;
+  const hostPath = instrumentSharePath?.value ?? "";
+  const readOnly = instrumentShareRo?.checked !== false;
+  void requestGuestApi("/api/guest/shared-folder", { cardId: card.id, hostPath, readOnly })
+    .then((status) => {
+      updateGuestCardStatus(status);
+      showToast(hostPath.trim() ? `Shared folder set for ${card.id} (${readOnly ? "read-only" : "rw"}).` : `Cleared shared folder for ${card.id}.`);
+    })
+    .catch(reportGuestError);
 });
 
 initCommercialEditions();
