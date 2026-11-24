@@ -12,7 +12,44 @@ import {
   type OnCardAction,
 } from "./card-actions";
 import { carouselPoseFromAngle } from "./carousel-pose";
-import { CARD_BUTTON_IDS, cardButtonRect, hitCardButton, type CardButtonId } from "./card-buttons";
+import {
+  CARD_BUTTON_IDS,
+  DIAGNOSTIC_BENCHES,
+  TACTILE_GRID,
+  benchActionRect,
+  cardButtonRect,
+  hitCardButton,
+  hitDiagnosticBench,
+  hitTactileCell,
+  isDiagnosticFacet,
+  tactileCellRect,
+  tactileGridBounds,
+  type CardButtonId,
+  type DiagnosticAction,
+  type DiagnosticBench,
+  type DiagnosticFacet,
+  type TactileCell,
+  type TactileFacet,
+} from "./card-buttons";
+import {
+  CARD_STYLES,
+  CARD_STYLE_ORDER,
+  DEFAULT_COLOR_GRADE,
+  ROOM_ENVIRONMENTS,
+  ROOM_ENVIRONMENT_ORDER,
+  STUDIO_PRESETS,
+  isCardStyleId,
+  isColorGradeId,
+  isRoomEnvironmentId,
+  loadCardStyle,
+  loadRoomEnvironment,
+  resolveStudioLighting,
+  saveCardStyle,
+  saveRoomEnvironment,
+  type CardStyleId,
+  type ColorGradeId,
+  type RoomEnvironmentId,
+} from "./room-environments";
 import {
   BUTLER_CHOICE_LABELS,
   CHECK_IN_COOLDOWN_SECONDS,
@@ -20,7 +57,10 @@ import {
   butlerAnswer,
   butlerCheckIn,
   butlerGreeting,
-  butlerInterpretPrompt,
+  butlerInterpretPromptWithRouter,
+  butlerTopic,
+  requestButlerRouting,
+  type ButlerAction,
   type ButlerChoiceId,
   type ButlerContext,
 } from "./butler";
@@ -47,7 +87,7 @@ type GuestOS = "linux" | "windows" | "android" | "macos";
 type GuestRuntimeStatus = "offline" | "starting" | "running" | "stopping" | "error";
 type CpuProfile = "eco" | "balanced" | "gaming";
 type GraphicsProfile = "performance" | "balanced" | "quality";
-type CardFacet = "front" | "back" | "left" | "right" | "top" | "bottom";
+type CardFacet = TactileFacet;
 
 type GuestStatus = {
   os: GuestOS;
@@ -147,6 +187,8 @@ type SystemCard = {
   peel?: number;
   /** Whether this card's display port is twisted bigger while pulled to the front. */
   twisted?: boolean;
+  /** Diagnostic bench state for facets 07–09, keyed by bench id. */
+  diagnostics?: Record<string, "idle" | "running" | "passed" | "fault">;
   /** 0..1 eased twist expansion amount in 3D space. */
   twistAmount?: number;
   /** Cards stay soft-focus until they settle at the front of the ring. */
@@ -167,7 +209,7 @@ type SystemCard = {
     midpointPassed: boolean;
     targetFacet: CardFacet;
     tiltDir: number;
-    tiltAxis: "x" | "z";
+    tiltAxis: "x" | "z" | "diagonal";
   };
 };
 
@@ -182,7 +224,18 @@ type BinnedCardEntry = {
   restoreState?: TrashRestoreState;
 };
 
-const FACET_ORDER: CardFacet[] = ["front", "back", "left", "right", "top", "bottom"];
+const FACET_ORDER: CardFacet[] = [
+  "front",
+  "back",
+  "left",
+  "right",
+  "top",
+  "bottom",
+  "patent",
+  "tensor",
+  "streams",
+];
+const DIAGNOSTIC_FACETS: readonly DiagnosticFacet[] = ["patent", "tensor", "streams"];
 const CPU_PROFILE_VCPUS: Record<CpuProfile, number> = {
   eco: 1,
   balanced: 2,
@@ -194,42 +247,64 @@ const FACET_META: Record<
   { badge: string; header: string; shortLabel: string; accent: string }
 > = {
   front: {
-    badge: "01 / 06",
+    badge: "01 / 09",
     header: "POST CARD OS",
     shortLabel: "display",
     accent: "#62d8d0",
   },
   back: {
-    badge: "02 / 06",
+    badge: "02 / 09",
     header: "CARD SETTINGS",
     shortLabel: "settings",
     accent: "#c5a9ff",
   },
   left: {
-    badge: "03 / 06",
+    badge: "03 / 09",
     header: "SECURITY & ISOLATION",
     shortLabel: "security",
     accent: "#8caef4",
   },
   right: {
-    badge: "04 / 06",
+    badge: "04 / 09",
     header: "PAPER PLANES",
     shortLabel: "paper planes",
     accent: "#f0a7a3",
   },
   top: {
-    badge: "05 / 06",
+    badge: "05 / 09",
     header: "QUICK ACTIONS",
     shortLabel: "quick actions",
     accent: "#9b9eff",
   },
   bottom: {
-    badge: "06 / 06",
+    badge: "06 / 09",
     header: "TELEMETRY & PORTS",
     shortLabel: "telemetry",
     accent: "#77d2e8",
   },
+  patent: {
+    badge: "07 / 09",
+    header: "PATENT DIAGNOSTIC LAB",
+    shortLabel: "patent lab",
+    accent: "#ffcf6a",
+  },
+  tensor: {
+    badge: "08 / 09",
+    header: "SLM TENSOR ENCLAVE",
+    shortLabel: "slm tensor",
+    accent: "#7fe3ff",
+  },
+  streams: {
+    badge: "09 / 09",
+    header: "DIOV STREAMS INSPECTOR",
+    shortLabel: "diov streams",
+    accent: "#ff9de2",
+  },
 };
+
+/** Two-axis studio state: which room is staged and how card faces are printed. */
+let activeRoomEnvironment: RoomEnvironmentId = loadRoomEnvironment();
+let activeCardStyle: CardStyleId = loadCardStyle();
 
 const container = document.querySelector<HTMLDivElement>("#scene");
 const sceneShell = document.querySelector<HTMLElement>("#room");
@@ -247,6 +322,7 @@ const cardBinAction = document.querySelector<HTMLButtonElement>("#card-bin-actio
 const cardDeleteAction = document.querySelector<HTMLButtonElement>("#card-delete-action");
 const benchToggle = document.querySelector<HTMLButtonElement>("#bench-toggle");
 const secopsToggle = document.querySelector<HTMLButtonElement>("#secops-toggle");
+const secureNowToggle = document.querySelector<HTMLButtonElement>("#secure-now");
 const omniForm = document.querySelector<HTMLFormElement>("#omni-form");
 const omniInput = document.querySelector<HTMLInputElement>("#omni-input");
 const omniChips = document.querySelector<HTMLDivElement>("#omni-chips");
@@ -258,6 +334,11 @@ const selectedName = document.querySelector<HTMLDivElement>("#selected-name");
 const cardCount = document.querySelector<HTMLSpanElement>("#card-count");
 const sceneCardIndex = document.querySelector<HTMLSpanElement>("#scene-card-index");
 const sceneCardTotal = document.querySelector<HTMLSpanElement>("#scene-card-total");
+const inspectorReadoutElement = document.querySelector<HTMLElement>("#inspector-readout");
+const inspectorPresetsElement = document.querySelector<HTMLElement>("#inspector-presets");
+const roomSelectElement = document.querySelector<HTMLSelectElement>("#room-environment-select");
+const cardStyleSelectElement = document.querySelector<HTMLSelectElement>("#card-style-select");
+const compassTactileElement = document.querySelector<HTMLElement>("#compass-tactile");
 const zoomButton = document.querySelector<HTMLButtonElement>("#zoom-button");
 const zoomButtonLabel = document.querySelector<HTMLSpanElement>("#zoom-button-label");
 const cloneButton = document.querySelector<HTMLButtonElement>("#clone-button");
@@ -349,6 +430,7 @@ if (
   !cardBinAction ||
   !cardDeleteAction ||
   !secopsToggle ||
+  !secureNowToggle ||
   !omniForm ||
   !omniInput ||
   !omniChips ||
@@ -442,6 +524,7 @@ const cardSettingsActionElement = cardSettingsAction;
 const cardBinActionElement = cardBinAction;
 const cardDeleteActionElement = cardDeleteAction;
 const secopsToggleElement = secopsToggle;
+const secureNowToggleElement = secureNowToggle;
 const omniFormElement = omniForm;
 const omniInputElement = omniInput;
 const omniChipsElement = omniChips;
@@ -537,7 +620,8 @@ renderer.domElement.setAttribute(
 );
 container.appendChild(renderer.domElement);
 
-scene.add(new THREE.HemisphereLight("#d9e7ff", "#11162d", 1.35));
+const hemisphereLight = new THREE.HemisphereLight("#d9e7ff", "#11162d", 1.35);
+scene.add(hemisphereLight);
 const keyLight = new THREE.DirectionalLight("#8fe3e2", 2.2);
 keyLight.position.set(-4, 9, 6);
 keyLight.castShadow = true;
@@ -858,8 +942,10 @@ const monolithBodyMat = new THREE.MeshStandardMaterial({
   roughness: 0.34,
 });
 const monolithLedMats: THREE.MeshStandardMaterial[] = [];
+const monolithGroups: THREE.Group[] = [];
 for (const side of [-1, 1] as const) {
   const towerGroup = new THREE.Group();
+  monolithGroups.push(towerGroup);
   const body = new THREE.Mesh(new THREE.BoxGeometry(1.35, 5.6, 0.95), monolithBodyMat);
   body.position.y = 2.8;
   body.castShadow = true;
@@ -965,11 +1051,301 @@ const studioMotes = new THREE.Points(
 );
 scene.add(studioMotes);
 
+// Foreground dust: a handful of larger motes much closer to the lens, so the
+// camera parallax separates them from the backdrop and the room reads as deep.
+const nearMoteCount = 24;
+const nearMotePositions = new Float32Array(nearMoteCount * 3);
+for (let i = 0; i < nearMoteCount; i++) {
+  nearMotePositions[i * 3] = -8.5 + ((i * 37) % 17);
+  nearMotePositions[i * 3 + 1] = 1.1 + ((i * 13) % 9) * 0.52;
+  nearMotePositions[i * 3 + 2] = 4.2 + ((i * 29) % 11) * 0.55;
+}
+const nearMoteGeometry = new THREE.BufferGeometry();
+nearMoteGeometry.setAttribute("position", new THREE.BufferAttribute(nearMotePositions, 3));
+const moteSpriteCanvas = document.createElement("canvas");
+moteSpriteCanvas.width = 64;
+moteSpriteCanvas.height = 64;
+const moteSpriteContext = moteSpriteCanvas.getContext("2d");
+if (moteSpriteContext) {
+  const spriteGradient = moteSpriteContext.createRadialGradient(32, 32, 0, 32, 32, 32);
+  spriteGradient.addColorStop(0, "rgba(255, 255, 255, 1)");
+  spriteGradient.addColorStop(0.45, "rgba(255, 255, 255, 0.5)");
+  spriteGradient.addColorStop(1, "rgba(255, 255, 255, 0)");
+  moteSpriteContext.fillStyle = spriteGradient;
+  moteSpriteContext.fillRect(0, 0, 64, 64);
+}
+const moteSprite = new THREE.CanvasTexture(moteSpriteCanvas);
+moteSprite.colorSpace = THREE.SRGBColorSpace;
+const nearMotes = new THREE.Points(
+  nearMoteGeometry,
+  new THREE.PointsMaterial({
+    color: "#9fe8e2",
+    map: moteSprite,
+    size: 0.16,
+    transparent: true,
+    opacity: 0.32,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+  }),
+);
+scene.add(nearMotes);
+
+/* -------------------------------------------------------------------------- */
+/* Room environment props                                                     */
+/* -------------------------------------------------------------------------- */
+
+// Warm library shelves for Sunset Library / Forest Emerald.
+const libraryShelfGroup = new THREE.Group();
+const shelfWoodMat = new THREE.MeshStandardMaterial({ color: "#6b4526", roughness: 0.72, metalness: 0.06 });
+const bookPalette = ["#c9743e", "#e6c07a", "#7d9c6a", "#b4564a", "#5c7da3", "#d8b46c"];
+for (const side of [-1, 1] as const) {
+  const shelf = new THREE.Group();
+  shelf.position.set(side * 7.4, 0, -8.3);
+  shelf.rotation.y = side * -0.32;
+  for (let level = 0; level < 5; level++) {
+    const board = new THREE.Mesh(new THREE.BoxGeometry(3.6, 0.12, 0.9), shelfWoodMat);
+    board.position.y = 0.9 + level * 1.05;
+    board.castShadow = true;
+    board.receiveShadow = true;
+    shelf.add(board);
+    const back = new THREE.Mesh(new THREE.BoxGeometry(3.6, 1.0, 0.08), shelfWoodMat);
+    back.position.set(0, 1.4 + level * 1.05, -0.42);
+    shelf.add(back);
+    for (let book = 0; book < 14; book++) {
+      const height = 0.5 + ((book * 37) % 23) / 40;
+      const volumeMat = new THREE.MeshStandardMaterial({
+        color: bookPalette[(book + level) % bookPalette.length],
+        roughness: 0.85,
+        metalness: 0.02,
+      });
+      const volume = new THREE.Mesh(new THREE.BoxGeometry(0.16, height, 0.55), volumeMat);
+      volume.position.set(-1.62 + book * 0.235, 0.96 + level * 1.05 + height / 2, 0.05);
+      volume.castShadow = true;
+      shelf.add(volume);
+    }
+  }
+  libraryShelfGroup.add(shelf);
+}
+libraryShelfGroup.visible = false;
+scene.add(libraryShelfGroup);
+
+// Bright studio reference frames for Pixel Studio / Lavender Mist.
+const studioFrameGroup = new THREE.Group();
+const frameSteelMat = new THREE.MeshStandardMaterial({ color: "#c9d2e0", roughness: 0.35, metalness: 0.85 });
+for (const [x, z, rot, tone] of [
+  [-6.2, -6.9, 0.34, "#c9d8ff"],
+  [0, -8.9, 0, "#ffe3b8"],
+  [6.2, -6.9, -0.34, "#ffc9e6"],
+] as const) {
+  const easel = new THREE.Group();
+  easel.position.set(x, 0, z);
+  easel.rotation.y = rot;
+  const print = new THREE.Mesh(
+    new THREE.PlaneGeometry(2.1, 2.9),
+    new THREE.MeshStandardMaterial({ color: tone, roughness: 0.94, metalness: 0.02 }),
+  );
+  print.position.set(0, 2.7, 0.02);
+  const frame = new THREE.Mesh(new THREE.BoxGeometry(2.3, 3.1, 0.08), frameSteelMat);
+  frame.position.set(0, 2.7, -0.06);
+  const leg = new THREE.Mesh(new THREE.BoxGeometry(0.08, 1.3, 0.08), frameSteelMat);
+  leg.position.set(0, 0.65, 0);
+  easel.add(frame, print, leg);
+  studioFrameGroup.add(easel);
+}
+studioFrameGroup.visible = false;
+scene.add(studioFrameGroup);
+
+/**
+ * Single owner of studio lighting. The room supplies the rig, SecOps tints it,
+ * and the colour grade sits on top — so a room switch never erases an overlay
+ * and clearing an overlay never resurrects a previous room's palette.
+ */
+function applyStudioLighting(): void {
+  const lights = resolveStudioLighting(activeRoomEnvironment, activeColorGrade, secOpsMode);
+
+  hemisphereLight.color.set(lights.hemisphere.sky);
+  hemisphereLight.groundColor.set(lights.hemisphere.ground);
+  hemisphereLight.intensity = lights.hemisphere.intensity;
+
+  keyLight.color.set(lights.key.color);
+  keyLight.intensity = lights.key.intensity;
+  keyLight.position.set(...lights.key.position);
+
+  fillLight.color.set(lights.fill.color);
+  fillLight.intensity = lights.fill.intensity;
+  fillLight.position.set(...lights.fill.position);
+
+  rimLight.color.set(lights.rim.color);
+  rimLight.intensity = lights.rim.intensity;
+  rimLight.position.set(...lights.rim.position);
+
+  duskLight.color.set(lights.dusk.color);
+  duskLight.intensity = lights.dusk.intensity;
+  duskLight.position.set(...lights.dusk.position);
+
+  cardHaloLight.color.set(lights.halo.color);
+  cardHaloLight.intensity = lights.halo.intensity;
+  cardFloorGlow.color.set(lights.floorGlow.color);
+  cardFloorGlow.intensity = lights.floorGlow.intensity;
+  renderer.toneMappingExposure = lights.exposure;
+}
+
+/**
+ * Swaps the whole room in one call: background, fog, PBR floor and walls,
+ * lighting rig, and the thematic prop set. The floor plane never moves, so
+ * card collision heights and the turntable dais stay stable across rooms.
+ */
+function applyRoomEnvironment(id: RoomEnvironmentId): void {
+  const room = ROOM_ENVIRONMENTS[id];
+  activeRoomEnvironment = id;
+  saveRoomEnvironment(id);
+
+  if (scene.background instanceof THREE.Color) {
+    scene.background.set(room.background);
+  } else {
+    scene.background = new THREE.Color(room.background);
+  }
+  scene.fog = new THREE.FogExp2(room.fogColor, room.fogDensity);
+
+  const floorMaterial = floor.material as THREE.MeshStandardMaterial;
+  floorMaterial.color.set(room.floor.color);
+  floorMaterial.roughness = room.floor.roughness;
+  floorMaterial.metalness = room.floor.metalness;
+
+  studioWallMat.color.set(room.walls.color);
+  studioWallMat.roughness = room.walls.roughness;
+  studioWallMat.metalness = room.walls.metalness;
+
+  applyStudioLighting();
+
+  for (const tower of monolithGroups) tower.visible = room.props.monolithRacks;
+  libraryShelfGroup.visible = room.props.libraryShelves;
+  studioFrameGroup.visible = room.props.studioFrames;
+
+  sceneShellElement.style.setProperty("--room-accent", room.accent);
+  updateInspectorReadout();
+}
+
+/** Repaints every card face with the selected surface treatment. */
+function applyCardStyle(id: CardStyleId): void {
+  activeCardStyle = id;
+  saveCardStyle(id);
+  for (const card of cards) {
+    card.cachedContentKey = undefined;
+    refreshCardTexture(card, true);
+  }
+  updateInspectorReadout();
+}
+
+function updateInspectorReadout(): void {
+  const room = ROOM_ENVIRONMENTS[activeRoomEnvironment];
+  const style = CARD_STYLES[activeCardStyle];
+  if (inspectorReadoutElement) {
+    inspectorReadoutElement.textContent = `${room.name.toUpperCase()} · ${style.name.toUpperCase()}`;
+  }
+  if (roomSelectElement) roomSelectElement.value = activeRoomEnvironment;
+  if (cardStyleSelectElement) cardStyleSelectElement.value = activeCardStyle;
+  if (inspectorPresetsElement) {
+    for (const button of inspectorPresetsElement.querySelectorAll<HTMLButtonElement>("[data-preset]")) {
+      const preset = STUDIO_PRESETS.find((item) => item.id === button.dataset.preset);
+      const active = Boolean(
+        preset && preset.room === activeRoomEnvironment && preset.cardStyle === activeCardStyle,
+      );
+      button.classList.toggle("active", active);
+      button.setAttribute("aria-pressed", String(active));
+    }
+  }
+  sceneShellElement.dataset.room = activeRoomEnvironment;
+  sceneShellElement.dataset.cardStyle = activeCardStyle;
+}
+
+function applyStudioPreset(presetId: string): void {
+  const preset = STUDIO_PRESETS.find((item) => item.id === presetId);
+  if (!preset) return;
+  applyRoomEnvironment(preset.room);
+  applyCardStyle(preset.cardStyle);
+  showToast(`Making it yours · ${preset.name}`);
+}
+
+function initializeTwoAxisInspector(): void {
+  if (roomSelectElement) {
+    roomSelectElement.replaceChildren();
+    for (const id of ROOM_ENVIRONMENT_ORDER) {
+      const option = document.createElement("option");
+      option.value = id;
+      option.textContent = ROOM_ENVIRONMENTS[id].name;
+      roomSelectElement.append(option);
+    }
+    roomSelectElement.value = activeRoomEnvironment;
+    roomSelectElement.addEventListener("change", () => {
+      if (isRoomEnvironmentId(roomSelectElement.value)) {
+        applyRoomEnvironment(roomSelectElement.value);
+        showToast(`Room · ${ROOM_ENVIRONMENTS[roomSelectElement.value].name}`);
+      }
+    });
+  }
+
+  if (cardStyleSelectElement) {
+    cardStyleSelectElement.replaceChildren();
+    for (const id of CARD_STYLE_ORDER) {
+      const option = document.createElement("option");
+      option.value = id;
+      option.textContent = CARD_STYLES[id].name;
+      cardStyleSelectElement.append(option);
+    }
+    cardStyleSelectElement.value = activeCardStyle;
+    cardStyleSelectElement.addEventListener("change", () => {
+      if (isCardStyleId(cardStyleSelectElement.value)) {
+        applyCardStyle(cardStyleSelectElement.value);
+        showToast(`Card style · ${CARD_STYLES[cardStyleSelectElement.value].name}`);
+      }
+    });
+  }
+
+  if (inspectorPresetsElement) {
+    inspectorPresetsElement.replaceChildren();
+    for (const preset of STUDIO_PRESETS) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "inspector-preset";
+      button.dataset.preset = preset.id;
+      button.textContent = preset.name;
+      button.title = `${preset.name} · ${ROOM_ENVIRONMENTS[preset.room].name} + ${CARD_STYLES[preset.cardStyle].name}`;
+      button.setAttribute("aria-pressed", "false");
+      button.addEventListener("click", () => applyStudioPreset(preset.id));
+      inspectorPresetsElement.append(button);
+    }
+  }
+
+  if (compassTactileElement) {
+    compassTactileElement.replaceChildren();
+    for (const cell of TACTILE_GRID) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = `tactile-dot${cell.compound ? " is-compound" : ""}`;
+      button.dataset.tactileFacet = cell.facet;
+      button.title = `${cell.label}${cell.compound ? " · compound diagonal flip" : ""}`;
+      button.setAttribute("aria-label", button.title);
+      const dot = document.createElement("span");
+      dot.textContent = cell.label.split(" ")[0];
+      button.append(dot);
+      button.addEventListener("click", () => {
+        if (selectedCard) activateTactileCell(selectedCard, cell);
+      });
+      compassTactileElement.append(button);
+    }
+  }
+
+  updateInspectorReadout();
+}
+
 const CARD_WIDTH = 2.15;
 const CARD_HEIGHT = 3.2;
 const GUEST_PREVIEW_WIDTH = 468;
 const GUEST_PREVIEW_HEIGHT = 328;
-const GUEST_PREVIEW_X = (640 - GUEST_PREVIEW_WIDTH) / 2;
+// Nudged left of centre to leave a clear tactile control rail down the right
+// edge of the card face (the framebuffer itself stays a quarter of the face).
+const GUEST_PREVIEW_X = 28;
 const GUEST_PREVIEW_Y = 380;
 const cardGeometry = new THREE.ShapeGeometry(roundedRectangle(CARD_WIDTH, CARD_HEIGHT, 0.13));
 const uvAttr = cardGeometry.attributes.uv;
@@ -1078,6 +1454,8 @@ let guestServiceStatus: GuestServiceStatus | undefined;
 let guestTargetCardId: string | undefined;
 let guestTargetOs: GuestOS = "linux";
 let secOpsMode = false;
+let roomSecured = false;
+let activeColorGrade: ColorGradeId = DEFAULT_COLOR_GRADE;
 let cardZoomed = false;
 let benchCount: 1 | 2 | 3 = 1;
 
@@ -1126,6 +1504,10 @@ function toggleCardTwist(card: SystemCard, force?: boolean): void {
 }
 let studioGraphicsProfile: GraphicsProfile = "balanced";
 const cameraLookTarget = new THREE.Vector3(0, 2.42, -0.25);
+// Loose pointer parallax: the room leans a little with the cursor, which sells
+// the depth between the card ring, the props and the backdrop.
+const pointerParallax = new THREE.Vector2();
+const pointerParallaxTarget = new THREE.Vector2();
 const rolodexRadius = 8.4;
 const rolodexAngleStep = 0.44;
 const INITIAL_CARD_INDEX = 2; // Linux · Dev Space starts in center
@@ -1557,6 +1939,9 @@ selectCard(cards.find((card) => card.id === "linux") ?? cards[Math.min(INITIAL_C
 updateCardCount();
 updateRecipientOptions();
 resize();
+initializeTwoAxisInspector();
+applyRoomEnvironment(activeRoomEnvironment);
+applyCardStyle(activeCardStyle);
 
 roomCardNavElement.addEventListener("click", (event) => {
   if (pendingTrash || trashFlight) return;
@@ -1671,6 +2056,8 @@ let butlerLastKey = "";
 let butlerHideTimer: number | undefined;
 let butlerQuietUntil = 0;
 let butlerLastSpoke = 0;
+/** A prompt waiting for approval before it runs on a card. */
+let pendingButlerCommand: { prompt: string; cardId: string } | undefined;
 
 for (const type of ["pointerdown", "keydown", "wheel"]) {
   window.addEventListener(type, () => { lastUserActivity = performance.now(); }, { passive: true });
@@ -1681,6 +2068,7 @@ function butlerContext(): ButlerContext {
   const serviceUnavailable = Boolean(errorText && /unavailable|failed to fetch/i.test(errorText));
   const card = selectedCard;
   const os = card ? cardToGuestOs(card) : undefined;
+  const meta = card ? FACET_META[card.facet] : undefined;
   return {
     idleSeconds: (performance.now() - lastUserActivity) / 1000,
     guestError: serviceUnavailable ? undefined : errorText,
@@ -1689,11 +2077,20 @@ function butlerContext(): ButlerContext {
     serviceUnavailable,
     displayOpen: guestDialogElement.open,
     needsInstall: card ? cardButtonStates(card).guest.label === "Install" : false,
+    roomName: ROOM_ENVIRONMENTS[activeRoomEnvironment].name,
+    cardStyleName: CARD_STYLES[activeCardStyle].name,
+    facetLabel: meta ? `${meta.badge.split(" / ")[0]} · ${meta.shortLabel.toUpperCase()}` : undefined,
+    cardCount: cards.length,
+    binCount: binnedCards.size,
+    benchCount,
+    zoomed: cardZoomed,
   };
 }
 
 function butlerSay(note: { message: string; choices: ButlerChoiceId[] }, autoHideMs = 0): void {
   if (!butlerBubble || !butlerMessage || !butlerChoices) return;
+  // Any new message replaces an unanswered command confirmation.
+  pendingButlerCommand = undefined;
   butlerMessage.textContent = note.message;
   butlerChoices.replaceChildren();
   for (const id of note.choices) {
@@ -1710,6 +2107,45 @@ function butlerSay(note: { message: string; choices: ButlerChoiceId[] }, autoHid
   if (autoHideMs > 0) butlerHideTimer = window.setTimeout(() => { butlerBubble.hidden = true; }, autoHideMs);
 }
 
+/**
+ * Prompts the butler cannot place used to run on the card straight away. They
+ * now wait here for an explicit approval; any other message cancels the wait.
+ */
+function butlerConfirmCommand(prompt: string, cardId: string): void {
+  if (!butlerChoices) return;
+  const card = cards.find((item) => item.id === cardId);
+  if (!card) {
+    butlerSay({ message: "That card is no longer in the room.", choices: ["dismiss"] });
+    return;
+  }
+  butlerSay({
+    message: `I don't know "${prompt}" as a control. Run it as a command on ${card.name}?`,
+    choices: [],
+  });
+  const run = document.createElement("button");
+  run.type = "button";
+  run.className = "butler-choice";
+  run.textContent = `Run on ${card.name}`;
+  run.addEventListener("click", () => {
+    const pending = pendingButlerCommand;
+    pendingButlerCommand = undefined;
+    const target = pending ? cards.find((item) => item.id === pending.cardId) : undefined;
+    if (!pending || !target) return;
+    butlerSay({ message: `Running "${pending.prompt}" on ${target.name}.`, choices: ["dismiss"] });
+    void runAiOrSecOpsCommand(pending.prompt, target);
+  });
+  const cancel = document.createElement("button");
+  cancel.type = "button";
+  cancel.className = "butler-choice";
+  cancel.textContent = "Not now";
+  cancel.addEventListener("click", () => {
+    pendingButlerCommand = undefined;
+    butlerSay({ message: "Left the card alone.", choices: ["dismiss"] });
+  });
+  butlerChoices.append(run, cancel);
+  pendingButlerCommand = { prompt, cardId };
+}
+
 function butlerChoose(id: ButlerChoiceId): void {
   const context = butlerContext();
   const card = selectedCard;
@@ -1721,7 +2157,61 @@ function butlerChoose(id: ButlerChoiceId): void {
     if (butlerBubble) butlerBubble.hidden = true;
     return;
   }
-  butlerSay({ message: butlerAnswer(id, context), choices: id === "stuck" ? ["tour", "dismiss"] : ["dismiss"] }, 20000);
+  const more: ButlerChoiceId[] = id === "stuck" || id === "guide" ? ["tour", "dismiss"] : ["dismiss"];
+  butlerSay({ message: butlerAnswer(id, context), choices: more }, 20000);
+}
+
+/** Cycles to the next entry in a catalog, wrapping at the end. */
+function nextCatalogEntry<T extends string>(order: readonly T[], current: T): T {
+  const index = order.indexOf(current);
+  return order[(index + 1) % order.length] ?? current;
+}
+
+/** Runs what the butler understood, using the same paths as the visible controls. */
+function runButlerAction(action: ButlerAction): void {
+  const card = selectedCard;
+  switch (action) {
+    case "zoom":
+      toggleCardZoom(true);
+      break;
+    case "unzoom":
+      toggleCardZoom(false);
+      break;
+    case "install":
+      if (card) runCardButton("guest", card);
+      break;
+    case "display":
+      if (card) runCardExtra("display", card);
+      break;
+    case "settings":
+      if (card) flipCardTo(card, "back");
+      break;
+    case "front":
+      if (card) flipCardTo(card, "front");
+      break;
+    case "next-room":
+      applyRoomEnvironment(nextCatalogEntry(ROOM_ENVIRONMENT_ORDER, activeRoomEnvironment));
+      break;
+    case "next-style":
+      applyCardStyle(nextCatalogEntry(CARD_STYLE_ORDER, activeCardStyle));
+      break;
+    case "manual":
+      document.querySelector<HTMLButtonElement>("#help-button")?.click();
+      break;
+    case "performance":
+      openPerformanceDialog();
+      break;
+    case "new-instance":
+      openAddCardDialog();
+      break;
+    case "bin":
+      updateBinDialog();
+      binDialogElement.showModal();
+      break;
+    case "bench":
+      setBenchCount(benchCount === 3 ? 1 : ((benchCount + 1) as 1 | 2 | 3));
+      break;
+  }
 }
 
 function openButlerOnHover(): void {
@@ -1787,6 +2277,8 @@ window.setInterval(() => {
 
 window.setInterval(() => {
   if (!guestTargetCardId) return;
+  // Don't mirror frames into card textures while the room is secured.
+  if (roomSecured) return;
   const vncCanvas = guestDisplayElement.querySelector<HTMLCanvasElement>("canvas");
   if (!vncCanvas || vncCanvas.width < 16 || vncCanvas.height < 16) return;
   const card = cards.find((c) => c.id === guestTargetCardId);
@@ -1815,6 +2307,15 @@ resize();
 renderer.domElement.addEventListener("pointerdown", onPointerDown);
 renderer.domElement.addEventListener("contextmenu", (event) => event.preventDefault());
 renderer.domElement.addEventListener("pointermove", onPointerMove);
+sceneShellElement.addEventListener("pointermove", (event) => {
+  const rect = sceneShellElement.getBoundingClientRect();
+  if (rect.width < 1 || rect.height < 1) return;
+  pointerParallaxTarget.set(
+    ((event.clientX - rect.left) / rect.width) * 2 - 1,
+    ((event.clientY - rect.top) / rect.height) * 2 - 1,
+  );
+});
+sceneShellElement.addEventListener("pointerleave", () => pointerParallaxTarget.set(0, 0));
 renderer.domElement.addEventListener("pointerup", onPointerUp);
 renderer.domElement.addEventListener("pointercancel", onPointerUp);
 renderer.domElement.addEventListener("dblclick", onDoubleClick);
@@ -1864,7 +2365,12 @@ document.addEventListener("click", (event) => {
   if (clickedAction) {
     const parentDetails = clickedAction.closest<HTMLDetailsElement>("details.pulldown");
     if (parentDetails) parentDetails.open = false;
+    clickedAction.closest<HTMLDetailsElement>("details.studio-tools")?.removeAttribute("open");
     return;
+  }
+  // Dock actions live in a pull-down now, so close it once one is chosen.
+  if (target.closest(".studio-tools .command-bar button")) {
+    document.querySelector<HTMLDetailsElement>("#studio-tools")?.removeAttribute("open");
   }
   const openMenus = document.querySelectorAll<HTMLDetailsElement>(
     "details.pulldown[open], details.studio-tools[open]",
@@ -2013,11 +2519,38 @@ document.getElementById("record-tour-button")?.addEventListener("click", () => {
 
 omniFormElement.addEventListener("submit", (event) => {
   event.preventDefault();
+  void runButlerPrompt();
+});
+
+async function runButlerPrompt(): Promise<void> {
   const prompt = omniInputElement.value.trim();
   if (!prompt) return;
   omniInputElement.value = "";
   const context = butlerContext();
-  const interpreted = butlerInterpretPrompt(prompt, context);
+  window.clearTimeout(butlerHideTimer);
+  let thinking = 0;
+  const interpreted = await butlerInterpretPromptWithRouter(prompt, context, (text, next) => {
+    // Reached only for prompts the keyword matcher did not understand.
+    thinking = window.setTimeout(() => butlerSay({ message: "One moment…", choices: [] }), 250);
+    return requestButlerRouting(text, next);
+  });
+  window.clearTimeout(thinking);
+  if (interpreted.action) {
+    runButlerAction(interpreted.action);
+    // Answer from the state *after* the action so it can name the new room, facet, etc.
+    butlerSay(
+      interpreted.topic
+        ? butlerTopic(interpreted.topic, butlerContext())
+        : { key: "action", message: interpreted.reply ?? "Done.", choices: ["dismiss"] },
+    );
+    return;
+  }
+  // A router can name a help topic with no control to run; answer it here so the
+  // prompt is never forwarded to the card as a shell command.
+  if (interpreted.topic) {
+    butlerSay(butlerTopic(interpreted.topic, butlerContext()));
+    return;
+  }
   if (interpreted.choice) {
     butlerChoose(interpreted.choice);
     return;
@@ -2027,12 +2560,13 @@ omniFormElement.addEventListener("submit", (event) => {
     return;
   }
   const target = selectedCard ?? cards[0];
-  butlerSay({
-    message: `Right away — sending "${prompt}" to ${target?.name ?? "the selected card"}.`,
-    choices: ["dismiss"],
-  });
-  void runAiOrSecOpsCommand(prompt, selectedCard ?? undefined);
-});
+  if (!target) {
+    butlerSay({ message: "There is no card in the room to send that to.", choices: ["dismiss"] });
+    return;
+  }
+  // Nothing recognised it, so nothing runs until the user says so.
+  butlerConfirmCommand(prompt, target.id);
+}
 
 omniChipsElement.addEventListener("click", (event) => {
   const button = (event.target as HTMLElement | null)?.closest<HTMLButtonElement>(
@@ -2248,19 +2782,19 @@ addCardDialog?.addEventListener("click", (event) => {
   if (event.target === addCardDialog) addCardDialog.close();
 });
 
-addButton.addEventListener("click", () => {
-  if (addCardDialog && addCardTemplateSelect && addCardNameInput && addCardIsoInput) {
-    const order = ["windows", "linux", "android", "macos"];
-    const defaultKey = order[(nextCardIdNumber - 1) % order.length];
-    addCardTemplateSelect.value = defaultKey;
-    addCardNameInput.value = ADD_CARD_TEMPLATES[defaultKey].name;
-    addCardIsoInput.value = "";
-    addCardDialog.showModal();
-    addCardNameInput.focus();
-    addCardNameInput.select();
-    return;
-  }
-});
+function openAddCardDialog(): void {
+  if (!addCardDialog || !addCardTemplateSelect || !addCardNameInput || !addCardIsoInput) return;
+  const order = ["windows", "linux", "android", "macos"];
+  const defaultKey = order[(nextCardIdNumber - 1) % order.length];
+  addCardTemplateSelect.value = defaultKey;
+  addCardNameInput.value = ADD_CARD_TEMPLATES[defaultKey].name;
+  addCardIsoInput.value = "";
+  addCardDialog.showModal();
+  addCardNameInput.focus();
+  addCardNameInput.select();
+}
+
+addButton.addEventListener("click", openAddCardDialog);
 
 addCardForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -2581,45 +3115,12 @@ function openPerformanceDialog(): void {
   }
   const colorGradeSelect = document.querySelector<HTMLSelectElement>("#color-grade-profile");
   if (colorGradeSelect) {
+    colorGradeSelect.value = activeColorGrade;
     colorGradeSelect.onchange = () => {
-      const grade = colorGradeSelect.value;
-      if (grade === "cyberpunk") {
-        cardHaloLight.color.set("#00ffff");
-        cardHaloLight.intensity = 60;
-        cardFloorGlow.color.set("#ff007f");
-        cardFloorGlow.intensity = 42;
-        fillLight.color.set("#7928ca");
-        rimLight.color.set("#00f0ff");
-        duskLight.color.set("#ff007f");
-        renderer.toneMappingExposure = 1.35;
-      } else if (grade === "monochrome") {
-        cardHaloLight.color.set("#00ff66");
-        cardHaloLight.intensity = 52;
-        cardFloorGlow.color.set("#00ff66");
-        cardFloorGlow.intensity = 35;
-        fillLight.color.set("#003311");
-        rimLight.color.set("#00ff66");
-        duskLight.color.set("#001a00");
-        renderer.toneMappingExposure = 1.05;
-      } else if (grade === "vintage") {
-        cardHaloLight.color.set("#ffaa44");
-        cardHaloLight.intensity = 40;
-        cardFloorGlow.color.set("#e69138");
-        cardFloorGlow.intensity = 26;
-        fillLight.color.set("#b45f06");
-        rimLight.color.set("#ffd966");
-        duskLight.color.set("#783f04");
-        renderer.toneMappingExposure = 0.98;
-      } else {
-        cardHaloLight.color.set("#ffb81c");
-        cardHaloLight.intensity = 48;
-        cardFloorGlow.color.set("#70d5cf");
-        cardFloorGlow.intensity = 32;
-        fillLight.color.set("#a89bff");
-        rimLight.color.set("#54d6cf");
-        duskLight.color.set("#e495a4");
-        renderer.toneMappingExposure = 1.12;
-      }
+      activeColorGrade = isColorGradeId(colorGradeSelect.value)
+        ? colorGradeSelect.value
+        : DEFAULT_COLOR_GRADE;
+      applyStudioLighting();
     };
   }
   performanceGpuInfoElement.textContent =
@@ -2945,30 +3446,53 @@ function makeCardTexture(card: SystemCard, facet: CardFacet): THREE.CanvasTextur
   context.scale(2, 2);
 
   const meta = FACET_META[facet];
+  const style = CARD_STYLES[activeCardStyle];
+  const accent = style.accent ?? meta.accent;
+  const [surfaceTop, surfaceMid, surfaceBottom] = style.background;
   const gradient = context.createLinearGradient(0, 0, 640, 960);
-  gradient.addColorStop(0, facet === "front" ? "#14161B" : "#14161B");
-  gradient.addColorStop(0.58, "#0D111A");
-  gradient.addColorStop(1, "#0D111A");
+  gradient.addColorStop(0, surfaceTop);
+  gradient.addColorStop(0.58, surfaceMid);
+  gradient.addColorStop(1, surfaceBottom);
   context.fillStyle = gradient;
   context.fillRect(0, 0, 640, 960);
 
-  context.fillStyle = `${card.color}16`;
+  // Card style grid (Blueprint / Hologram / Carbon). Low alpha so type stays legible.
+  if (style.gridColor) {
+    context.save();
+    context.strokeStyle = style.gridColor;
+    context.lineWidth = 1;
+    for (let gx = 32; gx < 640; gx += 32) {
+      context.beginPath();
+      context.moveTo(gx, 24);
+      context.lineTo(gx, 936);
+      context.stroke();
+    }
+    for (let gy = 32; gy < 960; gy += 32) {
+      context.beginPath();
+      context.moveTo(24, gy);
+      context.lineTo(616, gy);
+      context.stroke();
+    }
+    context.restore();
+  }
+
+  context.fillStyle = `${accent}${Math.round(style.glowAlpha * 255).toString(16).padStart(2, "0")}`;
   context.beginPath();
   context.arc(560, 85, 165, 0, Math.PI * 2);
   context.fill();
-  context.fillStyle = meta.accent;
+  context.fillStyle = accent;
   roundRect(context, 48, 49, 7, 30, 3.5);
   context.fill();
 
-  context.strokeStyle = `${meta.accent}55`;
+  context.strokeStyle = `${accent}55`;
   context.lineWidth = 2;
   roundRect(context, 25, 24, 590, 912, 18);
   context.stroke();
 
-  context.fillStyle = meta.accent;
+  context.fillStyle = accent;
   context.font = "700 25px Inter, Arial, sans-serif";
   context.fillText(meta.header, 72, 74);
-  context.fillStyle = meta.accent;
+  context.fillStyle = accent;
   context.font = "700 21px Inter, Arial, sans-serif";
   context.textAlign = "right";
   context.fillText(meta.badge, 590, 74);
@@ -2993,13 +3517,22 @@ function makeCardTexture(card: SystemCard, facet: CardFacet): THREE.CanvasTextur
     case "bottom":
       drawCardTelemetry(context, card);
       break;
+    case "patent":
+      drawCardPatentLab(context, card);
+      break;
+    case "tensor":
+      drawCardTensorEnclave(context, card);
+      break;
+    case "streams":
+      drawCardDiovStreams(context, card);
+      break;
   }
 
   drawFacetCompassDots(context, facet, card.color);
   drawEdgeFlipGuides(context, facet);
 
   drawCompanyLogo(context, 46, 898, 22, false);
-  context.fillStyle = meta.accent;
+  context.fillStyle = accent;
   context.font = "700 18px Inter, Arial, sans-serif";
   context.fillText("POST CARD · OS", 76, 915);
   context.fillStyle = "#c3c8d1";
@@ -3145,9 +3678,13 @@ function drawEdgeFlipGuides(context: CanvasRenderingContext2D, activeFacet: Card
   context.fillStyle = activeFacet === "bottom" ? "#bca8ff" : "#bca8ff99";
   context.fillText("▼ FLIP DOWN · 06 TELEMETRY (S)", 320, 952);
 
+  // Left and right guides run down the bezel, so they use a smaller face and
+  // sit clear of the card's edge instead of being clipped by it.
+  context.font = "700 12px Inter, Arial, sans-serif";
+
   // Left edge vertical tab -> 03 SECURITY
   context.save();
-  context.translate(15, 480);
+  context.translate(16.5, 480);
   context.rotate(-Math.PI / 2);
   context.fillStyle = activeFacet === "left" ? "#8baef0" : "#8baef099";
   context.fillText("◀ FLIP LEFT · 03 SECURITY (A)", 0, 0);
@@ -3155,7 +3692,7 @@ function drawEdgeFlipGuides(context: CanvasRenderingContext2D, activeFacet: Card
 
   // Right edge vertical tab -> 04 PLANES
   context.save();
-  context.translate(625, 480);
+  context.translate(623.5, 480);
   context.rotate(Math.PI / 2);
   context.fillStyle = activeFacet === "right" ? "#eea3a6" : "#eea3a699";
   context.fillText("▶ FLIP RIGHT · 04 PLANES (D)", 0, 0);
@@ -3180,6 +3717,206 @@ function drawFacetCompassDots(
   }
 }
 
+/**
+ * 3×3 tactile flip matrix on the control rail beside the live display preview.
+ * The four corners fire a compound diagonal flip, and three of them open the
+ * diagnostic enclaves 07–09.
+ */
+function drawTactileMatrix(context: CanvasRenderingContext2D, card: SystemCard): void {
+  // The twisted display takes the whole face; hide the rail instead of covering it.
+  if (card.twisted) return;
+  const bounds = tactileGridBounds();
+  const railAccent = CARD_STYLES[activeCardStyle].accent ?? card.color;
+  context.save();
+  context.fillStyle = "rgba(6, 9, 16, 0.86)";
+  roundRect(context, bounds.x - 7, bounds.y - 7, bounds.w + 14, bounds.h + 14, 10);
+  context.fill();
+  context.strokeStyle = `${railAccent}88`;
+  context.lineWidth = 1.5;
+  roundRect(context, bounds.x - 7, bounds.y - 7, bounds.w + 14, bounds.h + 14, 10);
+  context.stroke();
+
+  context.textAlign = "center";
+  context.textBaseline = "middle";
+  for (const cell of TACTILE_GRID) {
+    const rect = tactileCellRect(cell);
+    const cx = rect.x + rect.w / 2;
+    const cy = rect.y + rect.h / 2;
+    const active = card.facet === cell.facet;
+    context.fillStyle = active ? `${card.color}55` : cell.compound ? "#1b2333" : "#121823";
+    roundRect(context, rect.x + 3, rect.y + 3, rect.w - 6, rect.h - 6, 8);
+    context.fill();
+    context.strokeStyle = active ? card.color : cell.compound ? "#ffcf6a99" : "#394456";
+    context.lineWidth = active ? 2 : 1;
+    roundRect(context, rect.x + 3, rect.y + 3, rect.w - 6, rect.h - 6, 8);
+    context.stroke();
+
+    context.fillStyle = active ? "#ffffff" : cell.compound ? "#ffcf6a" : "#c3c8d1";
+    context.beginPath();
+    context.arc(cx, cy - 5, active ? 4.5 : 3.5, 0, Math.PI * 2);
+    context.fill();
+    context.font = "700 8.5px 'DM Mono', monospace";
+    context.fillStyle = active ? "#ffffff" : cell.compound ? "#ffcf6a" : "#9aa5b8";
+    context.fillText(cell.label.split(" ")[0], cx, cy + 8);
+  }
+  context.restore();
+  context.textAlign = "left";
+  context.textBaseline = "alphabetic";
+}
+
+function diagnosticState(card: SystemCard, benchId: string): "idle" | "running" | "passed" | "fault" {
+  return card.diagnostics?.[benchId] ?? "idle";
+}
+
+function diagnosticLaneValue(bench: DiagnosticBench, state: string, lane: number): number {
+  const seed = [...bench.id].reduce((total, char) => total + char.charCodeAt(0), 0);
+  const base = 32 + ((seed * (lane + 3) * 17) % 58);
+  if (state === "fault") return Math.max(4, base - 26 - lane * 3);
+  if (state === "passed") return Math.min(98, base + 12 - lane * 4);
+  return base;
+}
+
+const DIAGNOSTIC_STATE_COLORS: Record<string, string> = {
+  idle: "#7e8aa0",
+  running: "#ffcf6a",
+  passed: "#6fe0a8",
+  fault: "#ff6b6b",
+};
+
+/** One live bench with its run / fault-injection hitboxes. */
+function drawDiagnosticBench(
+  context: CanvasRenderingContext2D,
+  card: SystemCard,
+  bench: DiagnosticBench,
+  accent: string,
+): void {
+  const state = diagnosticState(card, bench.id);
+  const stateColor = DIAGNOSTIC_STATE_COLORS[state] ?? accent;
+
+  context.fillStyle = "rgba(9, 13, 22, 0.94)";
+  roundRect(context, bench.x, bench.y, bench.w, bench.h, 14);
+  context.fill();
+  context.strokeStyle = state === "fault" ? "#ff6b6b" : `${accent}66`;
+  context.lineWidth = state === "fault" ? 2 : 1.4;
+  roundRect(context, bench.x, bench.y, bench.w, bench.h, 14);
+  context.stroke();
+
+  context.fillStyle = accent;
+  context.fillRect(bench.x + 14, bench.y + 14, 4, 42);
+
+  context.fillStyle = "#f4f5f7";
+  context.font = "700 19px Inter, Arial, sans-serif";
+  context.fillText(bench.label, bench.x + 28, bench.y + 30);
+  context.fillStyle = accent;
+  context.font = "600 10.5px 'DM Mono', monospace";
+  context.fillText(bench.tag, bench.x + 28, bench.y + 50);
+
+  const chipW = 108;
+  context.fillStyle = `${stateColor}22`;
+  roundRect(context, bench.x + bench.w - chipW - 16, bench.y + 14, chipW, 24, 12);
+  context.fill();
+  context.strokeStyle = `${stateColor}aa`;
+  context.lineWidth = 1;
+  roundRect(context, bench.x + bench.w - chipW - 16, bench.y + 14, chipW, 24, 12);
+  context.stroke();
+  context.fillStyle = stateColor;
+  context.font = "700 10px 'DM Mono', monospace";
+  context.textAlign = "center";
+  context.fillText(state.toUpperCase(), bench.x + bench.w - chipW / 2 - 16, bench.y + 30);
+  context.textAlign = "left";
+
+  const lanes = ["LAT", "THRU", "ERR"];
+  for (const [lane, label] of lanes.entries()) {
+    const laneY = bench.y + 68 + lane * 17;
+    context.fillStyle = "#7e8aa0";
+    context.font = "600 9px 'DM Mono', monospace";
+    context.fillText(label, bench.x + 28, laneY + 7);
+    context.fillStyle = "#141b28";
+    roundRect(context, bench.x + 62, laneY, 250, 7, 3.5);
+    context.fill();
+    const value = diagnosticLaneValue(bench, state, lane);
+    context.fillStyle = stateColor;
+    roundRect(context, bench.x + 62, laneY, 250 * (value / 100), 7, 3.5);
+    context.fill();
+    context.fillStyle = "#c3c8d1";
+    context.font = "600 9px 'DM Mono', monospace";
+    context.textAlign = "right";
+    context.fillText(`${value}%`, bench.x + 356, laneY + 7);
+    context.textAlign = "left";
+  }
+
+  const run = benchActionRect(bench, "run");
+  context.fillStyle = "#6fe0a822";
+  roundRect(context, run.x, run.y, run.w, run.h, 9);
+  context.fill();
+  context.strokeStyle = "#6fe0a8aa";
+  context.lineWidth = 1.2;
+  roundRect(context, run.x, run.y, run.w, run.h, 9);
+  context.stroke();
+  context.fillStyle = "#6fe0a8";
+  context.font = "700 11px 'DM Mono', monospace";
+  context.textAlign = "center";
+  context.fillText("▶ RUN BENCH", run.x + run.w / 2, run.y + run.h / 2 + 4);
+
+  const fault = benchActionRect(bench, "fault");
+  context.fillStyle = state === "fault" ? "#ff6b6b33" : "#ff6b6b18";
+  roundRect(context, fault.x, fault.y, fault.w, fault.h, 9);
+  context.fill();
+  context.strokeStyle = "#ff6b6bbb";
+  roundRect(context, fault.x, fault.y, fault.w, fault.h, 9);
+  context.stroke();
+  context.fillStyle = "#ff9a9a";
+  context.fillText(state === "fault" ? "✦ CLEAR FAULT" : "⚡ INJECT FAULT", fault.x + fault.w / 2, fault.y + fault.h / 2 + 4);
+  context.textAlign = "left";
+}
+
+function drawDiagnosticEnclave(
+  context: CanvasRenderingContext2D,
+  card: SystemCard,
+  facet: DiagnosticFacet,
+  intro: string,
+): void {
+  const accent = CARD_STYLES[activeCardStyle].accent ?? FACET_META[facet].accent;
+  context.fillStyle = `${accent}16`;
+  roundRect(context, 48, 100, 544, 52, 10);
+  context.fill();
+  context.strokeStyle = `${accent}55`;
+  context.lineWidth = 1;
+  roundRect(context, 48, 100, 544, 52, 10);
+  context.stroke();
+  context.fillStyle = accent;
+  context.font = "700 15px Inter, Arial, sans-serif";
+  context.fillText(FACET_META[facet].header, 62, 122);
+  context.font = "600 9.5px 'DM Mono', monospace";
+  context.fillStyle = `${accent}cc`;
+  context.fillText(intro, 62, 140);
+
+  for (const bench of DIAGNOSTIC_BENCHES[facet]) {
+    drawDiagnosticBench(context, card, bench, accent);
+  }
+
+  const faults = DIAGNOSTIC_BENCHES[facet].filter((bench) => diagnosticState(card, bench.id) === "fault").length;
+  context.fillStyle = faults > 0 ? "#ff9a9a" : "#6fe0a8";
+  context.font = "600 10px 'DM Mono', monospace";
+  context.fillText(
+    faults > 0 ? `${faults} FAULT(S) INJECTED · CLICK CLEAR FAULT TO RECOVER` : "ALL BENCHES NOMINAL · CLICK A BENCH TO RUN IT",
+    48,
+    712,
+  );
+}
+
+function drawCardPatentLab(context: CanvasRenderingContext2D, card: SystemCard): void {
+  drawDiagnosticEnclave(context, card, "patent", "ENCLAVE 07 · OMEGALOG UPG × DATAMELD PVM · CHAOS RAIL");
+}
+
+function drawCardTensorEnclave(context: CanvasRenderingContext2D, card: SystemCard): void {
+  drawDiagnosticEnclave(context, card, "tensor", "ENCLAVE 08 · INTER-KERNEL SLM MEMORY SHARING · TENSOR MESH");
+}
+
+function drawCardDiovStreams(context: CanvasRenderingContext2D, card: SystemCard): void {
+  drawDiagnosticEnclave(context, card, "streams", "ENCLAVE 09 · DIOV STREAM INSPECTOR · LIVE FAULT RAIL");
+}
+
 function drawCardFront(context: CanvasRenderingContext2D, card: SystemCard): void {
   if (card.twisted) {
     // Compact single-line header when twisted so the display port gets maximum room on the card.
@@ -3202,6 +3939,7 @@ function drawCardFront(context: CanvasRenderingContext2D, card: SystemCard): voi
   }
 
   drawMockDisplay(context, card);
+  drawTactileMatrix(context, card);
   drawCardButtons(context, card);
 
   context.fillStyle = card.color;
@@ -3323,9 +4061,11 @@ function drawMockDisplay(context: CanvasRenderingContext2D, card: SystemCard): v
   const y = card.twisted ? 132 : baseY;
   const dispW = card.twisted ? 568 : width;
   const dispH = card.twisted ? 568 : height;
+  // Secure Now hides live guest pixels everywhere, including on the selected card.
   const showLiveOnCard =
-    (card.liveCanvas && card === selectedCard) ||
-    Boolean(card.liveCanvas && isCardPulledToFront(card));
+    !roomSecured &&
+    ((card.liveCanvas && card === selectedCard) ||
+      Boolean(card.liveCanvas && isCardPulledToFront(card)));
 
   // Pillar 2: Outer Chamfered Hardware Screen Bezel
   context.save();
@@ -3355,9 +4095,9 @@ function drawMockDisplay(context: CanvasRenderingContext2D, card: SystemCard): v
     context.fillStyle = "#8A909E";
     context.textAlign = "center";
     context.font = "700 18px Inter, Arial, sans-serif";
-    context.fillText("PRIVATE DISPLAY", x + dispW / 2, y + dispH / 2 - 7);
+    context.fillText(roomSecured ? "ROOM SECURED" : "PRIVATE DISPLAY", x + dispW / 2, y + dispH / 2 - 7);
     context.font = "500 14px Inter, Arial, sans-serif";
-    context.fillText("SELECT CARD TO REVEAL", x + dispW / 2, y + dispH / 2 + 19);
+    context.fillText(roomSecured ? "DISPLAY HIDDEN" : "SELECT CARD TO REVEAL", x + dispW / 2, y + dispH / 2 + 19);
     context.textAlign = "left";
   } else {
     const wallpaper = context.createLinearGradient(x, y, x + dispW, y + dispH);
@@ -3442,20 +4182,26 @@ function drawMockDisplay(context: CanvasRenderingContext2D, card: SystemCard): v
     context.fill();
   }
 
+  // Left-aligned so the twist tab never sits on top of the display heading.
   context.fillStyle = "#f4f5f7";
-  context.textAlign = "center";
-  context.font = "700 17px Inter, Arial, sans-serif";
+  context.textAlign = "left";
+  context.font = "700 12.5px Inter, Arial, sans-serif";
   context.fillText(
     showLiveOnCard
-      ? "LIVE VNC FRAMEBUFFER MIRRORED ON 3D CARD"
-      : card.liveCanvas
-        ? "PRIVATE GUEST DISPLAY"
+      ? "LIVE VNC MIRROR"
+      : roomSecured && card.liveCanvas
+        ? "ROOM SECURED"
+        : card.liveCanvas
+          ? "PRIVATE GUEST DISPLAY"
         : status === "GUEST · CONNECTED"
-          ? "LIVE QEMU GUEST ACTIVE"
+          ? "LIVE QEMU GUEST"
           : "SPATIAL GUEST SURFACE",
-    x + dispW / 2,
-    y + 34,
+    x + 16,
+    y + 28,
   );
+  context.fillStyle = "#8a909e";
+  context.font = "600 9px 'DM Mono', monospace";
+  context.fillText("DISPLAY PORT 01", x + 16, y + 44);
   context.textAlign = "left";
 
   // Pillar 2: Subtle CRT curvature vignette & glass specular reflection
@@ -4681,6 +5427,12 @@ function updateGuestDialogCopy(): void {
 }
 
 function connectGuestDisplay(websocketPort: number, cardId: string): void {
+  // Secure Now owns every live-pixel surface, including this viewer.
+  if (roomSecured) {
+    disconnectGuestDisplay();
+    setGuestState("Room secured · displays hidden. Unlock Secure Now to view this card.");
+    return;
+  }
   if (guestRfb) guestRfb.disconnect();
   guestDisplayElement.replaceChildren();
   displayedGuestCardId = cardId;
@@ -4979,8 +5731,8 @@ function toggleSecOpsLabMode(): void {
       : "NEON DISTRICT <span>/</span> NIGHT GRID";
   }
 
-  fillLight.color.set(secOpsMode ? "#e59ba3" : "#a89bff");
-  rimLight.color.set(secOpsMode ? "#a99afa" : "#54d6cf");
+  // Recompose rather than hardcode: the tint layers over the active room.
+  applyStudioLighting();
 
   if (secOpsMode) {
     const secOpsDefinitions = [
@@ -5019,6 +5771,31 @@ function toggleSecOpsLabMode(): void {
     showToast("Returned to Standard Spatial Studio mode.");
   }
 }
+
+/**
+ * Secure Now hides live guest pixels, closes the viewer and curtains the room.
+ * It never stops a guest: the QEMU processes, disks and checkpoints are untouched.
+ */
+function setRoomSecured(secured: boolean): void {
+  roomSecured = secured;
+  secureNowToggleElement.classList.toggle("active", secured);
+  secureNowToggleElement.setAttribute("aria-pressed", String(secured));
+  secureNowToggleElement.textContent = secured ? "🔓 SECURED" : "🔒 SECURE NOW";
+  sceneShellElement.classList.toggle("room-secured", secured);
+  if (secured) {
+    // Drop the noVNC canvas and any cached mirror before anything can repaint.
+    disconnectGuestDisplay();
+    if (guestDialogElement.open) guestDialogElement.close();
+  }
+  for (const card of cards) refreshCardTexture(card, true);
+  showToast(
+    secured
+      ? "Room secured · live displays hidden. Guests keep running."
+      : "Room unsecured · live displays restored.",
+  );
+}
+
+secureNowToggleElement.addEventListener("click", () => setRoomSecured(!roomSecured));
 
 async function runAiOrSecOpsCommand(prompt: string, targetCard?: SystemCard): Promise<void> {
   const card = targetCard ?? selectedCard ?? cards[0];
@@ -5428,6 +6205,63 @@ function flipCardToSide(card: SystemCard, targetFacet: "left" | "right", directi
   }
 }
 
+/** Fires a tactile dot: corner dots roll the card on two axes at once. */
+function activateTactileCell(card: SystemCard, cell: TactileCell): void {
+  if (cell.facet === card.facet) {
+    flipCardTo(
+      card,
+      cell.facet === "front" ? "back" : "front",
+      cell.col === 0 ? -1 : 1,
+    );
+    return;
+  }
+  if (!cell.compound) {
+    flipCardTo(card, cell.facet);
+    return;
+  }
+  const direction: 1 | -1 = cell.col === 0 ? -1 : 1;
+  flipCardTo(card, cell.facet, direction);
+  if (card.flipAnim) {
+    card.flipAnim.tiltAxis = "diagonal";
+    card.flipAnim.tiltDir = cell.row === 0 ? 1 : -1;
+  }
+}
+
+/** Runs a diagnostic bench or toggles its fault injector, then repaints the face. */
+function runDiagnosticBench(
+  card: SystemCard,
+  bench: DiagnosticBench,
+  action: DiagnosticAction,
+): void {
+  card.diagnostics ??= {};
+  if (action === "run") {
+    card.diagnostics[bench.id] = "running";
+    card.serialOutput = `[bench ${bench.id}] running…`;
+    showToast(`${bench.label} · bench started on ${card.name}.`);
+    refreshCardTexture(card, true);
+    window.setTimeout(() => {
+      if (card.diagnostics?.[bench.id] !== "running") return;
+      card.diagnostics[bench.id] = "passed";
+      card.serialOutput = `[bench ${bench.id}] passed`;
+      refreshCardTexture(card, true);
+      if (card === selectedCard) showToast(`${bench.label} · all lanes nominal.`);
+    }, 900);
+    return;
+  }
+
+  const faulting = card.diagnostics[bench.id] === "fault";
+  card.diagnostics[bench.id] = faulting ? "idle" : "fault";
+  card.serialOutput = faulting
+    ? `[bench ${bench.id}] fault cleared`
+    : `[bench ${bench.id}] injected fault`;
+  refreshCardTexture(card, true);
+  showToast(
+    faulting
+      ? `${bench.label} · fault cleared, bench recovered.`
+      : `⚡ ${bench.label} · fault injected on ${card.name}.`,
+  );
+}
+
 function toggleCardZoom(force?: boolean): void {
   cardZoomed = typeof force === "boolean" ? force : !cardZoomed;
   if (cardZoomed && selectedCard) {
@@ -5499,6 +6333,24 @@ function openBigScreen(card: SystemCard): void {
 
 function handleCardClick(card: SystemCard, uv?: THREE.Vector2): void {
   if (!uv) return;
+
+  // 3×3 tactile rail sits beside the display preview (hidden while twisted).
+  if (card.facet === "front" && !card.twisted) {
+    const cell = hitTactileCell(uv.x, uv.y);
+    if (cell) {
+      activateTactileCell(card, cell);
+      return;
+    }
+  }
+
+  // Diagnostic enclaves own their bench hitboxes on facets 07–09.
+  if (isDiagnosticFacet(card.facet)) {
+    const benchHit = hitDiagnosticBench(card.facet, uv.x, uv.y);
+    if (benchHit) {
+      runDiagnosticBench(card, benchHit.bench, benchHit.action);
+      return;
+    }
+  }
 
   // Clicking near any of the 4 outer edges performs a directional 6-way flip.
   if (uv.x < 0.14) {
@@ -6507,7 +7359,7 @@ function onCanvasKeyDown(event: KeyboardEvent): void {
         return;
       }
     }
-    if (event.key >= "1" && event.key <= "6") {
+    if (event.key >= "1" && event.key <= "9") {
       event.preventDefault();
       const idx = Number(event.key) - 1;
       flipCardTo(selectedCard, FACET_ORDER[idx]);
@@ -7241,6 +8093,13 @@ function animate(now = 0): void {
         // Continue smoothly from any hand-held tilt into the 3D tumble.
         card.group.rotation.x =
           startX * (1 - eased) + Math.sin(t * Math.PI) * pitchDirection * (Math.PI * 0.5) * (1 - Math.abs(startX) / Math.PI);
+      } else if (card.flipAnim.tiltAxis === "diagonal") {
+        // Compound corner flip: the card turns on both axes at once, like
+        // pinching a corner and rolling it over into the diagnostic enclave.
+        const startX = card.flipAnim.startRotationX ?? 0;
+        const swing = arc * card.flipAnim.tiltDir;
+        card.group.rotation.x = startX * (1 - eased) + swing * (Math.PI * 0.34);
+        card.group.rotation.z = swing * (Math.PI * 0.2);
       } else {
         card.group.rotation.z = arc * (card.flipAnim.tiltDir * 0.22);
       }
@@ -7341,6 +8200,23 @@ function animate(now = 0): void {
           )
         : new THREE.Vector3(0, 2.68, 0.25);
 
+  // Pointer parallax plus a slow idle drift, damped so the room never snaps.
+  if (reducePreviewMotion) {
+    pointerParallax.set(0, 0);
+  } else {
+    pointerParallax.x = THREE.MathUtils.damp(pointerParallax.x, pointerParallaxTarget.x, 3.1, dt);
+    pointerParallax.y = THREE.MathUtils.damp(pointerParallax.y, pointerParallaxTarget.y, 3.1, dt);
+  }
+  const parallaxScale = cardZoomed ? 0.45 : 1;
+  const driftX = reducePreviewMotion ? 0 : Math.sin(now * 0.00019) * 0.2;
+  const driftY = reducePreviewMotion ? 0 : Math.sin(now * 0.00013 + 1.7) * 0.09;
+  const offsetX = pointerParallax.x * 0.55 * parallaxScale + driftX;
+  const offsetY = -pointerParallax.y * 0.26 * parallaxScale + driftY;
+  desiredCamPos.x += offsetX;
+  desiredCamPos.y += offsetY;
+  desiredLookAt.x += offsetX * 1.45;
+  desiredLookAt.y += offsetY * 1.2;
+
   if (reducePreviewMotion) {
     camera.position.copy(desiredCamPos);
     cameraLookTarget.copy(desiredLookAt);
@@ -7391,6 +8267,8 @@ function animate(now = 0): void {
   if (!reducePreviewMotion) {
     overheadHaloGroup.rotation.y = now * 0.00012;
     studioMotes.rotation.y = -now * 0.00008;
+    nearMotes.rotation.y = now * 0.00002;
+    nearMotes.position.y = Math.sin(now * 0.00018) * 0.16;
     cosmicStarfield.rotation.y = -now * 0.00002;
     starMaterial.size = 0.088 + 0.012 * Math.sin(now * 0.0016);
     for (const [idx, mat] of monolithLedMats.entries()) {

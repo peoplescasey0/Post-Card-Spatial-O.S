@@ -47,6 +47,36 @@ cards use a persistent 64 GiB disk and their own software TPM 2.0 state. Up to
 four guests and 8 GiB of guest RAM can be active at once. Android remains an
 illustration, and paper-plane notes are still local prototype behavior.
 
+## Optional: local butler router (Ollama)
+
+The butler ships with a built-in notebook and keyword matcher, so it works with
+nothing installed. If [Ollama](https://ollama.com) is already running on this
+computer, a small local model can read the phrasing instead — but it only
+classifies the request into an action or a help topic. The notebook still writes
+every answer, so the model cannot invent a control that does not exist.
+
+1. Install Ollama and pull the router model: `ollama pull qwen3.5:0.8b`.
+2. In `workspace-prototype/.env`, set `POSTCARD_OLLAMA_MODEL=qwen3.5:0.8b`.
+   `POSTCARD_OLLAMA_URL` defaults to `http://127.0.0.1:11434`; change it only if
+   Ollama listens on another port.
+3. Restart `npm run dev`. With `POSTCARD_OLLAMA_MODEL` empty the router stays
+   off, which is the default.
+
+The keyword matcher always runs first, so phrasing the butler already knows
+answers instantly; only prompts it cannot place ask the model. If nothing
+recognises a prompt, the butler asks before running it on a card as a command.
+
+The service asks Ollama's `/api/chat` for schema-constrained JSON
+(`{action, topic, confidence}`) with a four-second budget. If the model is off,
+unreachable, slow, malformed, or unsure, the butler falls back to keyword
+matching without changing anything else in the workspace.
+
+**Loopback only.** The router sits behind the same guard as the guest controls:
+requests must arrive from this computer. A preview that is tunneled or opened
+from another host receives `403` and every prompt goes through keyword matching.
+Prompts are only sent to `POSTCARD_OLLAMA_URL`, so keep it pointed at a local
+Ollama unless you intend to send that text elsewhere.
+
 ## Connect the Linux guest
 
 The guest service is part of the Vite development and preview servers; it

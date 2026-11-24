@@ -92,6 +92,88 @@ async function readJson(request, maxBytes = 2048) {
   }
 }
 
+/*
+ * Butler router contract. Keep BUTLER_ROUTER_ACTIONS / BUTLER_ROUTER_TOPICS in
+ * sync with ButlerAction / ButlerTopicId in src/butler.ts; tests/butler-router.test.mjs
+ * asserts they match. The model only classifies — the notebook in butler.ts owns
+ * the actual answers, so a small model can never invent a control that isn't there.
+ */
+export const BUTLER_ROUTER_ACTIONS = [
+  "zoom",
+  "unzoom",
+  "install",
+  "display",
+  "settings",
+  "front",
+  "next-room",
+  "next-style",
+  "manual",
+  "performance",
+  "new-instance",
+  "bin",
+  "bench",
+];
+
+export const BUTLER_ROUTER_TOPICS = [
+  "workspace",
+  "zoom",
+  "flip",
+  "install",
+  "display",
+  "rooms",
+  "bench",
+  "bin",
+  "savepoints",
+  "planes",
+  "new-instance",
+  "keys",
+  "performance",
+  "playbooks",
+];
+
+const BUTLER_ROUTER_SCHEMA = {
+  type: "object",
+  properties: {
+    action: { type: "string", enum: ["none", ...BUTLER_ROUTER_ACTIONS] },
+    topic: { type: "string", enum: ["none", ...BUTLER_ROUTER_TOPICS] },
+    confidence: { type: "number", minimum: 0, maximum: 1 },
+  },
+  required: ["action", "topic", "confidence"],
+};
+
+const BUTLER_ROUTER_SYSTEM_PROMPT = [
+  "You route requests for Post Card OS, a desktop app with a 3D card room.",
+  "Reply with JSON only. Never answer the request itself.",
+  'action: the one control to run, or "none":',
+  "  zoom / unzoom = make the selected card fill the stage / return to the room",
+  "  install = boot the selected card's guest OS",
+  "  display = open or enlarge the live guest display",
+  "  settings = flip the card to its settings face, front = flip back to the display face",
+  "  next-room / next-style = cycle the room environment / card surface",
+  "  manual = open the operator manual, performance = CPU and GPU profiles",
+  "  new-instance = open the add-a-card dialog, bin = open the paper bin,",
+  "  bench = change how many cards sit on the front bench",
+  `topic: the best help topic, or "none": ${BUTLER_ROUTER_TOPICS.join(", ")}.`,
+  "confidence: 0 to 1 for how sure you are.",
+  'Shell or card commands (recon, scan, ps, ls, curl, serial) must use "none" for both.',
+].join("\n");
+
+/** Compact state line so a tiny model can tell "make it bigger" apart from "zoom". */
+function butlerStateLine(context) {
+  if (!context || typeof context !== "object") return "";
+  const parts = [];
+  const add = (label, value) => {
+    if (typeof value === "string" && value.trim()) parts.push(`${label} ${value.trim().slice(0, 40)}`);
+  };
+  add("room", context.room);
+  add("facet", context.facet);
+  if (context.zoomed) parts.push("card zoomed");
+  if (context.displayOpen) parts.push("display open");
+  if (context.needsInstall) parts.push("guest not installed");
+  else if (context.guestRunning) parts.push("guest running");
+  return parts.length ? `State: ${parts.join(", ")}.` : "";
+}
+
 function findExecutable(environmentKey, defaultPath, executableName) {
   const configuredPath = process.env[environmentKey];
   if (configuredPath) return configuredPath;
@@ -709,6 +791,63 @@ export function createGuestApi(options = {}) {
     const result = registryMutationQueue.then(operation);
     registryMutationQueue = result.catch(() => undefined);
     return result;
+  }
+
+  // Optional local router. Off unless POSTCARD_OLLAMA_MODEL is set, so the
+  // keyword matcher in src/butler.ts is the default and the only path offline.
+  const butlerRouterModel = (process.env.POSTCARD_OLLAMA_MODEL ?? "").trim();
+  const butlerRouterUrl = (process.env.POSTCARD_OLLAMA_URL ?? "http://127.0.0.1:11434")
+    .trim()
+    .replace(/\/+$/, "");
+
+  /**
+   * Asks the local model for a schema-constrained routing decision. Any failure
+   * is reported as ok:false — the client then falls back to keyword matching.
+   */
+  async function routeButlerPrompt(body) {
+    if (!butlerRouterModel) return { enabled: false, reason: "router-off" };
+    const prompt = typeof body?.prompt === "string" ? body.prompt.trim().slice(0, 400) : "";
+    if (!prompt) return { enabled: true, ok: false, reason: "empty-prompt" };
+
+    const stateLine = butlerStateLine(body?.context);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 4000);
+    try {
+      const ollamaResponse = await fetch(`${butlerRouterUrl}/api/chat`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        signal: controller.signal,
+        body: JSON.stringify({
+          model: butlerRouterModel,
+          stream: false,
+          format: BUTLER_ROUTER_SCHEMA,
+          keep_alive: "30m",
+          options: { temperature: 0, num_predict: 96 },
+          messages: [
+            { role: "system", content: BUTLER_ROUTER_SYSTEM_PROMPT },
+            { role: "user", content: stateLine ? `${stateLine}\nRequest: ${prompt}` : prompt },
+          ],
+        }),
+      });
+      if (!ollamaResponse.ok) {
+        return { enabled: true, ok: false, reason: `ollama-${ollamaResponse.status}` };
+      }
+      const payload = await ollamaResponse.json();
+      const content = payload?.message?.content;
+      if (typeof content !== "string") return { enabled: true, ok: false, reason: "empty-reply" };
+      let reply;
+      try {
+        reply = JSON.parse(content);
+      } catch {
+        return { enabled: true, ok: false, reason: "invalid-json" };
+      }
+      return { enabled: true, ok: true, reply };
+    } catch (error) {
+      const aborted = error?.name === "AbortError";
+      return { enabled: true, ok: false, reason: aborted ? "timeout" : "unreachable" };
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   async function readCardIdRegistry() {
@@ -2680,6 +2819,23 @@ export function createGuestApi(options = {}) {
   return async (request, response, next) => {
     if (await handleStripeRequest(request, response)) return;
     const url = new URL(request.url ?? "/", "http://localhost");
+
+    // Local-only butler router: the browser never talks to Ollama directly.
+    if (request.method === "POST" && url.pathname === "/api/butler/interpret") {
+      if (!isLoopback(request.socket.remoteAddress)) {
+        sendJson(response, 403, { error: "The butler router is available only from this computer." });
+        return;
+      }
+      try {
+        sendJson(response, 200, await routeButlerPrompt(await readJson(request, 8192)));
+      } catch (error) {
+        sendJson(response, error instanceof GuestApiError ? error.status : 500, {
+          error: error?.message ?? "The butler router failed.",
+        });
+      }
+      return;
+    }
+
     if (!url.pathname.startsWith("/api/guest/")) {
       next();
       return;

@@ -231,10 +231,12 @@
               </button>
             </section>
           </div>
-        </div>
-      </header>
           <details class="studio-tools" id="studio-tools">
-            <summary class="studio-tools-trigger" aria-label="Open room tools folder"><span class="folder-icon" aria-hidden="true"></span><span class="folder-label">Room tools</span></summary>
+            <summary class="studio-tools-trigger" aria-label="Room tools" title="Room tools · card view, card actions and new instances">
+              <span class="tools-glyph" aria-hidden="true">▦</span>
+              <span class="tools-label">Room tools</span>
+              <span class="tools-chevron" aria-hidden="true">▾</span>
+            </summary>
             <nav class="command-bar" aria-label="Studio command bar">
         <div class="command-group command-view">
           <details class="pulldown facet-pulldown" id="facet-pulldown">
@@ -252,6 +254,9 @@
                 <button class="facet-pill" data-facet="right" type="button" title="Right · Paper Planes &amp; Sharing (Key 4 / D)"><span>04</span> PLANES</button>
                 <button class="facet-pill" data-facet="top" type="button" title="Top · Sandbox Quick Actions (Key 5 / W)"><span>05</span> ACTIONS</button>
                 <button class="facet-pill" data-facet="bottom" type="button" title="Bottom · Live Telemetry &amp; Ports (Key 6 / S)"><span>06</span> TELEMETRY</button>
+                <button class="facet-pill facet-pill-diagnostic" data-facet="patent" type="button" title="Corner 07 · Patent Diagnostic Lab &amp; Chaos Injection"><span>07</span> PATENT LAB</button>
+                <button class="facet-pill facet-pill-diagnostic" data-facet="tensor" type="button" title="Corner 08 · Inter-Kernel SLM Tensor Enclave"><span>08</span> SLM TENSOR</button>
+                <button class="facet-pill facet-pill-diagnostic" data-facet="streams" type="button" title="Corner 09 · DIOV Streams Inspector"><span>09</span> DIOV STREAMS</button>
               </nav>
             </div>
           </details>
@@ -325,11 +330,16 @@
               </div>
             </details>
             <span class="dock-divider"></span>
-            <button class="add-button" id="add-button" aria-label="Add a system card" title="Add a system card">+</button>
+            <button class="add-button add-instance" id="add-button" type="button" aria-label="Add a new system instance" title="Add a new system instance">
+              <span class="add-instance-glyph" aria-hidden="true">＋</span>
+              <span>New instance</span>
+            </button>
           </div>
         </section>
             </nav>
           </details>
+        </div>
+      </header>
 
       <main class="workspace">
         <section class="scene-shell" id="room" aria-label="Interactive 3D Post Card room">
@@ -347,7 +357,23 @@
             </div>
           </aside>
           <nav class="room-card-nav" id="room-card-nav" aria-label="Post Cards in this room"></nav>
+          <aside class="two-axis-inspector" id="two-axis-inspector" aria-label="Two-axis room and card style inspector">
+            <div class="inspector-head">
+              <span class="inspector-kicker">TWO-AXIS INSPECTOR</span>
+              <span class="inspector-readout" id="inspector-readout">CYBER MAINFRAME · SIGNATURE</span>
+            </div>
+            <div class="inspector-presets" id="inspector-presets" role="group" aria-label="Quick presets"></div>
+            <label class="inspector-axis" for="room-environment-select">
+              <span><b>AXIS 1</b> ROOM ENVIRONMENT</span>
+              <select id="room-environment-select"></select>
+            </label>
+            <label class="inspector-axis" for="card-style-select">
+              <span><b>AXIS 2</b> CARD STYLE</span>
+              <select id="card-style-select"></select>
+            </label>
+          </aside>
           <div id="scene" class="scene"></div>
+          <button class="secure-pill" id="secure-now" type="button" aria-pressed="false" title="Hide every live guest display and close the viewer. Guests keep running.">🔒 SECURE NOW</button>
           <div id="tour-overlay" class="tour-overlay" hidden>
             <div class="tour-overlay-card">
               <div class="tour-header">
@@ -423,6 +449,7 @@
             <details class="pulldown compass-pulldown">
               <summary class="compass-title">6-WAY D-PAD &amp; ZOOM <span>▾</span></summary>
               <div class="compass-body">
+                <div class="compass-tactile" id="compass-tactile" role="group" aria-label="9-dot tactile flip matrix"></div>
                 <div class="compass-grid">
                   <button class="compass-btn compass-up" data-compass-facet="top" type="button" title="Flip Up · 05 Quick Actions (W / Shift+Up)">▲<span>05 ACTIONS</span></button>
                   <button class="compass-btn compass-left" data-compass-facet="left" type="button" title="Flip Left · 03 Security (A / Shift+Left)">◀<span>03 SEC</span></button>

@@ -359,6 +359,17 @@ h1 {
   touch-action: none;
 }
 
+/* Depth vignette: darkens the far corners so the card ring sits inside the room. */
+.scene::after {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(118% 76% at 50% 46%, transparent 44%, rgba(4, 7, 15, 0.4) 100%),
+    linear-gradient(180deg, rgba(4, 7, 15, 0.3), transparent 19%, transparent 76%, rgba(4, 7, 15, 0.36));
+  content: "";
+  pointer-events: none;
+}
+
 .scene canvas:focus-visible {
   outline: 2px solid #c3c8d1;
   outline-offset: -4px;
@@ -3638,13 +3649,14 @@ summary:focus-visible {
   background: rgba(29, 59, 78, 0.68);
 }
 
-.studio-tools-trigger span {
+.studio-tools-trigger .tools-glyph {
   color: #79ded8;
-  font-size: 14px;
+  font-size: 12px;
 }
 
-.studio-tools[open] > .studio-tools-trigger span {
-  transform: rotate(180deg);
+.studio-tools-trigger .tools-chevron {
+  color: #79ded8;
+  font-size: 9px;
 }
 
 .command-bar {
@@ -4832,93 +4844,112 @@ summary:focus-visible {
   pointer-events: none;
 }
 
-/* ---- Room tools folder (bottom-left), no footer, responsive fit ---- */
+/* ---- Room tools pull-down, docked in the top bar ---- */
 .statusbar {
   display: none !important;
 }
 
+.topbar {
+  z-index: 40;
+}
+
 .studio-tools {
-  position: absolute;
-  z-index: 30;
-  left: 18px;
-  bottom: 18px;
+  order: -1;
 }
 
 .studio-tools-trigger {
-  min-height: 44px;
-  gap: 10px;
-  padding: 0 18px 0 14px;
+  min-height: 30px;
+  gap: 7px;
+  padding: 0 12px;
+  white-space: nowrap;
   border-radius: 9999px !important;
   background: rgba(10, 16, 28, 0.85);
   backdrop-filter: blur(24px) saturate(190%);
   -webkit-backdrop-filter: blur(24px) saturate(190%);
   border: 1px solid rgba(255, 255, 255, 0.14);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55), inset 0 1px 1px rgba(255, 255, 255, 0.15);
-  font-size: 11px;
-  transition: all 180ms ease;
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.15);
+  font-size: 10px;
+  transition: border-color 160ms ease, background 160ms ease;
 }
 
 .studio-tools-trigger:hover {
   border-color: rgba(112, 213, 207, 0.6);
-  transform: scale(1.02);
+  background: rgba(24, 42, 62, 0.9);
 }
 
-.folder-icon {
-  position: relative;
-  display: inline-block;
-  width: 22px;
-  height: 16px;
-  margin-top: 3px;
-  border-radius: 2px 3px 3px 3px;
-  background: linear-gradient(180deg, #8fe3e2, #4fb3b0);
-  transition: transform 180ms ease;
-}
-
-.folder-icon::before {
-  content: "";
-  position: absolute;
-  top: -4px;
-  left: 0;
-  width: 10px;
-  height: 5px;
-  border-radius: 2px 2px 0 0;
-  background: #8fe3e2;
-}
-
-.studio-tools[open] .folder-icon {
-  transform: perspective(60px) rotateX(18deg);
-  background: linear-gradient(180deg, #c3f4f3, #6fd0cd);
-}
-
-.studio-tools-trigger .folder-label {
+.studio-tools-trigger .tools-label {
   color: #d8e5f7;
-  font-size: 11px;
+  font-size: 10px;
 }
 
-.studio-tools[open] > .studio-tools-trigger span.folder-label {
-  transform: none;
+.studio-tools-trigger .tools-chevron {
+  transition: transform 160ms ease;
+}
+
+.studio-tools[open] .tools-chevron {
+  transform: rotate(180deg);
 }
 
 .studio-tools .command-bar {
-  top: auto;
-  right: auto;
-  bottom: calc(100% + 14px);
-  left: 0;
+  top: calc(100% + 6px);
+  right: 18px;
   width: min(1120px, calc(100vw - 36px));
-  max-height: calc(100dvh - 150px);
-  border-radius: 28px !important;
+  max-height: none;
+  overflow: visible;
+  border-radius: 24px !important;
   border: 1px solid rgba(255, 255, 255, 0.16) !important;
-  background: rgba(10, 16, 28, 0.84) !important;
+  background: rgba(10, 16, 28, 0.9) !important;
   backdrop-filter: blur(32px) saturate(200%) !important;
   -webkit-backdrop-filter: blur(32px) saturate(200%) !important;
   box-shadow: 0 24px 70px rgba(0, 0, 0, 0.75), inset 0 1px 2px rgba(255, 255, 255, 0.15) !important;
-  transform-origin: bottom left;
-  animation: folder-open 220ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  transform-origin: top right;
+  animation: tools-drop 200ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
-@keyframes folder-open {
-  from { opacity: 0; transform: translateY(10px) scale(0.97); }
+@keyframes tools-drop {
+  from { opacity: 0; transform: translateY(-10px) scale(0.97); }
   to { opacity: 1; transform: none; }
+}
+
+/* The pull-down is a full-width panel, so its dock buttons keep their labels. */
+.studio-tools .command-bar .dock-button:not(.guest-button) {
+  width: auto;
+  gap: 6px;
+  padding: 0 12px;
+  justify-content: center;
+}
+
+.studio-tools .command-bar .dock-button:not(.guest-button) > span:not(.button-icon) {
+  display: inline;
+}
+
+/* Add-a-screen tile: a new instance is one tap away, like a home screen. */
+.add-instance {
+  display: inline-flex;
+  width: auto;
+  min-width: 126px;
+  height: 30px;
+  gap: 6px;
+  padding: 0 12px;
+  border: 1px dashed rgba(121, 222, 216, 0.55);
+  border-radius: 999px;
+  background: rgba(121, 222, 216, 0.06);
+  color: #b7e9e6;
+  font: 600 10px "DM Mono", monospace;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+}
+
+.add-instance:hover {
+  transform: none;
+  border-color: #79ded8;
+  background: rgba(121, 222, 216, 0.16);
+  color: #ffffff;
+}
+
+.add-instance-glyph {
+  font-size: 13px;
+  line-height: 1;
 }
 
 .room-card-nav {
@@ -4932,6 +4963,22 @@ summary:focus-visible {
 
 .scene-hint {
   bottom: 78px;
+}
+
+@media (max-width: 1150px) {
+  /* Keep the pill compact before the top bar runs out of room. */
+  .studio-tools-trigger .tools-label {
+    display: none;
+  }
+
+  .topbar {
+    padding: 0 3vw;
+  }
+
+  .topbar .topbar-actions .mode-pill {
+    padding-left: 8px;
+    padding-right: 8px;
+  }
 }
 
 @media (max-width: 1100px), (max-height: 720px) {
@@ -4955,7 +5002,7 @@ summary:focus-visible {
     display: none;
   }
 
-  .studio-tools-trigger .folder-label {
+  .studio-tools-trigger .tools-label {
     display: none;
   }
 
@@ -5064,9 +5111,14 @@ summary:focus-visible {
   padding-top: 6px;
 }
 
+@keyframes panel-rise {
+  from { opacity: 0; transform: translateY(10px) scale(0.97); }
+  to { opacity: 1; transform: none; }
+}
+
 .butler-bubble {
   position: relative;
-  animation: folder-open 150ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  animation: panel-rise 150ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
 }
 
 .butler-bubble::after {
@@ -5742,4 +5794,252 @@ body.crt-scanlines::before {
   backdrop-filter: blur(12px);
   padding-bottom: 8px;
   z-index: 2;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Two-axis inspector (Quick Presets · Room Environment · Card Style)          */
+/* -------------------------------------------------------------------------- */
+
+.two-axis-inspector {
+  position: absolute;
+  z-index: 4;
+  top: 138px;
+  right: 28px;
+  display: grid;
+  width: min(258px, calc(100vw - 56px));
+  gap: 9px;
+  padding: 12px 13px 13px;
+  border: 1px solid rgba(151, 174, 211, 0.22);
+  border-radius: 12px;
+  background: linear-gradient(150deg, rgba(12, 19, 38, 0.86), rgba(15, 23, 44, 0.74));
+  box-shadow: 0 18px 42px rgba(2, 5, 15, 0.32), inset 0 1px rgba(223, 236, 255, 0.04);
+  backdrop-filter: blur(18px) saturate(150%);
+  -webkit-backdrop-filter: blur(18px) saturate(150%);
+  animation: room-arrive 700ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+.inspector-head {
+  display: grid;
+  gap: 3px;
+  padding-bottom: 7px;
+  border-bottom: 1px solid rgba(148, 173, 210, 0.18);
+}
+
+.inspector-kicker {
+  color: var(--room-accent, #79ded8);
+  font: 700 8.5px "DM Mono", monospace;
+  letter-spacing: 1.4px;
+}
+
+.inspector-readout {
+  overflow: hidden;
+  color: #f0f3ff;
+  font: 600 10.5px "DM Mono", monospace;
+  letter-spacing: 0.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inspector-presets {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 5px;
+}
+
+.inspector-preset {
+  padding: 7px 6px;
+  border: 1px solid rgba(148, 173, 210, 0.24);
+  border-radius: 7px;
+  background: rgba(10, 16, 30, 0.7);
+  color: #c3c8d1;
+  cursor: pointer;
+  font: 600 9px "Space Grotesk", sans-serif;
+  letter-spacing: 0.2px;
+  transition: border-color 140ms ease, color 140ms ease, background 140ms ease;
+}
+
+.inspector-preset:hover,
+.inspector-preset:focus-visible {
+  border-color: var(--room-accent, #79ded8);
+  color: #ffffff;
+}
+
+.inspector-preset.active {
+  border-color: var(--room-accent, #79ded8);
+  background: color-mix(in srgb, var(--room-accent, #79ded8) 16%, transparent);
+  color: #ffffff;
+}
+
+.inspector-axis {
+  display: grid;
+  gap: 4px;
+  color: #9eacc9;
+  font: 500 8px "DM Mono", monospace;
+  letter-spacing: 0.9px;
+}
+
+.inspector-axis b {
+  color: var(--room-accent, #79ded8);
+  font-weight: 700;
+}
+
+.inspector-axis select {
+  width: 100%;
+  padding: 7px 8px;
+  border: 1px solid rgba(148, 173, 210, 0.28);
+  border-radius: 7px;
+  background: rgba(8, 13, 25, 0.92);
+  color: #f4f5f7;
+  font: 500 11px "Space Grotesk", sans-serif;
+}
+
+.inspector-axis select:focus-visible {
+  border-color: var(--room-accent, #79ded8);
+  outline: none;
+}
+
+/* Diagnostic facet pills */
+
+.facet-pill.facet-pill-diagnostic {
+  border-color: rgba(255, 207, 106, 0.35);
+  color: #ffcf6a;
+}
+
+.facet-pill.facet-pill-diagnostic.active {
+  border-color: #ffcf6a;
+  background: rgba(255, 207, 106, 0.14);
+  color: #fff2cf;
+}
+
+/* 9-dot tactile matrix inside the flip compass */
+
+.compass-tactile {
+  display: grid;
+  grid-template-columns: repeat(3, 30px);
+  grid-template-rows: repeat(3, 30px);
+  gap: 4px;
+  margin-bottom: 2px;
+}
+
+.tactile-dot {
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid rgba(138, 144, 158, 0.3);
+  border-radius: 8px;
+  background: rgba(13, 17, 26, 0.92);
+  color: #8b97ab;
+  cursor: pointer;
+  font: 700 9px "DM Mono", monospace;
+  transition: all 130ms ease;
+}
+
+.tactile-dot span {
+  pointer-events: none;
+}
+
+.tactile-dot.is-compound {
+  border-color: rgba(255, 207, 106, 0.55);
+  color: #ffcf6a;
+}
+
+.tactile-dot:hover,
+.tactile-dot:focus-visible {
+  border-color: var(--room-accent, #79ded8);
+  color: #ffffff;
+  transform: translateY(-1px);
+}
+
+@media (max-width: 980px) {
+  .two-axis-inspector {
+    display: none;
+  }
+}
+
+/* Pixel Studio is a daylight room: flip the scene overlay type to dark ink so
+   the welcome block, scene hint and index keep their contrast. */
+.scene-shell[data-room="pixel-studio"] .room-welcome h1,
+.scene-shell[data-room="pixel-studio"] .room-selection strong {
+  color: #0b1524;
+}
+
+.scene-shell[data-room="pixel-studio"] .room-intro {
+  color: #253449;
+}
+
+.scene-shell[data-room="pixel-studio"] .room-kicker,
+.scene-shell[data-room="pixel-studio"] .room-selection-label,
+.scene-shell[data-room="pixel-studio"] .room-state {
+  color: #40516a;
+}
+
+.scene-shell[data-room="pixel-studio"] .scene-hint,
+.scene-shell[data-room="pixel-studio"] .scene-hint .hint-divider,
+.scene-shell[data-room="pixel-studio"] .scene-index {
+  color: #2a3a52;
+}
+
+.scene-shell[data-room="pixel-studio"] .scene-hint .hint-mouse {
+  border-color: rgba(42, 58, 82, 0.7);
+}
+
+.scene-shell[data-room="pixel-studio"] .scene-index .index-line {
+  background: #2a3a52;
+}
+
+/* Secure Now: a room-level panic control and curtain that never stops a guest. */
+
+.secure-pill {
+  position: absolute;
+  z-index: 6;
+  bottom: 22px;
+  left: 50%;
+  padding: 9px 16px;
+  border: 1px solid rgba(255, 207, 106, 0.42);
+  border-radius: 999px;
+  background: rgba(9, 13, 22, 0.82);
+  color: #ffcf6a;
+  cursor: pointer;
+  font: 700 9.5px "DM Mono", monospace;
+  letter-spacing: 1.4px;
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  transform: translateX(-50%);
+  transition: border-color 140ms ease, background 140ms ease, color 140ms ease;
+}
+
+.secure-pill:hover,
+.secure-pill:focus-visible {
+  border-color: rgba(255, 207, 106, 0.8);
+  color: #fff4d8;
+}
+
+.secure-pill.active {
+  border-color: rgba(255, 207, 106, 0.85);
+  background: rgba(255, 207, 106, 0.16);
+  color: #fff4d8;
+}
+
+.scene-shell.room-secured .scene::before {
+  position: absolute;
+  z-index: 3;
+  bottom: 72px;
+  left: 50%;
+  padding: 6px 13px;
+  border: 1px solid rgba(255, 207, 106, 0.48);
+  border-radius: 999px;
+  background: rgba(7, 11, 20, 0.86);
+  color: #ffcf6a;
+  content: "ROOM SECURED · LIVE DISPLAYS HIDDEN";
+  font: 700 9.5px "DM Mono", monospace;
+  letter-spacing: 1.5px;
+  pointer-events: none;
+  transform: translateX(-50%);
+}
+
+.scene-shell.room-secured .scene::after {
+  background:
+    repeating-linear-gradient(180deg, rgba(2, 5, 12, 0.16) 0 1px, transparent 1px 4px),
+    radial-gradient(118% 76% at 50% 46%, rgba(4, 7, 15, 0.3) 40%, rgba(4, 7, 15, 0.72) 100%),
+    linear-gradient(180deg, rgba(4, 7, 15, 0.5), transparent 22%, transparent 74%, rgba(4, 7, 15, 0.55));
 }
