@@ -147,6 +147,20 @@ const TOOLS = [
       required: ["cardId"],
     },
   },
+  {
+    name: "guest_report_task",
+    description: "Publish a structured task handoff summary (goal, summary, exitCode) onto a card for the human operator.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        cardId: { type: "string" },
+        goal: { type: "string" },
+        summary: { type: "string" },
+        exitCode: { type: "number", default: 0 },
+      },
+      required: ["cardId", "summary"],
+    },
+  },
 ];
 
 async function callGuestApi(pathname, method = "GET", body = undefined) {
@@ -259,6 +273,15 @@ export async function handleMcpRequest(request) {
             cardId: args.cardId,
             hostPath: args.hostPath ?? "",
             readOnly: args.readOnly !== false,
+          });
+          break;
+        case "guest_report_task":
+          data = await callGuestApi("/api/guest/task-report", "POST", {
+            cardId: args.cardId,
+            goal: args.goal ?? "",
+            summary: args.summary ?? "",
+            exitCode: args.exitCode ?? 0,
+            actor: "mcp-agent",
           });
           break;
         default:

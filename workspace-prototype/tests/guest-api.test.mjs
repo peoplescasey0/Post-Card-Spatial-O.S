@@ -748,4 +748,19 @@ test("exposes action journal, disk usage ledger, SSH key provisioning, and MCP t
   const butlerPayload = await butlerRes.json();
   assert.equal(butlerPayload.ok, true);
   assert.equal(butlerPayload.model, "qwen2.5-coder:1.5b");
+
+  const reportRes = await fetch(`${baseUrl}/api/guest/task-report`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      cardId: "linux",
+      goal: "Run unit tests",
+      summary: "All 353 tests passed.",
+      exitCode: 0,
+      actor: "mcp-agent",
+    }),
+  });
+  assert.equal(reportRes.status, 200);
+  const reportPayload = await reportRes.json();
+  assert.equal(reportPayload.taskReports.linux.summary, "All 353 tests passed.");
 });

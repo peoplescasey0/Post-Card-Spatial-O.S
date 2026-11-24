@@ -814,6 +814,7 @@ export function createGuestApi(options = {}) {
   const actionJournalPath = path.join(dataDirectory, "action-journal.json");
   const sshKeysPath = path.join(dataDirectory, "ssh-keys.json");
   const sharedFoldersPath = path.join(dataDirectory, "shared-folders.json");
+  const taskReportsPath = path.join(dataDirectory, "task-reports.json");
   const androidIsoPath = process.env.POSTCARD_ANDROID_ISO
     ? path.resolve(process.env.POSTCARD_ANDROID_ISO)
     : path.join(projectDirectory, "archive", "guest-vm-setup", "android-x86_64.iso");
@@ -946,6 +947,37 @@ export function createGuestApi(options = {}) {
 
   async function readSharedFolders() {
     return readJsonSafe(sharedFoldersPath, {});
+  }
+
+  async function readTaskReports() {
+    return readJsonSafe(taskReportsPath, {});
+  }
+
+  async function reportCardTask({ cardId, goal = "", summary = "", exitCode = 0, actor = "agent" }) {
+    if (typeof cardId !== "string" || !/^[a-z0-9][a-z0-9_-]{0,63}$/.test(cardId)) {
+      throw new GuestApiError(400, "cardId must be a lowercase card identifier.");
+    }
+    const cleanSummary = typeof summary === "string" ? summary.trim().slice(0, 400) : "";
+    if (!cleanSummary) {
+      throw new GuestApiError(400, "summary is required.");
+    }
+    const reports = await readTaskReports();
+    reports[cardId] = {
+      goal: typeof goal === "string" ? goal.trim().slice(0, 160) : "",
+      summary: cleanSummary,
+      exitCode: Number.isFinite(Number(exitCode)) ? Number(exitCode) : 0,
+      actor: typeof actor === "string" && actor.trim() ? actor.trim().slice(0, 32) : "agent",
+      updatedAt: new Date().toISOString(),
+    };
+    await writeJsonAtomic(taskReportsPath, reports);
+    await appendJournalEntry({
+      actor: reports[cardId].actor,
+      action: "task-report",
+      cardId,
+      outcome: reports[cardId].exitCode === 0 ? "ok" : `exit-${reports[cardId].exitCode}`,
+      detail: reports[cardId].goal || cleanSummary.slice(0, 80),
+    });
+    return status();
   }
 
   async function setSharedFolder({ cardId, hostPath = "", readOnly = true }) {
@@ -1746,6 +1778,7 @@ export function createGuestApi(options = {}) {
       cpuProfiles: await readCpuProfiles(),
       customIsos: await readCustomIsos(),
       sharedFolders: await readSharedFolders(),
+      taskReports: await readTaskReports(),
       cpuCapacity: availableParallelism(),
       maxConcurrentGuests: MAX_CONCURRENT_GUESTS,
       lockdownActive,
@@ -3411,6 +3444,17 @@ export function createGuestApi(options = {}) {
           cardId: body?.cardId,
           hostPath: body?.hostPath ?? "",
           readOnly: body?.readOnly !== false,
+        }));
+        return;
+      }
+      if (request.method === "POST" && url.pathname === "/api/guest/task-report") {
+        const body = await readJson(request);
+        sendJson(response, 200, await reportCardTask({
+          cardId: body?.cardId,
+          goal: body?.goal ?? "",
+          summary: body?.summary ?? "",
+          exitCode: body?.exitCode ?? 0,
+          actor: body?.actor ?? "agent",
         }));
         return;
       }

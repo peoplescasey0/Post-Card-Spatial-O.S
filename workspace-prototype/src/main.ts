@@ -143,6 +143,7 @@ type GuestServiceStatus = {
   memoryProfiles?: Record<string, "eco" | "balanced" | "performance">;
   cpuProfiles?: Record<string, CpuProfile>;
   customIsos?: Record<string, string>;
+  taskReports?: Record<string, { goal?: string; summary: string; exitCode: number; actor: string; updatedAt: string }>;
   cpuCapacity?: number;
   aiResult?: AiCommandResult;
   swarmResult?: { sourceCardId: string; os: string; createdCardIds: string[] };
@@ -2227,6 +2228,7 @@ new MutationObserver(() => {
 }).observe(guestDialogElement, { attributes: true, attributeFilter: ["open"] });
 
 window.setInterval(() => {
+  if (document.hidden) return;
   if (!butlerBubble || !butlerBubble.hidden || drag) return;
   const nowMs = performance.now();
   const context = butlerContext();
@@ -2240,6 +2242,7 @@ window.setInterval(() => {
 }, 4000);
 
 window.setInterval(() => {
+  if (document.hidden) return;
   void refreshGuestStatus().catch((error: unknown) => {
     if (guestDialogElement.open) {
       setGuestError(error instanceof Error ? error.message : "The local guest service is unavailable.");
@@ -2248,6 +2251,7 @@ window.setInterval(() => {
 }, 5000);
 
 window.setInterval(() => {
+  if (document.hidden) return;
   if (!guestTargetCardId) return;
   const vncCanvas = guestDisplayElement.querySelector<HTMLCanvasElement>("canvas");
   if (!vncCanvas || vncCanvas.width < 16 || vncCanvas.height < 16) return;
@@ -5208,6 +5212,12 @@ export function applyRoomEnvironment(envId: string): void {
 
   // 5. Cosmic starfield
   starfieldGroup.visible = !!env.showCosmicStarfield;
+
+  if (typeof document !== "undefined") {
+    document.querySelectorAll<HTMLElement>("[data-room-env-id]").forEach((chip) => {
+      chip.setAttribute("aria-checked", String(chip.dataset.roomEnvId === env.id));
+    });
+  }
 }
 
 export const setCardTheme = applyCardTheme;
@@ -5253,13 +5263,29 @@ export function initCardThemePicker(): void {
     });
   });
 
+  const themeToRoomEnv: Record<string, RoomEnvironmentId> = {
+    "pixel-blue": "pixel-studio",
+    "sunset-amber": "sunset-library",
+    "forest-emerald": "forest-emerald",
+    "lavender-mist": "lavender-mist",
+    "obsidian-monochrome": "obsidian-monochrome",
+    cyberpunk: "cyber-mainframe",
+  };
+
   // Also attach delegated click handler on document to ensure chips in dynamically opened pulldowns work
   document.addEventListener("click", (event) => {
+    const roomChip = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-room-env-id]");
+    if (roomChip?.dataset.roomEnvId) {
+      applyRoomEnvironment(roomChip.dataset.roomEnvId);
+      return;
+    }
     const target = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-theme-id]");
     if (!target) return;
     const themeId = target.getAttribute("data-theme-id");
     if (isValidCardThemeId(themeId)) {
       applyCardTheme(themeId);
+      const pairedEnv = themeToRoomEnv[themeId];
+      if (pairedEnv) applyRoomEnvironment(pairedEnv);
     }
   });
 
@@ -8610,9 +8636,43 @@ function initCommercialEditions(): void {
 }
 
 let lastFrameTime = 0;
+let webglContextLost = false;
+let animationFramePending = false;
+
+function scheduleNextFrame(): void {
+  if (animationFramePending || document.hidden || webglContextLost) return;
+  animationFramePending = true;
+  requestAnimationFrame((t) => {
+    animationFramePending = false;
+    animate(t);
+  });
+}
+
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) {
+    lastFrameTime = 0;
+    void refreshGuestStatus().catch(() => undefined);
+    scheduleNextFrame();
+  }
+});
+
+renderer.domElement.addEventListener("webglcontextlost", (event) => {
+  event.preventDefault();
+  webglContextLost = true;
+  showToast("GPU context paused — awaiting restore…");
+});
+
+renderer.domElement.addEventListener("webglcontextrestored", () => {
+  webglContextLost = false;
+  lastFrameTime = 0;
+  renderer.resetState?.();
+  for (const card of cards) refreshCardTexture(card, true);
+  scheduleNextFrame();
+});
 
 function animate(now = 0): void {
-  requestAnimationFrame(animate);
+  if (document.hidden || webglContextLost) return;
+  scheduleNextFrame();
   const dt = lastFrameTime > 0 ? Math.min(0.05, (now - lastFrameTime) / 1000) : 1 / 60;
   lastFrameTime = now;
   if (studioViewElement.hidden) return;
@@ -9028,6 +9088,12 @@ function getPaletteCommands(): PaletteCommand[] {
     { id: "manual", label: "Open User Manual", hint: "?", run: () => { if (helpDialog && !helpDialog.open) helpDialog.showModal(); } },
     { id: "journal", label: "Open Action Journal", hint: "Audit", run: () => { void openActionJournalDialog(); } },
     { id: "deck", label: "Open Flat Deck, Disk Ledger & Readiness", hint: "Access", run: () => { void openInstrumentDialog(); } },
+    { id: "room-pixel", label: "Room · Pixel Studio", hint: "3D Environment", run: () => applyRoomEnvironment("pixel-studio") },
+    { id: "room-sunset", label: "Room · Sunset Amber Library", hint: "3D Environment", run: () => applyRoomEnvironment("sunset-library") },
+    { id: "room-forest", label: "Room · Forest Emerald", hint: "3D Environment", run: () => applyRoomEnvironment("forest-emerald") },
+    { id: "room-lavender", label: "Room · Lavender Mist", hint: "3D Environment", run: () => applyRoomEnvironment("lavender-mist") },
+    { id: "room-obsidian", label: "Room · Obsidian Monochrome", hint: "3D Environment", run: () => applyRoomEnvironment("obsidian-monochrome") },
+    { id: "room-cyber", label: "Room · Cyber Mainframe", hint: "3D Environment", run: () => applyRoomEnvironment("cyber-mainframe") },
     { id: "home", label: "Return to Workspace Home", hint: "H", run: () => showHome() },
   );
   for (const card of cards) {
@@ -9243,6 +9309,7 @@ async function refreshInstrumentDialog(): Promise<void> {
     instrumentCardList.replaceChildren();
     for (const card of cards) {
       const guest = guestServiceStatus?.guests.find((g) => g.cardId === card.id);
+      const report = guestServiceStatus?.taskReports?.[card.id];
       const li = document.createElement("li");
       li.className = "bin-card-entry";
       const left = document.createElement("div");
@@ -9250,7 +9317,7 @@ async function refreshInstrumentDialog(): Promise<void> {
       title.textContent = `${card.name} (${card.os})`;
       const meta = document.createElement("small");
       meta.style.display = "block";
-      meta.textContent = `${guest?.status ?? "offline"}${guest?.sshPort ? ` · SSH 127.0.0.1:${guest.sshPort}` : ""}`;
+      meta.textContent = `${guest?.status ?? "offline"}${guest?.sshPort ? ` · SSH 127.0.0.1:${guest.sshPort}` : ""}${report ? ` · [${report.actor} exit ${report.exitCode}] ${report.summary}` : ""}`;
       left.append(title, meta);
 
       const actions = document.createElement("div");
