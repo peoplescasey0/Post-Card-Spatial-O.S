@@ -4795,6 +4795,7 @@ function selectCard(card: SystemCard, withAnticipation = false): void {
 
   selectedIndex = targetIndex;
   selectedCard = card;
+  persistSessionState();
   refreshPrivateGuestPreview(previousCard, card);
   for (const item of cards) item.layoutOffset.set(0, 0, 0);
   updateGuestActionButton();
@@ -8960,7 +8961,8 @@ function renderCommandPalette(query: string): void {
   paletteFiltered = q
     ? all.filter((c) => c.label.toLowerCase().includes(q) || c.hint.toLowerCase().includes(q))
     : all;
-  paletteSelectedIndex = Math.min(paletteSelectedIndex, Math.max(0, paletteFiltered.length - 1));
+  const visibleCount = Math.min(12, paletteFiltered.length);
+  paletteSelectedIndex = Math.min(paletteSelectedIndex, Math.max(0, visibleCount - 1));
   commandPaletteList.replaceChildren();
   if (paletteFiltered.length === 0) {
     const empty = document.createElement("li");

@@ -887,28 +887,50 @@ export function createGuestApi(options = {}) {
   }
 
   let registryMutationQueue = Promise.resolve();
+  let journalMutationQueue = Promise.resolve();
+
+  function assertNotLockedDown(actionLabel) {
+    if (lockdownActive) {
+      throw new GuestApiError(423, `Room is in Lockdown; ${actionLabel} is blocked.`);
+    }
+  }
+
+  function findGuest(cardId, os = "") {
+    if (os) {
+      const exact = guests.get(guestKey(os, cardId));
+      if (exact) return exact;
+    }
+    for (const guest of guests.values()) {
+      if (guest.cardId === cardId) return guest;
+    }
+    return undefined;
+  }
 
   async function readJournal() {
     return readJsonSafe(actionJournalPath, [], { expectArray: true });
   }
 
-  async function appendJournalEntry({ actor = "user", action, cardId = "", os = "", outcome = "ok", detail = "" }) {
-    try {
-      const entries = await readJournal();
-      entries.push({
-        id: randomUUID(),
-        at: new Date().toISOString(),
-        actor,
-        action,
-        cardId,
-        os,
-        outcome,
-        detail,
-      });
-      await writeJsonAtomic(actionJournalPath, entries.slice(-200));
-    } catch {
-      // Never fail a guest operation because journal persistence failed.
-    }
+  function appendJournalEntry({ actor = "user", action, cardId = "", os = "", outcome = "ok", detail = "" }) {
+    const run = journalMutationQueue.then(async () => {
+      try {
+        const entries = await readJournal();
+        entries.push({
+          id: randomUUID(),
+          at: new Date().toISOString(),
+          actor,
+          action,
+          cardId,
+          os,
+          outcome,
+          detail,
+        });
+        await writeJsonAtomic(actionJournalPath, entries.slice(-200));
+      } catch {
+        // Never fail a guest operation because journal persistence failed.
+      }
+    });
+    journalMutationQueue = run.catch(() => undefined);
+    return run;
   }
 
   async function readSshKeys() {
@@ -1963,7 +1985,7 @@ export function createGuestApi(options = {}) {
         }
         const ports = await reservePorts(guest);
         const cardDropDir = path.join(paperPlanesDropDir, cardId);
-        await provisionDropDirFiles(cardDropDir, cardId, os, effectiveBootMode);
+        await provisionDropDirFiles(cardDropDir, cardId, os, bootMode);
         const networkMode = (await readNetworkModes())[cardId] ?? "nat";
         args = qemuArguments({
           bootMode,
@@ -2008,7 +2030,7 @@ export function createGuestApi(options = {}) {
           : path.join(overlayDirectory, `${cardId}.qcow2`);
         const ports = await reservePorts(guest);
         const cardDropDir = path.join(paperPlanesDropDir, cardId);
-        await provisionDropDirFiles(cardDropDir, cardId, os, effectiveBootMode);
+        await provisionDropDirFiles(cardDropDir, cardId, os, bootMode);
         const networkMode = (await readNetworkModes())[cardId] ?? "nat";
         const isKernelGuest = os === "kernel";
         const kernelPath = isKernelGuest && existsSync(postcardKernelPath) ? postcardKernelPath : "";
@@ -2477,6 +2499,11 @@ export function createGuestApi(options = {}) {
         throw new GuestApiError(409, "Shut down the card before cloning its disk.");
       }
     }
+    const copyDiskWithSpaceCheck = async (srcPath, dstPath, targetDir) => {
+      const srcStat = await stat(srcPath);
+      await assertFreeDiskSpace(targetDir, srcStat.size);
+      await copyFile(srcPath, dstPath, fsConstants.COPYFILE_EXCL);
+    };
     if (os === WINDOWS_OS) {
       const srcDisk = path.join(windowsDiskDirectory, `${sourceCardId}.qcow2`);
       const dstDisk = path.join(windowsDiskDirectory, `${targetCardId}.qcow2`);
@@ -2484,9 +2511,7 @@ export function createGuestApi(options = {}) {
         throw new GuestApiError(409, "Target Windows card already has a disk.");
       }
       if (existsSync(srcDisk)) {
-        const srcStat = await stat(srcDisk);
-        await assertFreeDiskSpace(windowsDiskDirectory, srcStat.size);
-        await copyFile(srcDisk, dstDisk, fsConstants.COPYFILE_EXCL);
+        await copyDiskWithSpaceCheck(srcDisk, dstDisk, windowsDiskDirectory);
       }
     } else if (os === ANDROID_OS) {
       const srcDisk = path.join(androidDirectory, `${sourceCardId}.qcow2`);
@@ -2495,9 +2520,7 @@ export function createGuestApi(options = {}) {
         throw new GuestApiError(409, "Target Android card already has a disk.");
       }
       if (existsSync(srcDisk)) {
-        const srcStat = await stat(srcDisk);
-        await assertFreeDiskSpace(androidDirectory, srcStat.size);
-        await copyFile(srcDisk, dstDisk, fsConstants.COPYFILE_EXCL);
+        await copyDiskWithSpaceCheck(srcDisk, dstDisk, androidDirectory);
       }
     } else {
       const srcOverlay = path.join(overlayDirectory, `${sourceCardId}.qcow2`);
@@ -2506,8 +2529,7 @@ export function createGuestApi(options = {}) {
         throw new GuestApiError(409, "Target Linux card already has a disk overlay.");
       }
       if (existsSync(srcOverlay)) {
-        await mkdir(overlayDirectory, { recursive: true });
-        await copyFile(srcOverlay, dstOverlay, fsConstants.COPYFILE_EXCL);
+        await copyDiskWithSpaceCheck(srcOverlay, dstOverlay, overlayDirectory);
       } else if (await isBaseReady()) {
         await createOverlayIfNeeded(baseDiskPath, dstOverlay, qemuImgPath);
       }
@@ -2524,6 +2546,18 @@ export function createGuestApi(options = {}) {
     await writeJsonAtomic(paperPlanesPath, trimmed);
   }
 
+  function assertSafeRemoteHost(hostname) {
+    const clean = String(hostname || "").toLowerCase().replace(/^\[|\]$/g, "");
+    if (
+      !clean ||
+      clean === "0.0.0.0" ||
+      clean === "169.254.169.254" ||
+      clean.startsWith("169.254.")
+    ) {
+      throw new GuestApiError(403, `Remote delivery to link-local or unspecified address (${clean}) is blocked.`);
+    }
+  }
+
   async function deliverToRemoteComputer(remoteTarget, payload) {
     const raw = typeof remoteTarget === "string" ? remoteTarget.trim() : "";
     if (!raw) return { delivered: false, info: "" };
@@ -2534,6 +2568,7 @@ export function createGuestApi(options = {}) {
     if (raw.startsWith("tcp://")) {
       const parsed = new URL(raw);
       const host = parsed.hostname;
+      assertSafeRemoteHost(host);
       const port = Number(parsed.port);
       if (!host || !Number.isInteger(port) || port < 1 || port > 65535) {
         throw new GuestApiError(400, "tcp:// remoteTarget must include a valid host and port.");
@@ -2569,6 +2604,7 @@ export function createGuestApi(options = {}) {
         "remoteTarget must be a valid HTTP(S) URL, host:port, or tcp://host:port.",
       );
     }
+    assertSafeRemoteHost(parsedUrl.hostname);
     if (parsedUrl.pathname === "/" || parsedUrl.pathname === "") {
       parsedUrl.pathname = "/api/guest/paper-plane/inbox";
     }
@@ -2603,9 +2639,7 @@ export function createGuestApi(options = {}) {
     remoteTarget = "",
     injectToVm = true,
   }) {
-    if (lockdownActive) {
-      throw new GuestApiError(423, "Room is in Lockdown; paper-plane delivery is blocked.");
-    }
+    assertNotLockedDown("paper-plane delivery");
     if (typeof fromCardId !== "string" || !/^[a-z0-9][a-z0-9_-]{0,63}$/.test(fromCardId)) {
       throw new GuestApiError(400, "fromCardId must be a lowercase card identifier.");
     }
@@ -2982,9 +3016,7 @@ export function createGuestApi(options = {}) {
     remoteTarget = "",
     autoDispatch = true,
   }) {
-    if (lockdownActive) {
-      throw new GuestApiError(423, "Room is in Lockdown; AI command injection is blocked.");
-    }
+    assertNotLockedDown("AI command injection");
     if (typeof prompt !== "string" || prompt.trim().length === 0 || prompt.length > 160) {
       throw new GuestApiError(400, "prompt must be a non-empty string up to 160 characters.");
     }
@@ -3202,6 +3234,7 @@ export function createGuestApi(options = {}) {
   }
 
   async function serialExec({ cardId = "linux", os = LINUX_OS, command }) {
+    assertNotLockedDown("serial command execution");
     if (typeof cardId !== "string" || !/^[a-z0-9][a-z0-9_-]{0,63}$/.test(cardId)) {
       throw new GuestApiError(400, "cardId must be a lowercase card identifier.");
     }
@@ -3305,7 +3338,8 @@ export function createGuestApi(options = {}) {
       }
       if (request.method === "GET" && url.pathname === "/api/guest/stderr") {
         const targetCardId = url.searchParams.get("cardId") ?? "";
-        const targetGuest = guests.get(targetCardId);
+        const targetOs = url.searchParams.get("os") ?? "";
+        const targetGuest = findGuest(targetCardId, targetOs);
         sendJson(response, 200, {
           cardId: targetCardId,
           stderr: targetGuest?.stderr ?? "",

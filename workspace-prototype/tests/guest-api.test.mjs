@@ -640,6 +640,13 @@ test("lockdown airgaps cards and blocks ai-command and paper-plane until unlocke
   });
   assert.equal(planeRes.status, 423);
 
+  const serialRes = await fetch(`${baseUrl}/api/guest/serial-exec`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ cardId: "linux", os: "linux", command: "id" }),
+  });
+  assert.equal(serialRes.status, 423);
+
   const unlockRes = await fetch(`${baseUrl}/api/guest/lockdown`, {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -648,6 +655,18 @@ test("lockdown airgaps cards and blocks ai-command and paper-plane until unlocke
   assert.equal(unlockRes.status, 200);
   const unlockPayload = await unlockRes.json();
   assert.equal(unlockPayload.lockdownActive, false);
+
+  const ssrfRes = await fetch(`${baseUrl}/api/guest/paper-plane`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      fromCardId: "linux",
+      toCardId: "windows",
+      message: "probe",
+      remoteTarget: "http://169.254.169.254/latest/meta-data/",
+    }),
+  });
+  assert.equal(ssrfRes.status, 403);
 
   const stopAllRes = await fetch(`${baseUrl}/api/guest/stop-all`, {
     method: "POST",
