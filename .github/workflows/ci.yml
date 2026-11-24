@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend:
+    name: workspace-prototype (285 tests + build)
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: workspace-prototype
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: workspace-prototype/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Test
+        run: node --test
+
+      - name: Typecheck and build
+        run: npm run build
+
+  # Non-blocking until it is green on a clean runner. Flip continue-on-error to
+  # false the moment it passes; a check that never blocks is decoration.
+  kernel:
+    name: kernel (cargo check, non-blocking)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    defaults:
+      run:
+        working-directory: kernel
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install target toolchain
+        run: |
+          rustup toolchain install nightly --profile minimal
+          rustup target add x86_64-unknown-none --toolchain nightly
+
+      - name: cargo check
+        run: cargo +nightly check --target x86_64-unknown-none
+
+  # 07 QA owns this: validate that everything emitted matches handoff/contracts/.
+  # Enable once the contract validators exist.
+  # contracts:
+  #   name: contracts
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - uses: actions/setup-node@v4
+  #       with: { node-version: "22" }
+  #     - run: npx ajv-cli validate -s handoff/contracts/*.json -d "fixtures/**/*.json"

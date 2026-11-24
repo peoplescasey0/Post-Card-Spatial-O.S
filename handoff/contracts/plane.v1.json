@@ -1,0 +1,245 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://postcard.os/contracts/plane.v1.json",
+  "title": "Paper Plane packet v1.2 (DRAFT)",
+  "description": "Tender/cargo split. A small tender carries the manifest and the offers; the bytes travel by whichever method the RECEIVER chooses. A tender may also name a hold: a place where the cargo waits, independent of the card that sent it, so the sender can go away. v1 delivery is same-host; the hold is what makes cross-host possible.",
+  "oneOf": [
+    { "$ref": "#/$defs/tender" },
+    { "$ref": "#/$defs/cargo" }
+  ],
+  "$defs": {
+    "common": {
+      "type": "object",
+      "required": ["v", "id", "from", "to", "createdAt", "ttlSec"],
+      "properties": {
+        "v": { "const": 1 },
+        "id": { "type": "string", "description": "UUIDv4 from the sender. Idempotency key for the whole transfer." },
+        "from": { "type": "string", "description": "Sender card id (routing only, never identity)." },
+        "to": { "type": "string", "description": "Recipient card id (routing only, never identity)." },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "ttlSec": {
+          "type": "integer", "minimum": 3600, "maximum": 259200,
+          "description": "Tender/metadata shelf life. Default 259200 (72h), floor 172800 (48h). The cargo token may never outlive this."
+        },
+        "capabilities": {
+          "type": "array",
+          "items": { "enum": ["send_logs", "open_git", "drop_file", "inject_vm", "adopt_card", "burn"] },
+          "description": "Enforced at receive time, before the payload is opened."
+        }
+      }
+    },
+
+    "tender": {
+      "allOf": [{ "$ref": "#/$defs/common" }],
+      "type": "object",
+      "required": ["class", "manifest", "offers", "sig"],
+      "properties": {
+        "class": { "const": "tender" },
+        "manifest": {
+          "type": "object",
+          "required": ["bytes", "chunks", "sha256"],
+          "additionalProperties": false,
+          "properties": {
+            "bytes": { "type": "integer", "minimum": 0 },
+            "chunks": { "type": "integer", "minimum": 1 },
+            "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$", "description": "Hash of the bytes AS TRANSPORTED, i.e. ciphertext. A relay can verify it without holding the key, which is the point." },
+            "plaintextSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$", "description": "Optional. Hash of the bytes after decryption, so the receiver can prove the plaintext is intact. Never trusted by the relay." },
+            "cipher": { "enum": ["aes-256-gcm"], "default": "aes-256-gcm" },
+            "quotaClass": { "enum": ["note", "payload", "guest"], "default": "payload" }
+          }
+        },
+        "offers": {
+          "type": "array", "minItems": 1,
+          "description": "Ordered by sender preference. The RECEIVER picks exactly one; it is the only party that knows its free space and whether a guest is running.",
+          "items": {
+            "type": "object",
+            "required": ["method"],
+            "properties": {
+              "method": { "enum": ["clone", "push", "guest-fetch", "pull-http", "swarm"] },
+              "endpoint": { "type": "string", "description": "guest-fetch / pull-http only. Loopback or relay URL." },
+              "token": {
+                "type": "object",
+                "required": ["value", "expiresAt", "oneTime", "boundTo"],
+                "properties": {
+                  "value": { "type": "string", "description": "Opaque capability token. Never a bearer secret in a URL that can be logged unhashed." },
+                  "expiresAt": { "type": "string", "format": "date-time" },
+                  "oneTime": { "const": true },
+                  "boundTo": {
+                    "type": "object",
+                    "required": ["planeId", "recipientKeyId", "method"],
+                    "properties": {
+                      "planeId": { "type": "string" },
+                      "recipientKeyId": { "type": "string" },
+                      "method": { "type": "string" }
+                    }
+                  }
+                }
+              },
+              "peers": { "type": "array", "items": { "type": "string" }, "description": "swarm only." }
+            }
+          }
+        },
+        "chosen": {
+          "type": "string",
+          "enum": ["clone", "push", "guest-fetch", "pull-http", "swarm"],
+          "description": "Set by the receiver in its reply. Absent until the receiver answers."
+        },
+        "keyWrap": {
+          "type": "object",
+          "description": "Required whenever cipher is set. The content key, wrapped for the recipient only. Without this a relay can read every plane it holds, which makes 'encrypted' decorative.",
+          "required": ["alg", "recipientKeyId", "senderEphemeralPublicKey", "wrappedKey", "nonce"],
+          "properties": {
+            "alg": { "const": "x25519-hkdf-sha256-aes256kw" },
+            "recipientKeyId": { "type": "string" },
+            "senderEphemeralPublicKey": { "type": "string", "description": "Per-transfer X25519 public key. Never reused." },
+            "wrappedKey": { "type": "string", "description": "Content key encrypted under the ECDH-derived KEK." },
+            "nonce": { "type": "string" }
+          }
+        },
+        "hold": {
+          "type": "object",
+          "description": "Optional. Where the cargo waits so the sender's card can close. A hold is not a delivery method and not an inbox: it is staging with a lease. Ownership stays with the sender until the receiver fetches.",
+          "required": ["kind", "state", "holdExpiresAt"],
+          "properties": {
+            "kind": {
+              "enum": ["host", "relay"],
+              "description": "host = this machine's data dir, card-independent. relay = a provider (Supabase). Only relay survives the sender's machine going away."
+            },
+            "state": {
+              "enum": ["staged", "held", "leased", "released", "failed", "expired", "purged"],
+              "description": "staged = upload in flight, not yet trusted. held = complete, hash-verified, pending pickup. leased = a client has claimed it and the visibility lease is running. released = the receiver ACKed; the sender now holds a receipt. failed = retries exhausted. expired = past deadline, awaiting purge. purged = bytes confirmed gone."
+            },
+            "holdExpiresAt": {
+              "type": "string",
+              "format": "date-time",
+              "description": "Replaces the old senderAvailableUntil idea: availability is a property of the hold, not of the sender being awake. Never later than tender.createdAt + ttlSec."
+            },
+            "ref": {
+              "type": "object",
+              "description": "Opaque locator. Useless without a token; safe to log.",
+              "properties": {
+                "provider": { "type": "string" },
+                "bucket": { "type": "string" },
+                "objectPath": { "type": "string" }
+              }
+            },
+            "maxFetchBytes": {
+              "type": "integer",
+              "description": "Transport ceiling for one fetch, if the provider caps file size. A hold that exceeds it is refused at stage time, never half-delivered."
+            }
+          }
+        },
+        "sig": {
+          "type": "object",
+          "required": ["alg", "senderKeyId", "value"],
+          "properties": {
+            "alg": { "const": "ed25519" },
+            "senderKeyId": { "type": "string" },
+            "value": { "type": "string" }
+          }
+        }
+      }
+    },
+
+    "cargo": {
+      "allOf": [{ "$ref": "#/$defs/common" }],
+      "type": "object",
+      "required": ["class", "payload", "sig"],
+      "properties": {
+        "class": { "const": "cargo" },
+        "tenderId": { "type": "string", "description": "The tender that authorised this cargo." },
+        "payload": {
+          "type": "object",
+          "required": ["encoding", "sha256", "bytes"],
+          "properties": {
+            "encoding": { "enum": ["base64", "chunk", "chunked-ref"] },
+            "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+            "bytes": { "type": "integer" },
+            "cipher": { "enum": ["aes-256-gcm"] },
+            "nonce": { "type": "string" },
+            "seq": { "type": "integer", "minimum": 0, "description": "chunk only." },
+            "total": { "type": "integer", "minimum": 1, "description": "chunk only." },
+            "data": { "type": "string" }
+          }
+        },
+        "sig": { "type": "object" },
+        "receipt": {
+          "type": "object",
+          "required": ["at", "recipientKeyId", "value"],
+          "properties": {
+            "at": { "type": "string", "format": "date-time" },
+            "recipientKeyId": { "type": "string" },
+            "value": { "type": "string", "description": "Recipient signature over sha256(payload) + plane id." }
+          }
+        }
+      }
+    }
+  },
+
+  "x-token-policy": {
+    "defaultShelfLifeHours": 72,
+    "minShelfLifeHours": 48,
+    "maxShelfLifeHours": 72,
+    "rule": "token.expiresAt <= tender.createdAt + ttlSec. A token may never outlive the tender that issued it.",
+    "floorIsCapNotFloor": "The 48h minimum is a preferred duration, not a guarantee: a tender with ttlSec under 48h cannot issue a 48h token. Compute token.expiresAt = min(issuedAt + 48h, tender.expiresAt). Do not reject a short tender because it cannot reach the floor.",
+    "longTransfers": "If a transfer can outlive the token, the receiver asks for a fresh token before expiry and the old one is burned. Rotation is per-chunk-batch, not per-byte.",
+    "enforcement": "Server-side only. A hidden client button is not expiry.",
+    "onExpiry": "Purge the cargo bytes, not just the index row. Expired means gone from disk.",
+    "clockSkew": "Allow 120s skew. Reject anything beyond that.",
+    "replay": "One-time: consume the token on first successful open, then burn it even if the hash check fails.",
+    "neverASignedUrl": "The plane token is never a provider signed URL. Signed URLs generally cannot be revoked individually, so shelf life and burn-on-failure cannot be enforced through them. Validate the token first, then mint a transport URL with a 60-300s life.",
+    "atRest": "Store a hash of the token, never the token. A table dump must not be replayable."
+  },
+
+  "x-relay": {
+    "why": "A held cargo outlives the card because the bytes sit with a provider, not on a card. This is the only thing that makes a sender closing their laptop harmless.",
+    "provider": "supabase",
+    "mapping": {
+      "tender": "public.plane_holds.tender (jsonb, ~2 KB)",
+      "cargo": "storage bucket 'plane-holds', object path keyed by plane id",
+      "token": "public.plane_tokens, sha256 only",
+      "receipt": "public.plane_receipts"
+    },
+    "keyedBy": "plane id, never card id. Deleting a card must never destroy a held plane.",
+    "confidentiality": "The relay stores ciphertext only. It never holds a content key, so a provider breach leaks chunk sizes and timing, not planes. The recipient key arrives as tender.keyWrap; without it the hold is not end-to-end encrypted and must not be described as such.",
+    "hashScope": "manifest.sha256 covers the transported (encrypted) bytes, so the relay can verify integrity without a key. plaintextSha256 is the receiver's own post-decrypt check.",
+    "expiry": "mark_expired_holds() marks; a janitor purges through the Storage API. Deleting the storage row directly orphans the file and keeps billing it.",
+    "limitsAsOf": "2026-11-18, free plan: 50 MiB per file, 1 GB total, project paused after ~7 days idle. Pro: 500 GB per file, 100 GB included, never paused.",
+    "honesty": "A free-tier relay is fine for tenders and for files up to 50 MiB. It cannot carry a guest. Do not advertise guest transfer over a relay until the plan and the upload path both exist."
+  },
+
+  "x-landing-events": {
+    "landed": "Transport: bytes are on the receiver's side, fsynced, hash-verified. The sender is allowed to know this.",
+    "taken": "Receiver: the guest, an app, or the user did something with it. The sender does NOT get to know this unless the receiver chooses to sign a receipt."
+  },
+
+  "x-store-and-forward": {
+    "why": "The only delivery model where neither end has to be awake at the same time. The sender writes once and is done; the receiver converges whenever it next connects. Everything else in this contract is an optimisation on top of it.",
+    "roles": {
+      "mailbox": "The database. Holds every sent plane until it is ACKed, plus history after.",
+      "client": "A PC. Pulls, writes locally, fsyncs, then ACKs."
+    },
+    "states": {
+      "held": "pending — fetchable, nobody has claimed it",
+      "leased": "claimed by a client, visibility lease running",
+      "released": "delivered — receiver ACKed a receipt",
+      "failed": "attempts exhausted; needs a human"
+    },
+    "ackOrder": "Write locally, fsync, then ACK. Never the reverse. ACK-then-crash loses the plane; write-then-crash only duplicates it, and the receiver dedupes on plane id.",
+    "ordering": "A server-side monotonic sequence, never a timestamp. Timestamps collide within a millisecond, jump on clock steps, and cannot be a cursor.",
+    "recovery": "An expired lease makes a row eligible again. A client that dies mid-fetch strands nothing and cleans up nothing.",
+    "retention": "Delivered rows keep metadata so history stays readable; bytes purge after the retention window. On a 1 GB store, 'never delete' is a wish.",
+    "pushIsOptional": "Polling is the baseline and must converge on its own. WebSocket or LISTEN/NOTIFY only lowers latency; it is never required for correctness.",
+    "mapsTo": "handoff/relay/002_mailbox.sql"
+  },
+
+  "x-not-in-v1": [
+    "Deriving key material from card ids. Card ids are public and are never keys.",
+    "Binding trust to a card id. Remote identity belongs to a person: person key -> device key -> ephemeral per-transfer key.",
+    "Silent TOFU for remote senders. First contact needs a visible fingerprint.",
+    "Implying peer-to-peer across machines while delivery is same-host only.",
+    "Relaying guest-sized cargo over the free plan. 12 GiB against a 50 MiB file cap is not a tuning problem.",
+    "Treating 'delivered' as 'read'. Delivery is an ACK that the bytes arrived and were written; whether a human opened them is a separate fact the sender has no right to.",
+    "Deleting a plane on ACK. The bytes may go after the retention window; the record stays, or history and receipts die with it."
+  ]
+}

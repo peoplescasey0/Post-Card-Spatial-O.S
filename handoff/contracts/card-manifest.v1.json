@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://postcard.os/contracts/card-manifest.v1.json",
+  "title": "Post Card OS card manifest v1 (DRAFT)",
+  "description": "The PERSISTED shape of a card. Not the in-memory view model. SystemCard in src/main.ts holds THREE objects and animation state and must never be serialized.",
+  "type": "object",
+  "required": ["schema", "id", "os", "name", "guest"],
+  "additionalProperties": false,
+  "properties": {
+    "schema": { "const": "postcard/card-manifest/v1" },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{2,63}$",
+      "description": "Stable, allocated by POST /api/guest/allocate-card-id. Never derived from user input alone."
+    },
+    "name": { "type": "string", "maxLength": 64 },
+    "os": { "enum": ["linux", "windows", "android", "custom"] },
+    "tier": { "enum": ["community", "pro", "enterprise"], "default": "community" },
+    "clonedFrom": { "type": "string" },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "guest": {
+      "type": "object",
+      "required": ["state"],
+      "additionalProperties": false,
+      "properties": {
+        "state": {
+          "enum": ["absent", "installing", "installed", "running", "stopped", "error"],
+          "description": "Mirrors GuestServiceStatus.state. The only source of truth for lifecycle UI."
+        },
+        "baseImage": { "type": "string", "description": "Golden image path or 'custom-iso'." },
+        "disk": { "type": "string", "description": "Per-card qcow2 path." },
+        "overlay": { "type": "string", "description": "Per-card CoW overlay path (linux/android)." },
+        "uefiVars": { "type": "string", "description": "Windows only: per-card VARS.fd." },
+        "tpm": { "type": "string", "description": "Windows only: per-card swtpm state dir. Part of guest identity; never delete to save space." },
+        "checkpoint": { "type": "string", "description": "Path of the last snapshot, if any." },
+        "memoryMb": { "type": "integer", "minimum": 512, "maximum": 4096, "default": 1024 },
+        "cpuProfile": { "enum": ["eco", "balanced", "gaming"], "default": "balanced" },
+        "networkMode": { "type": "string", "enum": ["user"], "default": "user", "description": "User-mode only. Loopback VNC/QMP must never be exposed." }
+      }
+    },
+    "bin": {
+      "type": "object",
+      "description": "Binned cards keep all guest state. Only permanent delete removes private state, and only after confirmation.",
+      "required": ["binned"],
+      "additionalProperties": false,
+      "properties": {
+        "binned": { "type": "boolean" },
+        "binnedAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "theme": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "default": "classic" },
+        "seedColor": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" }
+      }
+    }
+  }
+}

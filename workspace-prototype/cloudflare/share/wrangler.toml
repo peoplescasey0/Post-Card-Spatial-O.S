@@ -1,0 +1,36 @@
+# Deployable, not deployed. Every value marked REPLACE is filled in by
+# `npm run share:provision` or by hand from the dashboard it prints.
+
+name = "postcard-share"
+main = "worker.mjs"
+compatibility_date = "2026-01-01"
+
+# No `nodejs_compat`: the Worker deliberately uses nothing from Node.
+workers_dev = true
+
+[observability]
+enabled = true
+
+[[r2_buckets]]
+binding = "BUCKET"
+bucket_name = "postcard-planes"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "postcard-share"
+database_id = "REPLACE_WITH_D1_DATABASE_ID"
+
+[triggers]
+# Hourly sweep of expired and revoked links. Correctness is enforced on read;
+# this only stops R2 filling with bytes nobody can reach.
+crons = ["17 * * * *"]
+
+[vars]
+# "size" (default) verifies the byte count; "verify" streams a SHA-256 as the
+# upload passes. "verify" costs CPU that a free Worker does not have.
+HASH_MODE = "size"
+# Verify the hash anyway for uploads at or below this many bytes. 0 = off.
+# Measured: this hasher runs at ~79 MiB/s in V8, so a 10 ms free-tier CPU budget
+# is roughly 700 KB of hashing before the rest of the request is counted. 256 KB
+# keeps a ~3x margin; raise it if you are on a paid plan.
+HASH_LIMIT = "0"

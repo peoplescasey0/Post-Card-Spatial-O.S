@@ -62,13 +62,14 @@ Complete the theming system for Post Card OS to bring card and interface theming
 | explorer_survey_integration | teamwork_explorer | 2D/3D Surface Integration, Controls, Persistence & Tests | completed | d0462fa7-60c6-46f4-8017-9006288052cc |
 | sub_orch_engine | self | Milestone 1: Android Theming Engine (`src/card-themes.ts`) | completed | 450ec46d-fd59-4548-852f-0d8efc3def1d |
 | sub_orch_surface | self | Milestone 2: 2D & 3D Surface Integration (`src/main.ts`, `src/style.css`) | completed | 6e5f5c8b-4dce-44f5-bb4c-54ac626657d9 |
-| sub_orch_controls | self | Milestone 3: Theme Controls & View Persistence (`index.html`, `src/main.ts`) | in-progress | 5cfb2ec6-c703-4bdc-934d-707c7bd0fd8c |
+| sub_orch_controls | self | Milestone 3: Theme Controls & View Persistence (`index.html`, `src/main.ts`) | replaced | 5cfb2ec6-c703-4bdc-934d-707c7bd0fd8c |
+| sub_orch_controls_gen1 | self | Milestone 3 Gen 1: Gate Verification & Sign-off | in-progress | c6b584d0-82f7-4727-bdaa-fbb56d43535e |
 | sub_orch_e2e_testing | self | E2E Testing Track (`tests/android-theming-integration.test.mjs`) | completed | 1c60e980-e2d6-498c-93f4-79b4807912b7 |
 
 ## Succession Status
 - Succession required: no
-- Spawn count: 13 / 16
-- Pending subagents: 5cfb2ec6-c703-4bdc-934d-707c7bd0fd8c
+- Spawn count: 8 / 16
+- Pending subagents: c6b584d0-82f7-4727-bdaa-fbb56d43535e
 - Predecessor: none
 - Successor spawned: not yet spawned
 - Successor generation: none
@@ -76,7 +77,7 @@ Complete the theming system for Post Card OS to bring card and interface theming
 
 ## Active Timers
 - Heartbeat cron: ceaf9aef-9506-4a7f-a2cd-13fd5bb3a5ec/task-105
-- Safety timer: ceaf9aef-9506-4a7f-a2cd-13fd5bb3a5ec/task-393
+- Safety timer: ceaf9aef-9506-4a7f-a2cd-13fd5bb3a5ec/task-579
 - On succession: kill all timers before spawning successor
 - On context truncation: handle timers as step 4 of the State Recovery section of your prompt says
 

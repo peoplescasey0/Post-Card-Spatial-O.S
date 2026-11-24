@@ -1,0 +1,566 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Post Card OS — Planes</title>
+<style>
+  :root{
+    --void:#07090E; --gutter:#0D111A; --surface:#14161B; --surface2:#1E2736;
+    --border:#262A33; --gold:#FFB81C; --text:#F4F5F7; --muted:#8A909E;
+    --danger:#E5484D; --ok:#3DD68C;
+    --mono: ui-monospace, "Cascadia Mono", "SF Mono", Menlo, monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0}
+  body{
+    background:var(--void); color:var(--text);
+    font:14px/1.5 "Segoe UI", Inter, system-ui, sans-serif;
+    overflow:hidden;
+  }
+  .app{
+    display:grid; grid-template-columns:236px 340px 1fr; height:100vh;
+  }
+  /* ---------- rail ---------- */
+  .rail{
+    background:var(--gutter); border-right:1px solid var(--border);
+    display:flex; flex-direction:column; padding:18px 14px; gap:22px;
+  }
+  .brand{display:flex;align-items:center;gap:10px;padding:0 4px}
+  .plate{width:26px;height:26px;border-radius:5px;background:var(--surface2);
+    border:1px solid var(--border);position:relative;overflow:hidden;flex:none}
+  .plate::after{content:"";position:absolute;left:0;right:0;top:50%;height:2px;background:var(--gold)}
+  .brand b{font-size:13px;letter-spacing:.14em;text-transform:uppercase}
+  .brand small{display:block;color:var(--muted);letter-spacing:.08em;font-size:10px;text-transform:uppercase}
+  .folders{display:flex;flex-direction:column;gap:2px}
+  .folder{
+    display:flex;align-items:center;justify-content:space-between;gap:8px;
+    padding:8px 10px;border-radius:6px;color:var(--muted);cursor:pointer;
+    border:1px solid transparent;font-size:13px;
+  }
+  .folder:hover{background:#11141B;color:var(--text)}
+  .folder[aria-current="true"]{background:var(--surface);border-color:var(--border);color:var(--text)}
+  .folder .count{font-family:var(--mono);font-size:11px;color:var(--muted)}
+  .folder[aria-current="true"] .count{color:var(--gold)}
+  .storage{margin-top:auto;border-top:1px solid var(--border);padding-top:14px}
+  .storage .row{display:flex;justify-content:space-between;font-family:var(--mono);font-size:11px;color:var(--muted)}
+  .bar{height:4px;background:#11141B;border-radius:3px;margin:8px 0 6px;overflow:hidden}
+  .bar i{display:block;height:100%;width:12%;background:var(--gold)}
+  .ident{font-family:var(--mono);font-size:10px;color:var(--muted);line-height:1.7}
+  .ident span{color:var(--text)}
+  .mode{
+    margin-top:10px;font-family:var(--mono);font-size:10px;letter-spacing:.06em;
+    color:var(--gold);border:1px solid #4a3a12;background:#1a1508;
+    padding:5px 7px;border-radius:4px;text-align:center;
+  }
+  /* ---------- list ---------- */
+  .list{background:var(--void);border-right:1px solid var(--border);display:flex;flex-direction:column;min-height:0}
+  .list header{
+    display:flex;align-items:center;gap:10px;padding:16px 16px 12px;
+    border-bottom:1px solid var(--border);
+  }
+  .list h1{font-size:15px;margin:0;font-weight:600;letter-spacing:.02em}
+  .list .sub{color:var(--muted);font-size:11px;font-family:var(--mono)}
+  .btn{
+    margin-left:auto;background:var(--gold);color:#12140F;border:0;border-radius:6px;
+    padding:8px 14px;font-weight:650;font-size:12px;letter-spacing:.03em;cursor:pointer;
+  }
+  .btn:hover{filter:brightness(1.06)}
+  .btn.ghost{background:transparent;color:var(--text);border:1px solid var(--border);font-weight:500}
+  .btn.ghost:hover{background:var(--surface)}
+  .btn:disabled{opacity:.45;cursor:default;filter:none}
+  .items{overflow:auto;min-height:0;flex:1}
+  .item{
+    padding:13px 16px;border-bottom:1px solid #151922;cursor:pointer;position:relative;
+  }
+  .item:hover{background:#0C0F15}
+  .item[aria-selected="true"]{background:var(--surface)}
+  .item[aria-selected="true"]::before{
+    content:"";position:absolute;left:0;top:0;bottom:0;width:2px;background:var(--gold);
+  }
+  .item .top{display:flex;justify-content:space-between;gap:8px;align-items:baseline}
+  .item .from{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .item .when{font-family:var(--mono);font-size:10px;color:var(--muted);flex:none}
+  .item .subj{font-size:12.5px;color:#C9CDD6;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .item .meta{display:flex;gap:6px;margin-top:7px;flex-wrap:wrap}
+  .chip{
+    font-family:var(--mono);font-size:9.5px;letter-spacing:.05em;text-transform:uppercase;
+    padding:2px 6px;border-radius:3px;border:1px solid var(--border);color:var(--muted);
+  }
+  .chip.size{color:#C9CDD6}
+  .chip.land{border-color:#2a3a2f;color:var(--ok)}
+  .chip.taken{border-color:#4a3a12;color:var(--gold)}
+  .chip.prog{border-color:#243a4a;color:#59B8E8}
+  /* ---------- reading ---------- */
+  .reading{display:flex;flex-direction:column;min-height:0;background:var(--void)}
+  .empty{margin:auto;text-align:center;color:var(--muted);max-width:300px;line-height:1.7}
+  .empty b{color:var(--text);display:block;margin-bottom:6px;font-size:15px}
+  .doc{padding:26px 30px;overflow:auto}
+  .doc h2{font-size:19px;margin:0 0 6px;letter-spacing:-.01em}
+  .who{display:flex;gap:10px;align-items:center;margin-bottom:18px;flex-wrap:wrap}
+  .avatar{
+    width:30px;height:30px;border-radius:6px;background:var(--surface2);border:1px solid var(--border);
+    display:grid;place-items:center;font-family:var(--mono);font-size:11px;color:var(--gold);flex:none
+  }
+  .who .name{font-size:13px;font-weight:600}
+  .who .addr{font-family:var(--mono);font-size:10.5px;color:var(--muted)}
+  .who .spacer{margin-left:auto}
+  .body{white-space:pre-wrap;color:#D6D9E0;font-size:13.5px;line-height:1.75;border-left:2px solid var(--border);padding-left:14px}
+  .attachments{margin-top:24px;border:1px solid var(--border);border-radius:8px;overflow:hidden}
+  .attachments .head{
+    padding:9px 13px;background:var(--gutter);font-family:var(--mono);font-size:10px;
+    letter-spacing:.08em;text-transform:uppercase;color:var(--muted);display:flex;justify-content:space-between
+  }
+  .att{display:flex;align-items:center;gap:12px;padding:11px 13px;border-top:1px solid #151922}
+  .att .ico{width:26px;height:30px;border:1px solid var(--border);border-radius:3px;display:grid;place-items:center;
+    font-family:var(--mono);font-size:8px;color:var(--muted);background:var(--surface)}
+  .att .nm{font-size:12.5px}
+  .att .sz{font-family:var(--mono);font-size:10.5px;color:var(--muted)}
+  .att .acts{margin-left:auto;display:flex;gap:6px}
+  .att .acts button{
+    font-size:11px;padding:5px 10px;border-radius:5px;cursor:pointer;
+    background:transparent;border:1px solid var(--border);color:var(--text)
+  }
+  .att .acts button.primary{border-color:#4a3a12;color:var(--gold)}
+  .att .acts button:hover{background:var(--surface)}
+  .foot{
+    margin-top:26px;padding-top:14px;border-top:1px solid var(--border);
+    display:flex;gap:18px;flex-wrap:wrap;font-family:var(--mono);font-size:10px;color:var(--muted)
+  }
+  .foot b{color:var(--text);font-weight:500}
+  .caps{display:flex;gap:5px;flex-wrap:wrap;margin-top:10px}
+  .caps .chip{border-color:#33405a;color:#8FB3E8}
+  .trace{margin-top:16px;font-family:var(--mono);font-size:10px;color:var(--muted);line-height:1.9}
+  .trace .k{display:inline-block;width:74px;color:#6B7280}
+  /* ---------- compose ---------- */
+  dialog{
+    border:1px solid var(--border);background:var(--surface);color:var(--text);
+    border-radius:10px;padding:0;width:min(620px,92vw);box-shadow:0 30px 80px #000a
+  }
+  dialog::backdrop{background:#0008}
+  .cmp{padding:20px 22px}
+  .cmp h3{margin:0 0 16px;font-size:15px;display:flex;align-items:center;gap:8px}
+  .cmp h3 span{font-family:var(--mono);font-size:10px;color:var(--gold);border:1px solid #4a3a12;
+    padding:2px 6px;border-radius:3px}
+  .field{display:grid;grid-template-columns:64px 1fr;gap:10px;align-items:center;margin-bottom:10px}
+  .field label{font-family:var(--mono);font-size:10px;letter-spacing:.07em;text-transform:uppercase;color:var(--muted)}
+  input,textarea,select{
+    width:100%;background:var(--void);border:1px solid var(--border);border-radius:6px;
+    color:var(--text);padding:9px 11px;font:13px/1.5 inherit;outline:none
+  }
+  input:focus,textarea:focus,select:focus{border-color:#5a4a1c}
+  textarea{min-height:96px;resize:vertical;font-family:inherit}
+  .drop{
+    border:1px dashed var(--border);border-radius:8px;padding:16px;text-align:center;
+    color:var(--muted);font-size:12px;cursor:pointer;margin:6px 0 14px
+  }
+  .drop:hover,.drop.over{border-color:#5a4a1c;color:var(--text);background:#0B0D12}
+  .drop small{display:block;font-family:var(--mono);font-size:10px;margin-top:4px;color:#6B7280}
+  .files{display:flex;flex-direction:column;gap:6px;margin-bottom:12px}
+  .file{display:flex;align-items:center;gap:10px;font-family:var(--mono);font-size:11px;color:#C9CDD6}
+  .file .x{margin-left:auto;color:var(--muted);cursor:pointer;border:0;background:none;font-size:13px}
+  .meter{height:3px;background:#11141B;border-radius:2px;overflow:hidden;margin:12px 0}
+  .meter i{display:block;height:100%;width:0;background:var(--gold);transition:width .18s}
+  .footnote{font-family:var(--mono);font-size:10px;color:var(--muted);line-height:1.8;margin-top:12px}
+  .actions{display:flex;gap:8px;justify-content:flex-end;margin-top:16px}
+  .toast{
+    position:fixed;bottom:22px;left:50%;transform:translateX(-50%) translateY(20px);
+    background:var(--surface2);border:1px solid var(--border);border-left:2px solid var(--gold);
+    padding:11px 16px;border-radius:7px;font-size:12.5px;opacity:0;transition:.22s;pointer-events:none
+  }
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="rail">
+    <div class="brand">
+      <div class="plate"></div>
+      <div><b>Planes</b><small>post card os</small></div>
+    </div>
+
+    <nav class="folders" id="folders"></nav>
+
+    <div class="storage">
+      <div class="row"><span>MAILBOX</span><span id="mbox">0 B / 2.0 GiB</span></div>
+      <div class="bar"><i id="mboxbar"></i></div>
+      <div class="ident">
+        DEVICE <span id="devid">card-linux-14</span><br>
+        KEY <span id="devkey">ed25519:9f3a…c41d</span>
+      </div>
+      <div class="mode">LOCAL MODE — same host only</div>
+    </div>
+  </aside>
+
+  <section class="list">
+    <header>
+      <div>
+        <h1 id="viewtitle">Inbox</h1>
+        <div class="sub" id="viewsub">0 planes</div>
+      </div>
+      <button class="btn" id="composeBtn">New plane</button>
+    </header>
+    <div class="items" id="items"></div>
+  </section>
+
+  <section class="reading" id="reading"></section>
+</div>
+
+<dialog id="compose">
+  <form class="cmp" id="composeForm" method="dialog">
+    <h3>Send a plane <span>v1 · same host</span></h3>
+
+    <div class="field">
+      <label for="to">To</label>
+      <select id="to">
+        <option value="card-win-03">Windows Studio · card-win-03</option>
+        <option value="card-linux-22">Linux Lab · card-linux-22</option>
+        <option value="card-android-11">Android Bench · card-android-11</option>
+        <option value="card-secops-07">SecOps Bench · card-secops-07</option>
+      </select>
+    </div>
+
+    <div class="field">
+      <label for="subject">Subject</label>
+      <input id="subject" placeholder="Dataset handoff — 3 shards" required>
+    </div>
+
+    <div class="field" style="align-items:start">
+      <label for="body" style="padding-top:9px">Body</label>
+      <textarea id="body" placeholder="Notes that travel with the payload."></textarea>
+    </div>
+
+    <div class="drop" id="drop">
+      Drop files, or click to attach
+      <small>no 25 MB ceiling — chunked, resumable, integrity-checked</small>
+      <input type="file" id="fileInput" multiple hidden>
+    </div>
+
+    <div class="files" id="files"></div>
+    <div class="meter"><i id="meter"></i></div>
+    <div class="footnote" id="sizeline">0 B · 0 chunks · aes-256-gcm · ed25519</div>
+
+    <div class="actions">
+      <button type="button" class="btn ghost" id="cancelBtn">Cancel</button>
+      <button type="submit" class="btn" id="sendBtn">Send</button>
+    </div>
+  </form>
+</dialog>
+
+<div class="toast" id="toast"></div>
+
+<script>
+(() => {
+  "use strict";
+
+  /* ---------- constants mirroring handoff/contracts/plane.v1.json ---------- */
+  const TTL = 24 * 3600;
+  const CHUNK = 4 * 1024 * 1024;          // 4 MiB chunks
+  const QUOTA = 2 * 1024 * 1024 * 1024;   // 2 GiB per-card mailbox
+  const CAPS = ["drop_file", "send_logs", "open_git"];
+
+  const KB = 1024, MB = KB * 1024, GB = MB * 1024;
+  const fmt = n => n >= GB ? (n/GB).toFixed(2) + " GiB"
+              : n >= MB ? (n/MB).toFixed(1) + " MB"
+              : n >= KB ? (n/KB).toFixed(0) + " KB" : n + " B";
+  const ago = iso => {
+    const s = Math.max(0, (Date.now() - new Date(iso)) / 1000);
+    if (s < 60) return Math.floor(s) + "s";
+    if (s < 3600) return Math.floor(s / 60) + "m";
+    return Math.floor(s / 3600) + "h";
+  };
+  const uid = () => "p_" + Math.random().toString(16).slice(2, 10);
+  const fakeHash = () => Array.from({length: 64}, () =>
+    "0123456789abcdef"[Math.floor(Math.random() * 16)]).join("");
+  const initials = s => s.replace(/^card-/,"").split("-").map(p => p[0]).join("").slice(0,2).toUpperCase();
+
+  /* ---------- state ---------- */
+  const seed = () => ([
+    {
+      id: uid(), v: 1, from: "card-win-03", to: "card-linux-14",
+      subject: "Windows build artifacts",
+      body: "Three shards of the new installer. Take whatever you need — the rest expires in a day.",
+      createdAt: new Date(Date.now() - 9 * 60000).toISOString(),
+      ttlSec: TTL, capabilities: ["drop_file", "send_logs"],
+      payload: { bytes: 842 * MB, chunks: 211, sha256: fakeHash(), cipher: "aes-256-gcm" },
+      attachments: [
+        { name: "installer-w11-x64.iso", bytes: 5_368_709_120 },
+        { name: "build-manifest.json", bytes: 4_812 }
+      ],
+      status: "landed", receipt: null
+    },
+    {
+      id: uid(), v: 1, from: "card-linux-22", to: "card-linux-14",
+      subject: "Overnight test logs",
+      body: "285 pass, 0 fail, 27s. Full serial log attached for the archive.",
+      createdAt: new Date(Date.now() - 74 * 60000).toISOString(),
+      ttlSec: TTL, capabilities: ["send_logs"],
+      payload: { bytes: 61 * MB, chunks: 16, sha256: fakeHash(), cipher: "aes-256-gcm" },
+      attachments: [{ name: "node-test-serial.log", bytes: 63_729_664 }],
+      status: "landed", receipt: null
+    },
+    {
+      id: uid(), v: 1, from: "card-secops-07", to: "card-linux-14",
+      subject: "Capability review — plane v1",
+      body: "Reviewed the receive path. Capability check happens before the payload is opened, which is what we wanted. Notes inline.",
+      createdAt: new Date(Date.now() - 6 * 3600e3).toISOString(),
+      ttlSec: TTL, capabilities: ["open_git"],
+      payload: { bytes: 214 * KB, chunks: 1, sha256: fakeHash(), cipher: "aes-256-gcm" },
+      attachments: [],
+      status: "taken", receipt: { at: new Date(Date.now() - 5.4 * 3600e3).toISOString(), recipientKeyId: "ed25519:7c2b…0091", value: "sig:" + fakeHash().slice(0, 24) }
+    }
+  ]);
+
+  const load = () => {
+    try {
+      const raw = localStorage.getItem("postcard.planes.v1");
+      if (raw) return JSON.parse(raw);
+    } catch (_) {}
+    return seed();
+  };
+  const save = () => {
+    try { localStorage.setItem("postcard.planes.v1", JSON.stringify(state.planes)); } catch (_) {}
+  };
+
+  const state = { planes: load(), selected: null, view: "inbox" };
+
+  const $ = id => document.getElementById(id);
+  const el = (tag, cls, txt) => {
+    const n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (txt != null) n.textContent = txt;
+    return n;
+  };
+  let toastTimer;
+  const toast = msg => {
+    const t = $("toast");
+    t.textContent = msg; t.classList.add("show");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => t.classList.remove("show"), 2600);
+  };
+
+  /* ---------- queries ---------- */
+  const views = {
+    inbox:   p => p.to === "card-linux-14" && p.status !== "taken",
+    taken:   p => p.to === "card-linux-14" && p.status === "taken",
+    outbox:  p => p.from === "card-linux-14",
+    expired: p => Date.now() - new Date(p.createdAt).getTime() > p.ttlSec * 1000
+  };
+  const listFor = v => state.planes
+    .filter(views[v])
+    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+  /* ---------- render: rail ---------- */
+  function renderRail() {
+    const defs = [
+      ["inbox", "Inbox"], ["taken", "Taken"], ["outbox", "Sent"], ["expired", "Expired"]
+    ];
+    const nav = $("folders");
+    nav.innerHTML = "";
+    for (const [key, label] of defs) {
+      const n = listFor(key).length;
+      const b = el("div", "folder");
+      b.setAttribute("role", "button");
+      b.setAttribute("aria-current", String(state.view === key));
+      b.append(el("span", null, label), el("span", "count", String(n)));
+      b.onclick = () => { state.view = key; state.selected = null; render(); };
+      nav.append(b);
+    }
+    const used = state.planes.reduce((a, p) => a + (p.payload?.bytes || 0), 0);
+    $("mbox").textContent = fmt(used) + " / 2.0 GiB";
+    $("mboxbar").style.width = Math.min(100, (used / QUOTA) * 100).toFixed(1) + "%";
+  }
+
+  /* ---------- render: list ---------- */
+  function renderList() {
+    const rows = listFor(state.view);
+    $("viewtitle").textContent = ({inbox:"Inbox", taken:"Taken", outbox:"Sent", expired:"Expired"})[state.view];
+    $("viewsub").textContent = rows.length + " plane" + (rows.length === 1 ? "" : "s");
+    const box = $("items");
+    box.innerHTML = "";
+    if (!rows.length) {
+      box.append(el("div", "empty", "Nothing here."));
+      return;
+    }
+    for (const p of rows) {
+      const item = el("div", "item");
+      item.setAttribute("aria-selected", String(state.selected === p.id));
+      const top = el("div", "top");
+      const who = state.view === "outbox" ? "To " + p.to : p.from;
+      top.append(el("div", "from", who), el("div", "when", ago(p.createdAt)));
+      item.append(top, el("div", "subj", p.subject));
+
+      const meta = el("div", "meta");
+      meta.append(el("span", "chip size", fmt(p.payload.bytes)));
+      if (p.status === "in-flight") meta.append(el("span", "chip prog", "streaming"));
+      if (p.status === "landed") meta.append(el("span", "chip land", "landed"));
+      if (p.status === "taken") meta.append(el("span", "chip taken", "taken"));
+      if (p.attachments?.length) meta.append(el("span", "chip", p.attachments.length + " file" + (p.attachments.length > 1 ? "s" : "")));
+      item.append(meta);
+
+      item.onclick = () => { state.selected = p.id; render(); };
+      box.append(item);
+    }
+  }
+
+  /* ---------- render: reading pane ---------- */
+  function renderReading() {
+    const pane = $("reading");
+    pane.innerHTML = "";
+    const p = state.planes.find(x => x.id === state.selected);
+    if (!p) {
+      const e = el("div", "empty");
+      e.innerHTML = "<b>No plane selected</b>Senders only learn one thing: that it landed. What happens next is yours.";
+      pane.append(e);
+      return;
+    }
+    const doc = el("div", "doc");
+    doc.append(el("h2", null, p.subject));
+
+    const who = el("div", "who");
+    const av = el("div", "avatar", initials(p.from));
+    const wrap = el("div");
+    wrap.append(el("div", "name", p.from), el("div", "addr", "plane " + p.id + " · v" + p.v));
+    who.append(av, wrap, el("div", "spacer"));
+    const ttlLeft = Math.max(0, p.ttlSec - (Date.now() - new Date(p.createdAt).getTime()) / 1000);
+    who.append(el("span", "chip", "expires in " + Math.floor(ttlLeft / 3600) + "h"));
+    doc.append(who);
+
+    doc.append(el("div", "body", p.body || "(no message body)"));
+
+    if (p.attachments?.length) {
+      const box = el("div", "attachments");
+      const head = el("div", "head");
+      head.append(el("span", null, "payload"), el("span", null, fmt(p.payload.bytes) + " · " + p.payload.chunks + " chunks"));
+      box.append(head);
+      for (const a of p.attachments) {
+        const row = el("div", "att");
+        row.append(el("div", "ico", "FILE"));
+        const nm = el("div");
+        nm.append(el("div", "nm", a.name), el("div", "sz", fmt(a.bytes)));
+        row.append(nm);
+        const acts = el("div", "acts");
+        const isMine = p.to === "card-linux-14";
+        if (isMine && p.status !== "taken") {
+          const take = el("button", "primary", "Take");
+          take.onclick = () => {
+            p.status = "taken";
+            p.receipt = {
+              at: new Date().toISOString(),
+              recipientKeyId: "ed25519:9f3a…c41d",
+              value: "sig:" + fakeHash().slice(0, 24)
+            };
+            save(); render();
+            toast("Taken — receipt signed and returned");
+          };
+          const drop = el("button", null, "Discard");
+          drop.onclick = () => {
+            state.planes = state.planes.filter(x => x.id !== p.id);
+            state.selected = null; save(); render();
+            toast("Discarded — nothing was taken, nothing is kept");
+          };
+          acts.append(take, drop);
+        } else {
+          const b = el("button", null, "Verify");
+          b.onclick = () => toast("sha256 matches · " + p.payload.sha256.slice(0, 16) + "…");
+          acts.append(b);
+        }
+        row.append(acts);
+        box.append(row);
+      }
+      doc.append(box);
+    }
+
+    const caps = el("div", "caps");
+    caps.append(el("span", "chip", "capabilities"));
+    for (const c of p.capabilities) caps.append(el("span", "chip", c));
+    doc.append(caps);
+
+    const trace = el("div", "trace");
+    trace.innerHTML =
+      '<div><span class="k">cipher</span><b>' + p.payload.cipher + '</b></div>' +
+      '<div><span class="k">sha256</span><b>' + p.payload.sha256.slice(0, 24) + '…</b></div>' +
+      '<div><span class="k">landed</span><b>' + (p.status === "in-flight" ? "streaming…" : "yes · fsynced") + '</b></div>' +
+      '<div><span class="k">taken</span><b>' + (p.status === "taken" ? "yes · " + new Date(p.receipt.at).toLocaleTimeString() : "not yet") + '</b></div>' +
+      '<div><span class="k">receipt</span><b>' + (p.receipt ? p.receipt.value : "—") + '</b></div>';
+    doc.append(trace);
+
+    pane.append(doc);
+  }
+
+  function render() { renderRail(); renderList(); renderReading(); }
+
+  /* ---------- compose ---------- */
+  let attached = [];
+  const dialog = $("compose");
+
+  function renderFiles() {
+    const box = $("files");
+    box.innerHTML = "";
+    let total = 0;
+    for (const [i, f] of attached.entries()) {
+      total += f.bytes;
+      const row = el("div", "file");
+      row.append(el("span", null, "•"), el("span", null, f.name + "  " + fmt(f.bytes)));
+      const x = el("button", "x", "×");
+      x.type = "button";
+      x.onclick = () => { attached.splice(i, 1); renderFiles(); };
+      row.append(x);
+      box.append(row);
+    }
+    const chunks = Math.max(1, Math.ceil(total / CHUNK));
+    $("sizeline").textContent = fmt(total) + " · " + chunks + " chunk" + (chunks > 1 ? "s" : "") + " · aes-256-gcm · ed25519";
+    $("meter").style.width = Math.min(100, (total / (2 * GB)) * 100) + "%";
+  }
+
+  $("composeBtn").onclick = () => {
+    attached = []; renderFiles(); $("subject").value = ""; $("body").value = "";
+    dialog.showModal();
+  };
+  $("cancelBtn").onclick = () => dialog.close();
+
+  const drop = $("drop"), fileInput = $("fileInput");
+  drop.onclick = () => fileInput.click();
+  fileInput.onchange = () => {
+    for (const f of fileInput.files) attached.push({ name: f.name, bytes: f.size });
+    fileInput.value = ""; renderFiles();
+  };
+  drop.addEventListener("dragover", e => { e.preventDefault(); drop.classList.add("over"); });
+  drop.addEventListener("dragleave", () => drop.classList.remove("over"));
+  drop.addEventListener("drop", e => {
+    e.preventDefault(); drop.classList.remove("over");
+    for (const f of e.dataTransfer.files) attached.push({ name: f.name, bytes: f.size });
+    renderFiles();
+  });
+
+  $("composeForm").addEventListener("submit", e => {
+    e.preventDefault();
+    const to = $("to").value;
+    const subject = $("subject").value.trim() || "(no subject)";
+    const bytes = attached.reduce((a, f) => a + f.bytes, 0) || 2048;
+    const plane = {
+      id: uid(), v: 1, from: "card-linux-14", to,
+      subject, body: $("body").value, createdAt: new Date().toISOString(),
+      ttlSec: TTL, capabilities: CAPS.slice(),
+      payload: { bytes, chunks: Math.max(1, Math.ceil(bytes / CHUNK)), sha256: fakeHash(), cipher: "aes-256-gcm" },
+      attachments: attached.slice(), status: "in-flight", receipt: null
+    };
+    state.planes.push(plane);
+    dialog.close(); save(); render();
+    toast("Streaming " + fmt(bytes) + " to " + to);
+
+    // simulate chunked transfer: land it after a short, size-aware delay
+    const ms = Math.min(6000, 900 + (bytes / MB) * 22);
+    setTimeout(() => {
+      plane.status = "landed";
+      save(); render();
+      toast("Landed · " + plane.payload.sha256.slice(0, 12) + "… verified");
+    }, ms);
+  });
+
+  /* ---------- boot ---------- */
+  render();
+})();
+</script>
+</body>
+</html>

@@ -166,7 +166,7 @@ test("force stop is idempotent for an offline card", async () => {
   assert.equal(status.guests.some((guest) => guest.cardId === "offline-card"), false);
 });
 
-test("offline card deletion removes only its scoped Linux files and keyed metadata", async () => {
+test("offline card deletion removes its scoped Linux files but never its mail", async () => {
   const cardId = "delete-offline";
   const overlayDir = path.join(testDataDirectory, "overlays");
   const spoolDir = path.join(testDataDirectory, "paper-planes");
@@ -224,8 +224,8 @@ test("offline card deletion removes only its scoped Linux files and keyed metada
     await readFile(markerPath, "utf8"),
     JSON.stringify({ version: 1, baseDiskPath: basePath }),
   );
-  await assert.rejects(readFile(path.join(spoolDir, cardId, "latest.txt")), { code: "ENOENT" });
-  assert.equal(await readFile(path.join(spoolDir, "keep-card", "latest.txt"), "utf8"), "other card spool");
+  // Mail survives the card: the spool is an address, not card-owned state.
+  assert.equal(await readFile(path.join(spoolDir, cardId, "latest.txt"), "utf8"), "private spool");  assert.equal(await readFile(path.join(spoolDir, "keep-card", "latest.txt"), "utf8"), "other card spool");
   assert.deepEqual(JSON.parse(await readFile(path.join(testDataDirectory, "checkpoints.json"), "utf8")), {
     "keep-card": { tag: "keep" },
   });
@@ -239,6 +239,8 @@ test("offline card deletion removes only its scoped Linux files and keyed metada
     "keep-card": "balanced",
   });
   assert.deepEqual(JSON.parse(await readFile(path.join(testDataDirectory, "paper-planes.json"), "utf8")), [
+    { id: "to-card", fromCardId: "other", toCardId: cardId },
+    { id: "from-card", fromCardId: cardId, toCardId: "other" },
     { id: "unrelated", fromCardId: "keep-card", toCardId: "other" },
   ]);
   await rm(path.join(testDataDirectory, "paper-planes.json"), { force: true });
@@ -544,4 +546,54 @@ test("ai-command synthesizes OS-specific SecOps playbooks and snapshot manages T
   const memProfilePayload = await memProfileRes.json();
   assert.equal(memProfilePayload.memoryProfiles["windows-2"], "eco");
   assert.equal(memProfilePayload.maxConcurrentGuests, 6);
+});
+
+test("a dropped file becomes a share link that anyone can fetch", async () => {
+  const cardId = "share-link-card";
+  const dropRes = await fetch(`${baseUrl}/api/guest/file-drop`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      fromCardId: "host-drop",
+      toCardId: cardId,
+      os: "linux",
+      fileName: "handoff.txt",
+      contentBase64: Buffer.from("shared from the spool\n").toString("base64"),
+    }),
+  });
+  assert.equal(dropRes.status, 200);
+
+  const shareRes = await fetch(`${baseUrl}/api/guest/paper-plane/share`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      cardId,
+      fileName: "handoff.txt",
+      fromCardId: "host-drop",
+      ttlSec: 3600,
+    }),
+  });
+  assert.equal(shareRes.status, 200);
+  const share = await shareRes.json();
+  assert.match(share.url, /^http:\/\/127\.0\.0\.1:\d+\/s\/[A-Za-z0-9_-]+$/);
+  assert.equal(share.bytes, 22);
+
+  const page = await fetch(share.url);
+  assert.equal(page.status, 200);
+  assert.match(await page.text(), /handoff\.txt/);
+
+  const file = await fetch(`${share.url}/file`);
+  assert.equal(file.status, 200);
+  assert.equal(await file.text(), "shared from the spool\n");
+
+  const revokeRes = await fetch(`${baseUrl}/api/guest/paper-plane/revoke`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ token: new URL(share.url).pathname.split("/").pop() }),
+  });
+  assert.equal(revokeRes.status, 200);
+  assert.equal((await revokeRes.json()).revoked, true);
+  assert.equal((await fetch(share.url)).status, 404);
+
+  await rm(path.join(testDataDirectory, "share-links.json"), { force: true });
 });

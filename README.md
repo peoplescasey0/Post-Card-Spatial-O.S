@@ -1,14 +1,13 @@
 # Post Card Spatial OS
 
-The spatial workspace: a 3D (Three.js) desktop that runs and displays guest
-operating systems (Windows, Linux, macOS, Kali, AI copilot) as cards in space.
+A local workstation for controlled security labs and development environments. Run isolated guest systems, inspect their behavior, snapshot or reset work, and switch between environments in a spatial workspace. Use network testing features only on systems and networks you own or are authorized to assess.
 
 ## Documentation & User Manual
 For comprehensive operating procedures, 3D navigation shortcuts, multi-OS hypervisor profiles, AI Butler orchestration, Freeplane mind mapping, and commercial editions, see the **[Official User Manual & Field Guide](USER_MANUAL.md)** or press `?` inside the running workspace.
 
 ## Layout
-- `workspace-prototype/` - Vite + TypeScript + Three.js front end, noVNC display,
-  and `guest-api.mjs`, the QEMU/QMP/VNC backend that starts and manages guests.
+- `workspace-prototype/` - Vite + TypeScript + Three.js lab UI, noVNC display,
+  and `guest-api.mjs`, the local QEMU/QMP/VNC service for managing guest environments.
 - `supabase/` - Supabase project configuration.
 - `scripts/stripe_sync.mjs` - Stripe catalog sync (reads keys from environment variables).
 
@@ -16,9 +15,7 @@ For comprehensive operating procedures, 3D navigation shortcuts, multi-OS hyperv
 The bare-metal kernel, user programs and security layer live in a separate repo:
 https://github.com/peoplescasey0/micro-host
 
-Spatial OS is the product; micro-host is the engine it is meant to run on.
-Long term the two merge, with the workspace talking to the host through a small,
-versioned VM-control API.
+The first product focus is the workstation-hosted lab workflow: start a guest, perform authorized testing or development, save a checkpoint, and reset or clone the environment. The bare-metal micro-host remains a separate long-term direction rather than a dependency for the current workflow.
 
 ## Run
 ```powershell

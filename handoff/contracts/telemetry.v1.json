@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://postcard.os/contracts/telemetry.v1.json",
+  "title": "Telemetry packet v1 (DRAFT)",
+  "description": "WebSocket /telemetry frame, plus GET/POST /api/guest/telemetry. Source: buildTelemetryPacket() in guest-api.mjs line 928. Consumers render only; they never write.",
+  "type": "object",
+  "required": ["kernel_version", "romy_active", "heap_usage_kb", "heap_free_kb", "heap_pressure", "active_guests", "timestamp"],
+  "additionalProperties": true,
+  "properties": {
+    "kernel_version": { "type": "string", "description": "Doubles as the contract version marker." },
+    "timestamp": { "type": "string", "format": "date-time" },
+    "romy_active": { "type": "boolean", "description": "Writable via POST /api/guest/telemetry {romy_active}. Real state." },
+    "romy_coprocessor_state": { "type": "string", "description": "Derived display string from romy_active." },
+    "heap_usage_kb": { "type": "integer", "description": "Derived: base 1536 KB + 0.42 * guest memoryMb. Real arithmetic over real guest list." },
+    "heap_free_kb": { "type": "integer" },
+    "heap_pressure": { "type": "integer", "minimum": 0, "maximum": 100, "description": "Percentage of KERNEL_HEAP_CAPACITY_KB." },
+    "heap_allocator": { "type": "string" },
+    "active_guests": { "type": "integer" },
+    "elf_loader": { "type": "object" },
+    "bootloader": { "type": "object" },
+    "boot_log": { "type": "array", "items": { "type": "string" } },
+    "avionics_stages": { "type": "array" },
+    "patent_engines": {
+      "type": "object",
+      "description": "STATIC DISPLAY VALUES. Not measurements. Do not chart, do not summarize as performance, do not put in a README as achieved numbers."
+    }
+  },
+  "x-provenance": {
+    "measured": ["active_guests", "heap_usage_kb", "heap_free_kb", "heap_pressure", "romy_active", "timestamp"],
+    "static": ["kernel_version", "chassis_alloy", "heap_start", "elf_loader", "bootloader", "boot_log", "avionics_stages", "patent_engines"]
+  }
+}

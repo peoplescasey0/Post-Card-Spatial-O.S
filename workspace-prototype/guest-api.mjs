@@ -1,4 +1,4 @@
-import { execFile, execFileSync, execSync, spawn } from "node:child_process";
+﻿import { execFile, execFileSync, execSync, spawn } from "node:child_process";
 import { createConnection, isIP } from "node:net";
 import { availableParallelism } from "node:os";
 import { createHash, randomUUID } from "node:crypto";
@@ -8,6 +8,8 @@ import { constants as fsConstants, existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { handleStripeRequest } from "./stripe-api.mjs";
+import { createShareLinks } from "./share-links.mjs";
+import { createSharePublisher } from "./share-publisher.mjs";
 
 const execFileAsync = promisify(execFile);
 const appDirectory = path.dirname(fileURLToPath(import.meta.url));
@@ -737,6 +739,29 @@ export function createGuestApi(options = {}) {
   const readyMarkerPath = path.join(dataDirectory, "debian-golden.ready.json");
   const paperPlanesPath = path.join(dataDirectory, "paper-planes.json");
   const paperPlanesDropDir = path.join(dataDirectory, "paper-planes");
+  // The front door for people who do not have the app: a capability URL that
+  // reads a file already sitting in a card's spool. Shares the spool, never copies it.
+  const shareLinks = createShareLinks({ dataDirectory, paperPlanesDropDir });
+  // When a host is configured, a share is uploaded instead of served from this
+  // machine's disk, so the link survives this laptop closing. Local mode stays
+  // the default: it needs no credentials and no network.
+  const sharePublisher = (() => {
+    const baseUrl = (process.env.SHARE_REMOTE_URL ?? "").trim();
+    if (!baseUrl) return null;
+    try {
+      return createSharePublisher({
+        baseUrl,
+        secret: process.env.SHARE_REMOTE_SECRET ?? "",
+        paperPlanesDropDir,
+      });
+    } catch (error) {
+      // A half-configured host must not silently produce links that die with the
+      // laptop, and must not stop the studio from booting either.
+      console.warn(`[share] remote host ignored: ${error.message} Falling back to local links.`);
+      return null;
+    }
+  })();
+  const shareService = sharePublisher ?? shareLinks;
   const checkpointsPath = path.join(dataDirectory, "checkpoints.json");
   const networkModesPath = path.join(dataDirectory, "network-modes.json");
   const memoryProfilesPath = path.join(dataDirectory, "memory-profiles.json");
@@ -2042,11 +2067,10 @@ export function createGuestApi(options = {}) {
         { parent: overlayDirectory, name: `${cardId}.qcow2`, type: "file", disk: true },
         { parent: overlayDirectory, name: `${cardId}.qcow2.checkpoint`, type: "file" },
       ];
-    cardFiles.push({
-      parent: paperPlanesDropDir,
-      name: cardId,
-      type: "directory",
-    });
+    // The paper-plane spool is deliberately NOT part of the card's own files.
+    // A plane is addressed mail, not card-owned state: deleting the card that
+    // happens to share its name with an address must not destroy undelivered
+    // planes. They expire on their own TTL.
 
     const filesToRemove = [];
     for (const entry of cardFiles) {
@@ -2099,12 +2123,10 @@ export function createGuestApi(options = {}) {
           throw new GuestApiError(500, "paper-planes.json has an invalid record; card data was not deleted.");
         }
       }
-      const retainedPlanes = planes.value.filter(
-        (plane) => plane.fromCardId !== cardId && plane.toCardId !== cardId,
-      );
-      if (retainedPlanes.length !== planes.value.length) {
-        metadataUpdates.push({ path: planes.path, value: retainedPlanes });
-      }
+      // Records are kept: the ledger is the receipt for what was sent, and a
+      // re-created card with the same id must still find its mail waiting.
+      // Retaining them also stops a delete from rewriting history for the
+      // other side of a plane, who still holds a copy of the receipt.
     }
 
     const isRunning = typeof options.isGuestRunning === "function"
@@ -2889,7 +2911,7 @@ export function createGuestApi(options = {}) {
     const targetFilePath = path.join(cardDropDir, safeFileName);
     await writeFile(targetFilePath, buffer);
 
-    const summaryMsg = `📦 FILE DROP: ${safeFileName} (${buffer.length} B) → VVFAT drive`;
+    const summaryMsg = `ðŸ“¦ FILE DROP: ${safeFileName} (${buffer.length} B) â†’ VVFAT drive`;
     await sendPaperPlane({
       fromCardId: cleanFrom,
       toCardId: toCardId === cleanFrom ? "linux" : toCardId,
@@ -2974,6 +2996,10 @@ export function createGuestApi(options = {}) {
       sendJson(response, 200, broadcastTelemetry());
       return;
     }
+    // Share links are the one surface built for machines that are not this one.
+    // They are handled before the loopback gate on purpose: a front door that is
+    // only reachable from inside the house is not a front door.
+    if (!sharePublisher && (await shareLinks.handle(request, response, url))) return;
     if (!url.pathname.startsWith("/api/guest/")) {
       next();
       return;
@@ -3118,6 +3144,34 @@ export function createGuestApi(options = {}) {
             injectToVm: body?.injectToVm !== false,
           }),
         );
+        return;
+      }
+      if (request.method === "POST" && url.pathname === "/api/guest/paper-plane/share") {
+        const body = await readJson(request);
+        const origin =
+          typeof body?.origin === "string" && body.origin
+            ? body.origin
+            : `${request.headers["x-forwarded-proto"] ?? "http"}://${request.headers.host ?? "127.0.0.1"}`;
+        sendJson(
+          response,
+          200,
+          await shareService.issue({
+            cardId: body?.cardId,
+            fileName: body?.fileName,
+            fromCardId: body?.fromCardId,
+            ttlSec: body?.ttlSec,
+            maxDownloads: body?.maxDownloads,
+            origin,
+          }),
+        );
+        return;
+      }
+      if (request.method === "POST" && url.pathname === "/api/guest/paper-plane/revoke") {
+        const body = await readJson(request);
+        if (typeof body?.token !== "string" || !body.token) {
+          throw new GuestApiError(400, "token is required.");
+        }
+        sendJson(response, 200, await shareService.revoke(body.token));
         return;
       }
       if (request.method === "POST" && url.pathname === "/api/guest/custom-iso") {

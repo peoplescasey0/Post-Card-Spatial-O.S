@@ -302,6 +302,10 @@ const shareForm = document.querySelector<HTMLFormElement>("#share-form");
 const recipientSelect = document.querySelector<HTMLSelectElement>("#recipient");
 const remoteTargetInput = document.querySelector<HTMLInputElement>("#remote-target");
 const fileDropInput = document.querySelector<HTMLInputElement>("#file-drop-input");
+const shareLinkToggle = document.querySelector<HTMLInputElement>("#share-link-toggle");
+const shareLinkResult = document.querySelector<HTMLElement>("#share-link-result");
+const shareLinkUrlInput = document.querySelector<HTMLInputElement>("#share-link-url");
+const shareLinkCopyButton = document.querySelector<HTMLButtonElement>("#share-link-copy");
 const messageInput = document.querySelector<HTMLTextAreaElement>("#message");
 const performanceDialog = document.querySelector<HTMLDialogElement>("#performance-dialog");
 const performanceForm = document.querySelector<HTMLFormElement>("#performance-form");
@@ -2563,6 +2567,25 @@ shareForm.addEventListener("submit", (event) => {
   const remoteTarget = remoteTargetInputElement.value.trim();
   const message = messageInput.value.trim();
   const attachedFile = fileDropInput?.files?.[0];
+  const wantsLink = shareLinkToggle?.checked === true;
+
+  if (wantsLink) {
+    if (!attachedFile) {
+      showToast("Attach a file to make a link — a link needs something to point at.");
+      return;
+    }
+    if (!target) {
+      showToast("Pick the card that will hold the file first.");
+      return;
+    }
+    const from = selectedCard;
+    shareDialog.close();
+    messageInput.value = "";
+    if (fileDropInput) fileDropInput.value = "";
+    void makeShareLink(from, target, attachedFile);
+    return;
+  }
+
   if ((!target && !isRemoteOnly) || (!message && !attachedFile)) return;
 
   const from = selectedCard;
@@ -2576,6 +2599,13 @@ shareForm.addEventListener("submit", (event) => {
   if (message) {
     sendPaperPlane(from, target, message, remoteTarget);
   }
+});
+
+shareLinkCopyButton?.addEventListener("click", () => {
+  const url = shareLinkUrlInput?.value ?? "";
+  if (!url) return;
+  void navigator.clipboard?.writeText(url).catch(() => undefined);
+  showToast("Link copied. Anyone can open it — no account, no app.");
 });
 
 document.querySelector("#cancel-share")?.addEventListener("click", () => {
@@ -5835,22 +5865,80 @@ async function runSwarmFork(sourceCard: SystemCard): Promise<void> {
   }
 }
 
+const MAX_PLANE_FILE_BYTES = 512 * 1024;
+
+async function fileToBase64(file: File): Promise<string> {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  let binary = "";
+  for (const b of bytes) {
+    binary += String.fromCharCode(b);
+  }
+  return window.btoa(binary);
+}
+
+/**
+ * The front door: drop the file into the target card's spool, then mint a
+ * capability URL for it. The bytes are never copied — the link just reads them.
+ */
+async function makeShareLink(
+  fromCard: SystemCard,
+  targetCard: SystemCard,
+  file: File,
+): Promise<void> {
+  if (file.size > MAX_PLANE_FILE_BYTES) {
+    showToast("That file is past the 512 KB spool limit. A bigger one needs the cloud relay.");
+    return;
+  }
+  try {
+    showToast(`Laying '${file.name}' into ${targetCard.name}'s spool...`);
+    await requestGuestApi("/api/guest/file-drop", {
+      fromCardId: fromCard.id,
+      toCardId: targetCard.id,
+      os: cardToGuestOs(targetCard),
+      fileName: file.name,
+      contentBase64: await fileToBase64(file),
+    });
+  } catch (error) {
+    reportGuestError(error);
+    return;
+  }
+
+  try {
+    const response = await fetch("/api/guest/paper-plane/share", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        cardId: targetCard.id,
+        fileName: file.name,
+        fromCardId: fromCard.id,
+        ttlSec: 48 * 3600,
+      }),
+    });
+    const payload = (await response.json()) as { url?: string; error?: string };
+    if (!response.ok || !payload.url) {
+      throw new Error(payload.error ?? `Could not make a link (${response.status}).`);
+    }
+    if (shareLinkUrlInput) shareLinkUrlInput.value = payload.url;
+    if (shareLinkResult) shareLinkResult.hidden = false;
+    if (shareDialog && !shareDialog.open) shareDialog.showModal();
+    await navigator.clipboard?.writeText(payload.url).catch(() => undefined);
+    showToast("Link ready and copied. Anyone can open it for 48 hours.");
+  } catch (error) {
+    reportGuestError(error);
+  }
+}
+
 async function uploadFilePaperPlane(
   fromCard: SystemCard,
   targetCard: SystemCard,
   file: File,
 ): Promise<void> {
-  if (file.size > 512 * 1024) {
+  if (file.size > MAX_PLANE_FILE_BYTES) {
     showToast("File is larger than 512 KB limit for Heavy Paper Airplanes.");
     return;
   }
-  const buffer = await file.arrayBuffer();
-  const bytes = new Uint8Array(buffer);
-  let binary = "";
-  for (const b of bytes) {
-    binary += String.fromCharCode(b);
-  }
-  const contentBase64 = window.btoa(binary);
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const contentBase64 = await fileToBase64(file);
   const os = cardToGuestOs(targetCard);
 
   sendPaperPlane(fromCard, targetCard, `[FILE DROP] ${file.name} (${bytes.byteLength} B)`);

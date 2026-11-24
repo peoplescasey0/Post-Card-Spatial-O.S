@@ -8,9 +8,9 @@
     <link rel="apple-touch-icon" href="/company-logo.png" />
     <meta
       name="description"
-      content="Post Card OS — an interactive spatial workspace prototype."
+      content="Post Card OS — a local workstation for isolated security testing and development labs."
     />
-    <title>Post Card OS — Twilight Atelier</title>
+    <title>Post Card OS — Security Lab Workspace</title>
   </head>
   <body>
     <div id="app">
@@ -22,7 +22,7 @@
           </a>
           <div class="home-session">
             <span class="home-session-mark" aria-hidden="true"></span>
-            <span>LOCAL SESSION</span>
+            <span>FEDORA WORKSTATION · LOCAL SESSION</span>
             <span class="home-session-divider" aria-hidden="true"></span>
             <span>PROTOTYPE 0.1</span>
           </div>
@@ -31,23 +31,23 @@
         <div class="home-content">
           <section class="home-hero" aria-labelledby="home-title">
             <div class="home-intro">
-              <p class="home-eyebrow"><span>01</span> / WORKSPACE HOME</p>
-              <h1 id="home-title">Your systems,<br /><span>in spatial view.</span></h1>
+              <p class="home-eyebrow"><span>01</span> / ISOLATED LAB WORKSPACE</p>
+              <h1 id="home-title">Build a lab.<br /><span>Test with intent.</span></h1>
               <p class="home-lede">
-                Five Post Cards. One focused place to move between your worlds.
+                Launch isolated Linux environments, inspect systems, and return to clean starting points.
               </p>
               <div class="home-primary-actions">
                 <button class="home-primary-button" type="button" data-open-studio>
-                  <span>Open Spatial Studio</span>
+                  <span>Open Security Lab</span>
                   <span class="home-button-arrow" aria-hidden="true">↗</span>
                 </button>
-                <span class="home-action-note">INTERACTIVE 3D WORKSPACE</span>
+                <span class="home-action-note">FEDORA LINUX WORKSTATION · LOCAL VM LAB</span>
               </div>
             </div>
 
             <aside class="home-hero-visual" aria-label="Spatial Studio preview">
               <div class="home-visual-head">
-                <span>POST CARD / 3D</span>
+                <span>POST CARD / LAB</span>
                 <span class="home-visual-index">01—05</span>
               </div>
               <div class="home-card-stack" aria-hidden="true">
@@ -60,13 +60,13 @@
                 <div class="home-stack-card home-stack-card-front">
                   <span class="home-stack-brand">POST CARD O.S.</span>
                   <span class="home-stack-lambda">λ</span>
-                  <strong>DEV SPACE</strong>
+                  <strong>ISOLATED LAB</strong>
                   <span class="home-stack-line"></span>
-                  <span class="home-stack-foot">LINUX · DEMO SURFACE</span>
+                  <span class="home-stack-foot">LINUX · PRIVATE GUEST</span>
                 </div>
               </div>
               <div class="home-visual-foot">
-                <span>LOCAL / SPATIAL ENVIRONMENT</span>
+                <span>LOCAL / ISOLATED ENVIRONMENT</span>
                 <span class="home-visual-dot" aria-hidden="true"></span>
               </div>
             </aside>
@@ -75,10 +75,10 @@
           <section class="home-systems" aria-labelledby="systems-title">
             <div class="home-section-heading">
               <div>
-                <p class="home-eyebrow"><span>02</span> / YOUR SYSTEMS</p>
-                <h2 id="systems-title">Choose a Post Card</h2>
+                <p class="home-eyebrow"><span>02</span> / LAB ENVIRONMENTS</p>
+                <h2 id="systems-title">Choose a test environment</h2>
               </div>
-              <p class="home-section-note">SELECT A CARD TO OPEN IT IN THE STUDIO</p>
+              <p class="home-section-note">USE ONLY ON SYSTEMS YOU OWN OR ARE AUTHORIZED TO TEST</p>
             </div>
 
             <!-- Card Theme Customization Controls -->
@@ -174,7 +174,7 @@
                   <span class="home-system-code">PC / 03 · SELECTED IN STUDIO</span>
                 </span>
                 <span class="home-system-name">Linux <span>· Dev Space</span></span>
-                <span class="home-system-detail">Build, explore, make things happen.</span>
+                <span class="home-system-detail">Isolated Linux workspace for tools, builds, and repeatable experiments.</span>
                 <span class="home-system-bottom">
                   <span class="home-system-state"><i aria-hidden="true"></i> DEMO · DISCONNECTED</span>
                   <span class="home-system-open" aria-hidden="true">↗</span>
@@ -199,8 +199,8 @@
                   <span class="home-system-mark home-mark-kali" aria-hidden="true">K</span>
                   <span class="home-system-code">PC / 05</span>
                 </span>
-                <span class="home-system-name">Kali <span>· Cyber Range</span></span>
-                <span class="home-system-detail">Offensive SecOps, AI recon &amp; isolated VLAN lab.</span>
+                <span class="home-system-name">Kali <span>· Security Lab</span></span>
+                <span class="home-system-detail">A controlled guest for authorized assessment and network-security practice.</span>
                 <span class="home-system-bottom">
                   <span class="home-system-state"><i aria-hidden="true"></i> DEMO · DISCONNECTED</span>
                   <span class="home-system-open" aria-hidden="true">↗</span>
@@ -213,13 +213,13 @@
             <span class="home-note-icon" aria-hidden="true">i</span>
             <div>
               <h2 id="local-note-title">Local activity</h2>
-              <p>No activity feed or live host telemetry is shown on this prototype home. Open Spatial Studio to inspect the local guest controls.</p>
+              <p>Guests run on this workstation under your control. Keep lab traffic scoped to systems and networks you are authorized to test.</p>
             </div>
             <span class="home-note-state">NOT REPORTED</span>
           </section>
           <footer class="home-footer">
             <span>POST CARD O.S. <span>— LOCAL PROTOTYPE</span></span>
-            <span>BUILT FOR SPATIAL WORK</span>
+            <span>BUILT FOR CONTROLLED LAB WORK</span>
           </footer>
         </div>
       </main>
@@ -456,7 +456,7 @@
                   <button class="omni-chip omni-chip-horizon" data-omni-action="snapshot-save" type="button" title="Create a Time-Travel Savepoint (RAM + Disk)">⏱️ Savepoint</button>
                   <button class="omni-chip omni-chip-horizon" data-omni-action="snapshot-rewind" type="button" title="Rewind card to last Time-Travel Savepoint">⏪ Rewind</button>
                   <button class="omni-chip omni-chip-horizon" data-omni-action="swarm-fork" type="button" title="Fork selected card into 2 parallel Swarm clones">🐝 Swarm ×2</button>
-                  <button class="omni-chip omni-chip-horizon" data-omni-action="cycle-network" type="button" title="Cycle card network topology: NAT / Cyber-Range VLAN / Airgap">🔌 Net Mode</button>
+                  <button class="omni-chip omni-chip-horizon" data-omni-action="cycle-network" type="button" title="Cycle guest networking: NAT / multicast group / no network device">🔌 Net Mode</button>
                   <button class="omni-chip omni-chip-horizon" data-omni-action="cycle-memory" type="button" title="Cycle card RAM profile: Eco (1G/2G) / Balanced / Performance + VirtIO Balloon">🍃 Eco RAM</button>
                   <button class="omni-chip omni-chip-horizon" data-omni-action="file-drop" type="button" title="Drop a real file into the card's QEMU VVFAT drive">📦 Drop File</button>
                   <button class="omni-chip omni-chip-horizon" data-omni-action="serial-exec" type="button" title="Execute &amp; read output back over the two-way ttyS0 serial pipe">📡 Serial Pipe</button>
@@ -667,6 +667,15 @@
           <textarea id="message" name="message" rows="3" maxlength="160" placeholder="A note, a link, a little context… (or attach a file below)"></textarea>
           <label for="file-drop-input">HEAVY PAPER AIRPLANE · VVFAT FILE DROP (OPTIONAL)</label>
           <input id="file-drop-input" name="fileAttachment" type="file" />
+          <label class="share-link-toggle-label" for="share-link-toggle">
+            <input id="share-link-toggle" name="shareLink" type="checkbox" />
+            <span>Make a link anyone can open &mdash; no account, no app</span>
+          </label>
+          <p class="dialog-subhint" id="share-link-hint">Needs an attached file. The link expires in 48 hours and reads the file straight out of the card's spool &mdash; nothing is copied.</p>
+          <div class="share-link-result" id="share-link-result" hidden>
+            <input id="share-link-url" type="text" readonly aria-label="Share link" />
+            <button class="dialog-cancel" id="share-link-copy" type="button">Copy link</button>
+          </div>
           <div class="dialog-actions">
             <button class="dialog-cancel" id="cancel-share" type="button" formnovalidate>Not now</button>
             <button class="dialog-send" id="confirm-send" value="default">Fold &amp; send <span>↗</span></button>
@@ -860,7 +869,7 @@
               <div class="manual-chapter-body">
                 <div class="help-row"><span class="help-key">🪑 BENCH · 1/2/3 CARDS</span><span>Use the topbar bench selector or <em>SecOps Lab</em> button to pull 1, 2, or 3 cards side-by-side to the front row.</span></div>
                 <div class="help-row"><span class="help-key">⤢ TWIST EXPANSION</span><span>Drag any display corner or press <code>T</code> to twist and enlarge the guest viewport in 3D space.</span></div>
-                <div class="help-row"><span class="help-key">🛡️ KALI RED TEAM</span><span>Pulling SecOps Lab activates Kali Cyber Range on isolated multicast VLAN (<code>230.0.0.1:4550</code>).</span></div>
+                <div class="help-row"><span class="help-key">🛡️ KALI RED TEAM</span><span>Pulling SecOps Lab uses a QEMU multicast socket group (<code>230.0.0.1:4550</code>), not a physical VLAN or guaranteed boundary from the wired LAN. Use Airgap for guests that must have no virtual NIC.</span></div>
               </div>
             </details>
             <details class="manual-chapter">
