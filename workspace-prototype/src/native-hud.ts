@@ -157,6 +157,39 @@ export interface KernelTelemetryPacket {
       burst_4k_aligned: boolean;
       pe_quad_state: string[];
     };
+    omega_log?: {
+      checkpoint_count: number;
+      last_checkpoint_ns: number;
+      verification_state: string;
+      microsecond_latency: number;
+      signature: string;
+    };
+    point_isa_datameld?: {
+      pvm_state: string;
+      instruction_set: string;
+      active_mappings: number;
+      translation_rate_mips: number;
+      registers_mapped: number;
+    };
+    diov_streams?: {
+      stream_count: number;
+      packet_flow_mbps: number;
+      latency_us: number;
+      dropped_frames: number;
+      fabric_status: string;
+    };
+    slm_sharing?: {
+      shared_models: number;
+      tensor_pool_mb: number;
+      zero_copy_hit_rate: number;
+      cross_kernel_throughput_mbps: number;
+    };
+    boot_orom?: {
+      sandbox_state: string;
+      option_rom_verified: boolean;
+      fault_injected: boolean;
+      integrity_hash: string;
+    };
   };
   timestamp?: string;
 }
