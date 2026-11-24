@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import path from "node:path";
 import { after, before, test } from "node:test";
 import { createGuestApi } from "../guest-api.mjs";
+import { handleMcpRequest } from "../guest-mcp.mjs";
 
 let server;
 let baseUrl;
@@ -596,4 +597,101 @@ test("a dropped file becomes a share link that anyone can fetch", async () => {
   assert.equal((await fetch(share.url)).status, 404);
 
   await rm(path.join(testDataDirectory, "share-links.json"), { force: true });
+});
+
+test("quarantines corrupt JSON state files and surfaces stateWarnings in status", async () => {
+  const corruptPath = path.join(testDataDirectory, "network-modes.json");
+  await mkdir(testDataDirectory, { recursive: true });
+  await writeFile(corruptPath, "{not-valid-json", "utf8");
+
+  const statusRes = await fetch(`${baseUrl}/api/guest/status`);
+  assert.equal(statusRes.status, 200);
+  const statusPayload = await statusRes.json();
+  assert.deepEqual(statusPayload.networkModes, {});
+  assert.ok(Array.isArray(statusPayload.stateWarnings));
+  assert.ok(statusPayload.stateWarnings.some((w) => w.includes("network-modes.json")));
+  assert.ok(statusPayload.hostAcceleration && typeof statusPayload.hostAcceleration.mode === "string");
+
+  const entries = await readdir(testDataDirectory);
+  assert.ok(entries.some((name) => name.startsWith("network-modes.json.corrupt-")));
+});
+
+test("lockdown airgaps cards and blocks ai-command and paper-plane until unlocked", async () => {
+  const lockRes = await fetch(`${baseUrl}/api/guest/lockdown`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ enabled: true }),
+  });
+  assert.equal(lockRes.status, 200);
+  const lockPayload = await lockRes.json();
+  assert.equal(lockPayload.lockdownActive, true);
+
+  const aiRes = await fetch(`${baseUrl}/api/guest/ai-command`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ prompt: "recon-ports", targetCardId: "linux", os: "linux" }),
+  });
+  assert.equal(aiRes.status, 423);
+
+  const planeRes = await fetch(`${baseUrl}/api/guest/paper-plane`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ fromCardId: "linux", toCardId: "windows", message: "blocked" }),
+  });
+  assert.equal(planeRes.status, 423);
+
+  const unlockRes = await fetch(`${baseUrl}/api/guest/lockdown`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ enabled: false }),
+  });
+  assert.equal(unlockRes.status, 200);
+  const unlockPayload = await unlockRes.json();
+  assert.equal(unlockPayload.lockdownActive, false);
+
+  const stopAllRes = await fetch(`${baseUrl}/api/guest/stop-all`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ includeOrphans: false }),
+  });
+  assert.equal(stopAllRes.status, 200);
+});
+
+test("exposes action journal, disk usage ledger, SSH key provisioning, and MCP tool schema", async () => {
+  const sshRes = await fetch(`${baseUrl}/api/guest/ssh-key`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      cardId: "linux",
+      publicKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExampleKeyForPostCardTest postcard@local",
+    }),
+  });
+  assert.equal(sshRes.status, 200);
+  const sshPayload = await sshRes.json();
+  assert.equal(sshPayload.provisioned, true);
+
+  const badSshRes = await fetch(`${baseUrl}/api/guest/ssh-key`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ cardId: "linux", publicKey: "not-a-valid-key" }),
+  });
+  assert.equal(badSshRes.status, 400);
+
+  const journalRes = await fetch(`${baseUrl}/api/guest/journal`);
+  assert.equal(journalRes.status, 200);
+  const journalPayload = await journalRes.json();
+  assert.ok(Array.isArray(journalPayload.entries));
+  assert.ok(journalPayload.entries.some((entry) => entry.action === "ssh-key" && entry.cardId === "linux"));
+
+  const diskRes = await fetch(`${baseUrl}/api/guest/disk-usage`);
+  assert.equal(diskRes.status, 200);
+  const diskPayload = await diskRes.json();
+  assert.equal(typeof diskPayload.totalBytes, "number");
+  assert.ok(Array.isArray(diskPayload.cards));
+
+  const initResp = await handleMcpRequest({ jsonrpc: "2.0", id: 1, method: "initialize" });
+  assert.equal(initResp.result.serverInfo.name, "postcard-guest-mcp");
+  const listResp = await handleMcpRequest({ jsonrpc: "2.0", id: 2, method: "tools/list" });
+  assert.ok(listResp.result.tools.some((t) => t.name === "guest_status"));
+  assert.ok(listResp.result.tools.some((t) => t.name === "guest_lockdown"));
 });

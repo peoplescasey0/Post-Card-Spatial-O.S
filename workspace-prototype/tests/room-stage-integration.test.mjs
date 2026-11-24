@@ -31,3 +31,4 @@ test("applyRoomEnvironment updates lighting rigs and procedural prop groups", ()
 test("main.ts calls applyRoomEnvironment on startup with persisted room environment", () => {
   assert.match(mainTs, /applyRoomEnvironment\(loadPersistedRoomEnvironment\(\)\)/);
 });
+

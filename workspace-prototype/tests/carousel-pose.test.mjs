@@ -32,6 +32,19 @@ test("carousel poses carry cards through a visible spatial depth arc", () => {
   assert.ok(front.scale - rear.scale >= 0.39);
 });
 
+test("panoramic front arc keeps adjacent cards wide and legible", () => {
+  const front = carouselPoseFromAngle(0);
+  const leftShoulder = carouselPoseFromAngle(-Math.PI / 4);
+  const rightShoulder = carouselPoseFromAngle(Math.PI / 4);
+
+  assert.ok(leftShoulder.scale >= 0.85, "Adjacent cards must maintain large readable scale");
+  assert.ok(rightShoulder.scale >= 0.85, "Adjacent cards must maintain large readable scale");
+  assert.ok(Math.abs(leftShoulder.x) > 3.0, "Shoulder cards must spread outward horizontally");
+  assert.ok(Math.abs(rightShoulder.x) > 3.0, "Shoulder cards must spread outward horizontally");
+  assert.ok(leftShoulder.z > 0.5, "Shoulder cards must remain forward in the cockpit arc");
+  assert.ok(rightShoulder.z > 0.5, "Shoulder cards must remain forward in the cockpit arc");
+});
+
 test("the 3D path drives rendered card position and scale while inactive faces stay edge-on", () => {
   assert.match(mainTs, /function orbitPositionFromAngle\(theta: number\): THREE\.Vector3[\s\S]*carouselPoseFromAngle\(theta\)/);
   assert.match(mainTs, /const targetScale = carouselPoseFromAngle\(card\.orbitAngle\)\.scale/);

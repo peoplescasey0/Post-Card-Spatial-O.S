@@ -247,6 +247,7 @@
           <button class="mode-pill tier-pill" id="editions-button" type="button" aria-label="Open Commercial Editions &amp; Marketplace" title="Commercial Editions, Pro Licensing &amp; Modular Marketplace (M)">💎 EDITIONS</button>
           <button class="mode-pill" id="bench-toggle" type="button" title="Pull 1, 2, or 3 cards to the front workbench (B)">▣ BENCH · 1 CARD</button>
           <button class="mode-pill" id="secops-toggle" type="button" aria-pressed="false" title="Toggle SecOps &amp; Pen-Test Cyber Range Mode">🛡️ SECOPS LAB</button>
+          <button class="mode-pill" id="secure-room-button" type="button" aria-pressed="false" title="Secure Now (hide live screens) · Shift+Click or Ctrl+Shift+L for Lockdown">🔒 SECURE NOW</button>
           <button class="mode-pill manual-pill" id="help-button" type="button" aria-label="Open User Manual" title="Open Post Card OS User Manual (?)">📖 USER MANUAL</button>
           <!-- Studio Theme Selector Pulldown -->
           <details class="pulldown studio-theme-pulldown" id="studio-theme-pulldown">
@@ -728,7 +729,7 @@
               </div>
             </div>
             <div class="av-control-group">
-              <label for="audio-profile">VIRTUAL SOUND CARD &amp; DAC</label>
+              <label for="audio-profile">STUDIO AUDIO MONITORING (HOST-ONLY · NO GUEST AUDIO)</label>
               <select id="audio-profile" name="audioProfile">
                 <option value="hda">Intel High Definition Audio (ich9-intel-hda duplex)</option>
                 <option value="ac97">Legacy Studio AC97 Sound Card</option>
@@ -1354,6 +1355,20 @@
         <span aria-hidden="true">🎩</span>
       </button>
     </aside>
+    <dialog class="command-palette-dialog" id="command-palette-dialog" aria-label="Command Palette">
+      <div class="command-palette-box">
+        <input
+          class="command-palette-input"
+          id="command-palette-input"
+          type="text"
+          autocomplete="off"
+          placeholder="Type a command, card name, or AI prompt…"
+          aria-label="Command palette search"
+        />
+        <ul class="command-palette-list" id="command-palette-list" role="listbox"></ul>
+        <div class="command-palette-hint">↑↓ select · Enter run (or send to Butler) · Esc close</div>
+      </div>
+    </dialog>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

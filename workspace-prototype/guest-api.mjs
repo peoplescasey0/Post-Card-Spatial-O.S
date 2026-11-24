@@ -1,9 +1,9 @@
-﻿import { execFile, execFileSync, execSync, spawn } from "node:child_process";
+import { execFile, execFileSync, execSync, spawn } from "node:child_process";
 import { createConnection, isIP } from "node:net";
 import { availableParallelism } from "node:os";
 import { createHash, randomUUID } from "node:crypto";
 import { promisify } from "node:util";
-import { copyFile, lstat, mkdir, readdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
+import { access, copyFile, lstat, mkdir, open, readdir, readFile, realpath, rename, rm, stat, statfs, writeFile } from "node:fs/promises";
 import { constants as fsConstants, existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -18,6 +18,7 @@ const DEFAULT_WEBSOCKET_PORT = 5700;
 const DEFAULT_QMP_PORT = 4444;
 const DEFAULT_VNC_PORT = 5900;
 const DEFAULT_SERIAL_PORT = 4544;
+const DEFAULT_SSH_FWD_PORT = 2220;
 const DEFAULT_TPM_PORT = 23200;
 const MAX_GUESTS = 16;
 const MAX_CONCURRENT_GUESTS = 6;
@@ -262,19 +263,52 @@ function wait(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
-async function waitForQemu(child, port) {
+async function waitForQemu(child, port, qmpPort = 0) {
   const deadline = Date.now() + START_TIMEOUT_MS;
   while (Date.now() < deadline) {
     if (child.exitCode !== null) {
       throw new GuestApiError(500, `QEMU exited before its display was ready (exit ${child.exitCode}).`);
     }
-    if (await tcpPortIsOpen(port)) return;
+    const wsOpen = await tcpPortIsOpen(port);
+    const qmpOpen = !qmpPort || (await tcpPortIsOpen(qmpPort));
+    if (wsOpen && qmpOpen) return;
     await wait(150);
   }
   throw new GuestApiError(504, "QEMU started but its VNC display did not become ready in time.");
 }
 
-function buildNetworkArgs(networkMode = "nat", deviceModel = "virtio-net-pci") {
+async function detectHostAcceleration() {
+  if (process.platform === "win32") {
+    return {
+      mode: "whpx",
+      args: ["-accel", "whpx,kernel-irqchip=off", "-accel", "tcg,thread=multi"],
+      reason: "Windows Hypervisor Platform (WHPX) with TCG fallback",
+    };
+  }
+  if (process.platform === "darwin") {
+    return {
+      mode: "hvf",
+      args: ["-accel", "hvf", "-accel", "tcg,thread=multi"],
+      reason: "Apple Hypervisor.framework (HVF) with TCG fallback",
+    };
+  }
+  try {
+    await access("/dev/kvm", fsConstants.R_OK | fsConstants.W_OK);
+    return {
+      mode: "kvm",
+      args: ["-accel", "kvm", "-accel", "tcg,thread=multi"],
+      reason: "KVM hardware acceleration available (/dev/kvm)",
+    };
+  } catch {
+    return {
+      mode: "tcg",
+      args: ["-accel", "tcg,thread=multi"],
+      reason: "/dev/kvm not accessible; using TCG software emulation",
+    };
+  }
+}
+
+function buildNetworkArgs(networkMode = "nat", deviceModel = "virtio-net-pci", ports = undefined) {
   if (networkMode === "airgap") {
     return ["-nic", "none"];
   }
@@ -284,18 +318,22 @@ function buildNetworkArgs(networkMode = "nat", deviceModel = "virtio-net-pci") {
       "-device", `${deviceModel},netdev=net0`,
     ];
   }
+  const hostFwd = ports?.sshPort ? `,hostfwd=tcp:127.0.0.1:${ports.sshPort}-:22` : "";
   return [
-    "-netdev", "user,id=net0",
+    "-netdev", `user,id=net0${hostFwd}`,
     "-device", `${deviceModel},netdev=net0`,
   ];
 }
 
-function qemuArguments({ bootMode, cardId, diskPath, isoPath, ports, networkMode = "nat", dropDir, memoryMb = 1024, vcpus = 2, isMacOs = false, isAndroid = false, openCorePath = "", macOvmfCode = "", macOvmfVars = "", kernelPath = "", initrdPath = "" }) {
+function qemuArguments({ bootMode, cardId, diskPath, isoPath, ports, networkMode = "nat", dropDir, memoryMb = 1024, vcpus = 2, accelArgs = null, isMacOs = false, isAndroid = false, openCorePath = "", macOvmfCode = "", macOvmfVars = "", kernelPath = "", initrdPath = "" }) {
+  const resolvedAccelArgs = Array.isArray(accelArgs) && accelArgs.length > 0
+    ? accelArgs
+    : ["-accel", process.platform === "win32" ? "whpx,kernel-irqchip=off" : "tcg"];
   if (isMacOs) {
     const args = [
       "-name", `Post Card ${cardId} macOS guest`,
       "-machine", "q35",
-      "-accel", process.platform === "win32" ? "whpx,kernel-irqchip=off" : "tcg",
+      ...resolvedAccelArgs,
       "-cpu", "Penryn,vendor=GenuineIntel,+invtsc,vmware-cpuid-freq=on,+ssse3,+sse4.2,+popcnt,+avx,+aes,+xsave,+xsaveopt",
       "-smp", String(vcpus),
       "-m", String(memoryMb),
@@ -329,7 +367,7 @@ function qemuArguments({ bootMode, cardId, diskPath, isoPath, ports, networkMode
       "-device", "qemu-xhci",
       "-device", "usb-kbd",
       "-device", "usb-tablet",
-      ...buildNetworkArgs(networkMode, "e1000"),
+      ...buildNetworkArgs(networkMode, "e1000", ports),
       ...(ports.serialPort
         ? [
             "-chardev", `socket,id=charserial0,host=127.0.0.1,port=${ports.serialPort},server=on,wait=off`,
@@ -350,7 +388,7 @@ function qemuArguments({ bootMode, cardId, diskPath, isoPath, ports, networkMode
     "-machine", "q35",
     // WHPX's in-kernel IRQ chip hangs SeaBIOS at "Booting from Hard Disk...";
     // the userspace IRQ chip boots reliably.
-    "-accel", process.platform === "win32" ? "whpx,kernel-irqchip=off" : "tcg",
+    ...resolvedAccelArgs,
     "-cpu", cpuModel,
     "-smp", String(vcpus),
     "-m", String(memoryMb),
@@ -366,7 +404,7 @@ function qemuArguments({ bootMode, cardId, diskPath, isoPath, ports, networkMode
     "-device", "intel-hda",
     "-device", "hda-duplex",
     ...(dropDir ? ["-drive", `file=fat:rw:${dropDir},if=ide,index=2,format=raw`] : []),
-    ...buildNetworkArgs(networkMode, "e1000"),
+    ...buildNetworkArgs(networkMode, "e1000", ports),
     ...(ports.serialPort
       ? [
         "-chardev", `socket,id=charserial0,host=127.0.0.1,port=${ports.serialPort},server=on,wait=off`,
@@ -449,7 +487,7 @@ function windowsQemuArguments({ bootMode, cardId, diskPath, isoPath, firmwarePat
     "-device", "usb-kbd",
     "-device", "usb-tablet",
     ...(dropDir ? ["-drive", `file=fat:rw:${dropDir},if=ide,index=2,format=raw`] : []),
-    ...buildNetworkArgs(networkMode, "e1000"),
+    ...buildNetworkArgs(networkMode, "e1000", ports),
     ...(ports.serialPort
       ? [
         "-chardev", `socket,id=charserial0,host=127.0.0.1,port=${ports.serialPort},server=on,wait=off`,
@@ -767,6 +805,8 @@ export function createGuestApi(options = {}) {
   const memoryProfilesPath = path.join(dataDirectory, "memory-profiles.json");
   const cpuProfilesPath = path.join(dataDirectory, "cpu-profiles.json");
   const customIsosPath = path.join(dataDirectory, "custom-isos.json");
+  const actionJournalPath = path.join(dataDirectory, "action-journal.json");
+  const sshKeysPath = path.join(dataDirectory, "ssh-keys.json");
   const androidIsoPath = process.env.POSTCARD_ANDROID_ISO
     ? path.resolve(process.env.POSTCARD_ANDROID_ISO)
     : path.join(projectDirectory, "archive", "guest-vm-setup", "android-x86_64.iso");
@@ -793,7 +833,173 @@ export function createGuestApi(options = {}) {
   const windowsDiskDirectory = path.join(dataDirectory, "windows", "disks");
   const windowsFirmwareDirectory = path.join(dataDirectory, "windows", "firmware");
   const windowsTpmDirectory = path.join(dataDirectory, "windows", "tpm");
+  const stateWarnings = new Map();
+  let lockdownActive = false;
+
+  async function writeJsonAtomic(filePath, value) {
+    const directory = path.dirname(filePath);
+    const temporaryPath = `${filePath}.${process.pid}.${randomUUID()}.tmp`;
+    const payload = JSON.stringify(value, null, 2);
+    let handle = null;
+    try {
+      await mkdir(directory, { recursive: true });
+      handle = await open(temporaryPath, "wx");
+      await handle.writeFile(payload, "utf8");
+      await handle.sync();
+      await handle.close();
+      handle = null;
+      await rename(temporaryPath, filePath);
+    } catch (error) {
+      if (handle) await handle.close().catch(() => undefined);
+      await rm(temporaryPath, { force: true }).catch(() => undefined);
+      throw new GuestApiError(500, `Could not save ${path.basename(filePath)}: ${error.message}`);
+    }
+  }
+
+  async function readJsonSafe(filePath, fallback, { expectArray = false } = {}) {
+    const name = path.basename(filePath);
+    let raw;
+    try {
+      raw = await readFile(filePath, "utf8");
+    } catch (error) {
+      if (error.code === "ENOENT") return fallback;
+      stateWarnings.set(name, `Could not read ${name}: ${error.message}`);
+      return fallback;
+    }
+    try {
+      const parsed = JSON.parse(raw);
+      const valid = expectArray
+        ? Array.isArray(parsed)
+        : Boolean(parsed && typeof parsed === "object" && !Array.isArray(parsed));
+      if (!valid) {
+        throw new Error(`Unexpected JSON shape in ${name}`);
+      }
+      stateWarnings.delete(name);
+      return parsed;
+    } catch (error) {
+      const quarantinePath = `${filePath}.corrupt-${Date.now()}`;
+      await rename(filePath, quarantinePath).catch(() => undefined);
+      const message = `Quarantined corrupt ${name} to ${path.basename(quarantinePath)}: ${error.message}`;
+      console.warn(`[guest-api] ${message}`);
+      stateWarnings.set(name, message);
+      return fallback;
+    }
+  }
+
   let registryMutationQueue = Promise.resolve();
+
+  async function readJournal() {
+    return readJsonSafe(actionJournalPath, [], { expectArray: true });
+  }
+
+  async function appendJournalEntry({ actor = "user", action, cardId = "", os = "", outcome = "ok", detail = "" }) {
+    try {
+      const entries = await readJournal();
+      entries.push({
+        id: randomUUID(),
+        at: new Date().toISOString(),
+        actor,
+        action,
+        cardId,
+        os,
+        outcome,
+        detail,
+      });
+      await writeJsonAtomic(actionJournalPath, entries.slice(-200));
+    } catch {
+      // Never fail a guest operation because journal persistence failed.
+    }
+  }
+
+  async function readSshKeys() {
+    return readJsonSafe(sshKeysPath, {});
+  }
+
+  async function setSshPublicKey({ cardId, publicKey }) {
+    if (typeof cardId !== "string" || !/^[a-z0-9][a-z0-9_-]{0,63}$/.test(cardId)) {
+      throw new GuestApiError(400, "cardId must be a lowercase card identifier.");
+    }
+    if (typeof publicKey !== "string" || publicKey.trim().length < 16 || publicKey.length > 4096) {
+      throw new GuestApiError(400, "publicKey must be a valid SSH public key string.");
+    }
+    const cleanKey = publicKey.trim();
+    if (!/^(ssh-(ed25519|rsa|dss)|ecdsa-sha2-\S+)\s+\S+/.test(cleanKey)) {
+      throw new GuestApiError(400, "publicKey must start with a supported SSH key prefix (ssh-ed25519, ssh-rsa, ecdsa-sha2-*).");
+    }
+    const keys = await readSshKeys();
+    keys[cardId] = cleanKey;
+    await writeJsonAtomic(sshKeysPath, keys);
+    await appendJournalEntry({ actor: "api", action: "ssh-key", cardId, outcome: "ok" });
+    return { cardId, provisioned: true };
+  }
+
+  async function provisionDropDirFiles(cardDropDir, cardId, os, bootMode) {
+    await mkdir(cardDropDir, { recursive: true });
+    const keys = await readSshKeys();
+    const pubKey = keys[cardId] || process.env.POSTCARD_SSH_PUBKEY?.trim() || "";
+    if (pubKey) {
+      await writeFile(path.join(cardDropDir, "authorized_keys"), `${pubKey}\n`, "utf8");
+      await writeFile(
+        path.join(cardDropDir, "post-card-provision.sh"),
+        "#!/bin/sh\nset -e\nmkdir -p /root/.ssh && chmod 700 /root/.ssh\ncp -f /mnt/postcard/authorized_keys /root/.ssh/authorized_keys 2>/dev/null || true\nchmod 600 /root/.ssh/authorized_keys 2>/dev/null || true\n",
+        "utf8",
+      );
+    }
+    if (os === LINUX_OS && bootMode === "installer") {
+      const preseed = [
+        "d-i debian-installer/locale string en_US",
+        "d-i keyboard-configuration/xkb-keymap select us",
+        "d-i netcfg/choose_interface select auto",
+        `d-i netcfg/get_hostname string ${cardId}`,
+        "d-i passwd/root-login boolean true",
+        "d-i pkgsel/include string openssh-server curl ca-certificates",
+        "d-i finish-install/reboot_in_progress note",
+        "",
+      ].join("\n");
+      await writeFile(path.join(cardDropDir, "preseed.cfg"), preseed, "utf8");
+    }
+  }
+
+  async function assertFreeDiskSpace(targetDir, requiredBytes) {
+    if (!Number.isFinite(requiredBytes) || requiredBytes <= 0) return;
+    await mkdir(targetDir, { recursive: true });
+    try {
+      const stats = await statfs(targetDir);
+      const availableBytes = Number(stats.bavail) * Number(stats.bsize);
+      if (Number.isFinite(availableBytes) && availableBytes < requiredBytes) {
+        const needGb = (requiredBytes / (1024 ** 3)).toFixed(2);
+        const freeGb = (availableBytes / (1024 ** 3)).toFixed(2);
+        throw new GuestApiError(507, `Insufficient disk space: operation needs ~${needGb} GiB, but only ${freeGb} GiB is free.`);
+      }
+    } catch (error) {
+      if (error instanceof GuestApiError) throw error;
+    }
+  }
+
+  async function collectDiskUsage() {
+    const cards = [];
+    const scanDir = async (dir, osLabel) => {
+      if (!existsSync(dir)) return;
+      const entries = await readdir(dir, { withFileTypes: true }).catch(() => []);
+      for (const entry of entries) {
+        if (!entry.isFile() || !entry.name.endsWith(".qcow2")) continue;
+        const fullPath = path.join(dir, entry.name);
+        const info = await stat(fullPath).catch(() => null);
+        if (!info) continue;
+        cards.push({
+          cardId: entry.name.replace(/\.qcow2$/, ""),
+          os: osLabel,
+          path: fullPath,
+          sizeBytes: info.size,
+        });
+      }
+    };
+    await scanDir(overlayDirectory, LINUX_OS);
+    await scanDir(windowsDiskDirectory, WINDOWS_OS);
+    await scanDir(androidDirectory, ANDROID_OS);
+    const totalBytes = cards.reduce((sum, item) => sum + item.sizeBytes, 0);
+    return { totalBytes, cards };
+  }
   function withRegistryMutation(operation) {
     const result = registryMutationQueue.then(operation);
     registryMutationQueue = result.catch(() => undefined);
@@ -1429,10 +1635,12 @@ export function createGuestApi(options = {}) {
 
   async function status() {
     const baseReady = await isBaseReady();
+    const hostAcceleration = await detectHostAcceleration();
     return {
       baseReady,
       baseDiskExists: existsSync(baseDiskPath),
       baseDiskPath,
+      hostAcceleration,
       deletedCardIds: (await readCardIdRegistry()).deletedIds,
       preparedCardIds: await preparedCardIds(),
       preparedWindowsCardIds: await preparedWindowsCardIds(),
@@ -1445,6 +1653,9 @@ export function createGuestApi(options = {}) {
       customIsos: await readCustomIsos(),
       cpuCapacity: availableParallelism(),
       maxConcurrentGuests: MAX_CONCURRENT_GUESTS,
+      lockdownActive,
+      stateWarnings: [...stateWarnings.values()],
+      recentJournal: (await readJournal()).slice(-20),
       telemetry: broadcastTelemetry(),
       guests: [...guests.values()].map((guest) => {
         normalizeGuestState(guest);
@@ -1453,11 +1664,13 @@ export function createGuestApi(options = {}) {
           cardId: guest.cardId,
           status: guest.phase,
           bootMode: guest.bootMode,
+          accel: guest.accel ?? null,
           error: guest.error,
           stderr: guest.stderr ?? "",
           websocketPort: guest.ports?.websocketPort ?? null,
           qmpPort: guest.ports?.qmpPort ?? null,
           serialPort: guest.ports?.serialPort ?? null,
+          sshPort: guest.ports?.sshPort ?? null,
           serialOutput: guest.serialOutput ?? "",
           memoryMb: guest.memoryMb ?? resolveCardMemoryMb(guest.os ?? LINUX_OS, "eco"),
           vcpus: guest.vcpus ?? resolveCardVcpus("balanced"),
@@ -1531,12 +1744,15 @@ export function createGuestApi(options = {}) {
         qmpPort: DEFAULT_QMP_PORT + slot,
         serialPort: DEFAULT_SERIAL_PORT + slot,
         vncPort: DEFAULT_VNC_PORT + slot,
+        sshPort: DEFAULT_SSH_FWD_PORT + slot,
       };
       guest.ports = ports;
       if (
         await tcpPortIsOpen(ports.websocketPort) ||
         await tcpPortIsOpen(ports.qmpPort) ||
-        await tcpPortIsOpen(ports.vncPort)
+        await tcpPortIsOpen(ports.serialPort) ||
+        await tcpPortIsOpen(ports.vncPort) ||
+        await tcpPortIsOpen(ports.sshPort)
       ) {
         guest.ports = undefined;
         continue;
@@ -1608,6 +1824,8 @@ export function createGuestApi(options = {}) {
     try {
       let diskPath;
       let args;
+      const hostAccel = await detectHostAcceleration();
+      guest.accel = os === WINDOWS_OS ? "kvm" : hostAccel.mode;
       if (os === WINDOWS_OS) {
         const files = await prepareWindowsFiles(cardId, bootMode, cardCustomIso);
         diskPath = files.diskPath;
@@ -1694,7 +1912,7 @@ export function createGuestApi(options = {}) {
         }
         const ports = await reservePorts(guest);
         const cardDropDir = path.join(paperPlanesDropDir, cardId);
-        await mkdir(cardDropDir, { recursive: true });
+        await provisionDropDirFiles(cardDropDir, cardId, os, effectiveBootMode);
         const networkMode = (await readNetworkModes())[cardId] ?? "nat";
         const effectiveBootMode = isQcow2Image || isRawDiskImage ? "disk" : bootMode;
         guest.bootMode = effectiveBootMode;
@@ -1722,6 +1940,7 @@ export function createGuestApi(options = {}) {
           dropDir: cardDropDir,
           memoryMb,
           vcpus,
+          accelArgs: hostAccel.args,
           isMacOs: isMac,
           openCorePath: openCoreMaster,
           macOvmfCode: macOvmfCodeMaster,
@@ -1744,7 +1963,7 @@ export function createGuestApi(options = {}) {
         }
         const ports = await reservePorts(guest);
         const cardDropDir = path.join(paperPlanesDropDir, cardId);
-        await mkdir(cardDropDir, { recursive: true });
+        await provisionDropDirFiles(cardDropDir, cardId, os, effectiveBootMode);
         const networkMode = (await readNetworkModes())[cardId] ?? "nat";
         args = qemuArguments({
           bootMode,
@@ -1756,6 +1975,7 @@ export function createGuestApi(options = {}) {
           dropDir: cardDropDir,
           memoryMb: Math.max(memoryMb, 1536),
           vcpus,
+          accelArgs: hostAccel.args,
           isAndroid: true,
         });
       } else {
@@ -1788,12 +2008,12 @@ export function createGuestApi(options = {}) {
           : path.join(overlayDirectory, `${cardId}.qcow2`);
         const ports = await reservePorts(guest);
         const cardDropDir = path.join(paperPlanesDropDir, cardId);
-        await mkdir(cardDropDir, { recursive: true });
+        await provisionDropDirFiles(cardDropDir, cardId, os, effectiveBootMode);
         const networkMode = (await readNetworkModes())[cardId] ?? "nat";
         const isKernelGuest = os === "kernel";
         const kernelPath = isKernelGuest && existsSync(postcardKernelPath) ? postcardKernelPath : "";
         const initrdPath = isKernelGuest && existsSync(postcardRamdiskPath) ? postcardRamdiskPath : "";
-        args = qemuArguments({ bootMode, cardId, diskPath, isoPath, ports, networkMode, dropDir: cardDropDir, memoryMb, vcpus, kernelPath, initrdPath });
+        args = qemuArguments({ bootMode, cardId, diskPath, isoPath, ports, networkMode, dropDir: cardDropDir, memoryMb, vcpus, accelArgs: hostAccel.args, kernelPath, initrdPath });
       }
 
       let child;
@@ -1862,9 +2082,10 @@ export function createGuestApi(options = {}) {
         child.once("spawn", resolve);
         child.once("error", reject);
       });
-      await waitForQemu(child, guest.ports.websocketPort);
+      await waitForQemu(child, guest.ports.websocketPort, guest.ports.qmpPort);
       guest.phase = "running";
       guest.crashMessage = undefined;
+      await appendJournalEntry({ action: "start", cardId, os, outcome: "ok", detail: `${bootMode} (${guest.accel ?? "tcg"})` });
       if (os === WINDOWS_OS) startWindowsWatchdog(guest, cardId);
       if (os === WINDOWS_OS && bootMode === "installer" && guest.ports?.qmpPort) {
         // The ISO shows "Press any key to boot from CD or DVD" for only ~3.5s. On a cold
@@ -2192,7 +2413,7 @@ export function createGuestApi(options = {}) {
       if (!currentPath || currentPath.path !== update.path) {
         throw new GuestApiError(409, "Card metadata changed during deletion; no success was reported.");
       }
-      await writeFile(currentPath.path, JSON.stringify(update.value, null, 2), "utf8");
+      await writeJsonAtomic(currentPath.path, update.value);
     }
 
     guests.delete(key);
@@ -2263,7 +2484,8 @@ export function createGuestApi(options = {}) {
         throw new GuestApiError(409, "Target Windows card already has a disk.");
       }
       if (existsSync(srcDisk)) {
-        await mkdir(windowsDiskDirectory, { recursive: true });
+        const srcStat = await stat(srcDisk);
+        await assertFreeDiskSpace(windowsDiskDirectory, srcStat.size);
         await copyFile(srcDisk, dstDisk, fsConstants.COPYFILE_EXCL);
       }
     } else if (os === ANDROID_OS) {
@@ -2273,7 +2495,8 @@ export function createGuestApi(options = {}) {
         throw new GuestApiError(409, "Target Android card already has a disk.");
       }
       if (existsSync(srcDisk)) {
-        await mkdir(androidDirectory, { recursive: true });
+        const srcStat = await stat(srcDisk);
+        await assertFreeDiskSpace(androidDirectory, srcStat.size);
         await copyFile(srcDisk, dstDisk, fsConstants.COPYFILE_EXCL);
       }
     } else {
@@ -2293,20 +2516,12 @@ export function createGuestApi(options = {}) {
   }
 
   async function readPaperPlanes() {
-    try {
-      const raw = await readFile(paperPlanesPath, "utf8");
-      const parsed = JSON.parse(raw);
-      return Array.isArray(parsed) ? parsed : [];
-    } catch (error) {
-      if (error.code === "ENOENT") return [];
-      return [];
-    }
+    return readJsonSafe(paperPlanesPath, [], { expectArray: true });
   }
 
   async function writePaperPlanes(planes) {
-    await mkdir(dataDirectory, { recursive: true });
     const trimmed = planes.slice(-64);
-    await writeFile(paperPlanesPath, JSON.stringify(trimmed, null, 2), "utf8");
+    await writeJsonAtomic(paperPlanesPath, trimmed);
   }
 
   async function deliverToRemoteComputer(remoteTarget, payload) {
@@ -2388,6 +2603,9 @@ export function createGuestApi(options = {}) {
     remoteTarget = "",
     injectToVm = true,
   }) {
+    if (lockdownActive) {
+      throw new GuestApiError(423, "Room is in Lockdown; paper-plane delivery is blocked.");
+    }
     if (typeof fromCardId !== "string" || !/^[a-z0-9][a-z0-9_-]{0,63}$/.test(fromCardId)) {
       throw new GuestApiError(400, "fromCardId must be a lowercase card identifier.");
     }
@@ -2539,18 +2757,42 @@ export function createGuestApi(options = {}) {
   }
 
   async function readCheckpoints() {
-    try {
-      const raw = await readFile(checkpointsPath, "utf8");
-      const parsed = JSON.parse(raw);
-      return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
-    } catch {
-      return {};
-    }
+    return readJsonSafe(checkpointsPath, {});
   }
 
   async function writeCheckpoints(checkpoints) {
-    await mkdir(dataDirectory, { recursive: true });
-    await writeFile(checkpointsPath, JSON.stringify(checkpoints, null, 2), "utf8");
+    await writeJsonAtomic(checkpointsPath, checkpoints);
+  }
+
+  async function runQemuImg(os, args, errorMessage) {
+    if (os === WINDOWS_OS) {
+      return runWsl(wslQemuImgPath, args, errorMessage);
+    }
+    if (!(await executableExists(qemuImgPath))) {
+      throw new GuestApiError(503, `qemu-img was not found at ${qemuImgPath}. Set POSTCARD_QEMU_IMG to its path.`);
+    }
+    try {
+      return await execFileAsync(qemuImgPath, args, { windowsHide: true });
+    } catch (error) {
+      const detail = error.stderr?.trim() || error.stdout?.trim() || error.message;
+      throw new GuestApiError(500, `${errorMessage}: ${detail}`);
+    }
+  }
+
+  async function listQcow2Snapshots(os, diskPath) {
+    try {
+      const { stdout } = await runQemuImg(os, ["snapshot", "-U", "-l", diskPath], "Could not list disk snapshots");
+      const names = [];
+      for (const line of stdout.split(/\r?\n/)) {
+        const match = /^\s*\d+\s+(\S+)\s+/.exec(line);
+        if (match && match[1] !== "TAG") {
+          names.push(match[1]);
+        }
+      }
+      return names;
+    } catch {
+      return [];
+    }
   }
 
   async function snapshotCard({ action = "save", cardId, os = LINUX_OS, tag = "time-travel" }) {
@@ -2576,6 +2818,7 @@ export function createGuestApi(options = {}) {
           ? path.join(androidDirectory, `${cardId}.qcow2`)
           : path.join(overlayDirectory, `${cardId}.qcow2`);
     const checkpointDiskPath = `${diskPath}.checkpoint`;
+    let saveMode = targetGuest?.phase === "running" ? "live-qmp-ram" : "qcow2-snapshot";
 
     if (targetGuest && targetGuest.phase === "running" && targetGuest.ports?.qmpPort) {
       const hmpCmd = action === "save" ? `savevm ${cleanTag}` : `loadvm ${cleanTag}`;
@@ -2587,15 +2830,32 @@ export function createGuestApi(options = {}) {
       ]);
     } else if (action === "save") {
       if (existsSync(diskPath)) {
-        await copyFile(diskPath, checkpointDiskPath);
+        const existingSnapshots = await listQcow2Snapshots(os, diskPath);
+        if (existingSnapshots.includes(cleanTag)) {
+          await runQemuImg(os, ["snapshot", "-d", cleanTag, diskPath], "Could not replace previous disk snapshot");
+        }
+        await runQemuImg(os, ["snapshot", "-c", cleanTag, diskPath], "Could not save disk snapshot");
+      } else {
+        saveMode = "metadata-only";
       }
     } else if (action === "rewind") {
       const checkpoints = await readCheckpoints();
-      if (!checkpoints[cardId] && !existsSync(checkpointDiskPath)) {
+      const snapshots = existsSync(diskPath) ? await listQcow2Snapshots(os, diskPath) : [];
+      if (snapshots.includes(cleanTag)) {
+        await runQemuImg(os, ["snapshot", "-a", cleanTag, diskPath], "Could not apply disk snapshot");
+        await runQemuImg(os, ["check", diskPath], "Restored disk failed integrity check");
+      } else if (existsSync(checkpointDiskPath)) {
+        const temporaryRestorePath = `${diskPath}.restore.${process.pid}.${randomUUID()}.tmp`;
+        try {
+          await copyFile(checkpointDiskPath, temporaryRestorePath);
+          await runQemuImg(os, ["check", temporaryRestorePath], "Checkpoint image failed integrity check");
+          await rename(temporaryRestorePath, diskPath);
+        } catch (error) {
+          await rm(temporaryRestorePath, { force: true }).catch(() => undefined);
+          throw error;
+        }
+      } else if (!checkpoints[cardId]) {
         throw new GuestApiError(404, "No Time-Travel savepoint exists for this card yet.");
-      }
-      if (existsSync(checkpointDiskPath)) {
-        await copyFile(checkpointDiskPath, diskPath);
       }
     }
 
@@ -2605,12 +2865,13 @@ export function createGuestApi(options = {}) {
         tag: cleanTag,
         os,
         savedAt: new Date().toISOString(),
-        mode: targetGuest?.phase === "running" ? "live-qmp-ram" : "disk-overlay",
+        mode: saveMode,
       };
     } else if (checkpoints[cardId]) {
       checkpoints[cardId].rewoundAt = new Date().toISOString();
     }
     await writeCheckpoints(checkpoints);
+    await appendJournalEntry({ action: `snapshot-${action}`, cardId, os, outcome: "ok", detail: cleanTag });
     return status();
   }
 
@@ -2721,6 +2982,9 @@ export function createGuestApi(options = {}) {
     remoteTarget = "",
     autoDispatch = true,
   }) {
+    if (lockdownActive) {
+      throw new GuestApiError(423, "Room is in Lockdown; AI command injection is blocked.");
+    }
     if (typeof prompt !== "string" || prompt.trim().length === 0 || prompt.length > 160) {
       throw new GuestApiError(400, "prompt must be a non-empty string up to 160 characters.");
     }
@@ -2759,18 +3023,11 @@ export function createGuestApi(options = {}) {
   }
 
   async function readNetworkModes() {
-    try {
-      const raw = await readFile(networkModesPath, "utf8");
-      const parsed = JSON.parse(raw);
-      return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
-    } catch {
-      return {};
-    }
+    return readJsonSafe(networkModesPath, {});
   }
 
   async function writeNetworkModes(modes) {
-    await mkdir(dataDirectory, { recursive: true });
-    await writeFile(networkModesPath, JSON.stringify(modes, null, 2), "utf8");
+    await writeJsonAtomic(networkModesPath, modes);
   }
 
   async function setNetworkMode({ cardId, networkMode = "nat" }) {
@@ -2787,18 +3044,11 @@ export function createGuestApi(options = {}) {
   }
 
   async function readMemoryProfiles() {
-    try {
-      const raw = await readFile(memoryProfilesPath, "utf8");
-      const parsed = JSON.parse(raw);
-      return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
-    } catch {
-      return {};
-    }
+    return readJsonSafe(memoryProfilesPath, {});
   }
 
   async function writeMemoryProfiles(profiles) {
-    await mkdir(dataDirectory, { recursive: true });
-    await writeFile(memoryProfilesPath, JSON.stringify(profiles, null, 2), "utf8");
+    await writeJsonAtomic(memoryProfilesPath, profiles);
   }
 
   async function setMemoryProfile({ cardId, memoryProfile = "eco" }) {
@@ -2815,13 +3065,7 @@ export function createGuestApi(options = {}) {
   }
 
   async function readCpuProfiles() {
-    try {
-      const raw = await readFile(cpuProfilesPath, "utf8");
-      const parsed = JSON.parse(raw);
-      return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
-    } catch {
-      return {};
-    }
+    return readJsonSafe(cpuProfilesPath, {});
   }
 
   async function setCpuProfile({ cardId, cpuProfile = "balanced" }) {
@@ -2833,19 +3077,12 @@ export function createGuestApi(options = {}) {
     }
     const profiles = await readCpuProfiles();
     profiles[cardId] = cpuProfile;
-    await mkdir(dataDirectory, { recursive: true });
-    await writeFile(cpuProfilesPath, JSON.stringify(profiles, null, 2), "utf8");
+    await writeJsonAtomic(cpuProfilesPath, profiles);
     return status();
   }
 
   async function readCustomIsos() {
-    try {
-      const raw = await readFile(customIsosPath, "utf8");
-      const parsed = JSON.parse(raw);
-      return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
-    } catch {
-      return {};
-    }
+    return readJsonSafe(customIsosPath, {});
   }
 
   async function setCustomIso({ cardId, isoPath: nextIsoPath = "" }) {
@@ -2865,8 +3102,7 @@ export function createGuestApi(options = {}) {
     } else {
       isos[cardId] = trimmed;
     }
-    await mkdir(dataDirectory, { recursive: true });
-    await writeFile(customIsosPath, JSON.stringify(isos, null, 2), "utf8");
+    await writeJsonAtomic(customIsosPath, isos);
     return status();
   }
 
@@ -3051,6 +3287,22 @@ export function createGuestApi(options = {}) {
         sendJson(response, 200, await status());
         return;
       }
+      if (request.method === "GET" && url.pathname === "/api/guest/journal") {
+        sendJson(response, 200, { entries: await readJournal() });
+        return;
+      }
+      if (request.method === "GET" && url.pathname === "/api/guest/disk-usage") {
+        sendJson(response, 200, await collectDiskUsage());
+        return;
+      }
+      if (request.method === "POST" && url.pathname === "/api/guest/ssh-key") {
+        const body = await readJson(request);
+        sendJson(response, 200, await setSshPublicKey({
+          cardId: body?.cardId,
+          publicKey: body?.publicKey,
+        }));
+        return;
+      }
       if (request.method === "GET" && url.pathname === "/api/guest/stderr") {
         const targetCardId = url.searchParams.get("cardId") ?? "";
         const targetGuest = guests.get(targetCardId);
@@ -3091,6 +3343,18 @@ export function createGuestApi(options = {}) {
           throw new GuestApiError(400, "os must be 'linux', 'windows', 'android', or 'macos'.");
         }
         sendJson(response, 200, await stop(body.cardId, os));
+        return;
+      }
+      if (request.method === "POST" && url.pathname === "/api/guest/stop-all") {
+        const body = await readJson(request).catch(() => ({}));
+        const includeOrphans = body?.includeOrphans !== false;
+        const active = activeGuests();
+        await Promise.allSettled(active.map((g) => stop(g.cardId, g.os ?? LINUX_OS, true)));
+        if (includeOrphans && process.platform !== "win32") {
+          await execFileAsync("pkill", ["-f", "Post Card .* guest"], { windowsHide: true }).catch(() => undefined);
+        }
+        await appendJournalEntry({ action: "stop-all", outcome: "ok", detail: `${active.length} active` });
+        sendJson(response, 200, await status());
         return;
       }
       if (request.method === "POST" && url.pathname === "/api/guest/delete") {
@@ -3305,6 +3569,28 @@ export function createGuestApi(options = {}) {
             networkMode: body?.networkMode ?? "nat",
           }),
         );
+        return;
+      }
+      if (request.method === "POST" && url.pathname === "/api/guest/lockdown") {
+        const body = await readJson(request).catch(() => ({}));
+        const enabled = body?.enabled !== false;
+        lockdownActive = enabled;
+        if (enabled) {
+          const modes = await readNetworkModes();
+          const allIds = new Set([
+            ...Object.keys(modes),
+            ...(await preparedCardIds()),
+            ...(await preparedWindowsCardIds()),
+            ...(await installedWindowsCardIds()),
+            ...[...guests.values()].map((g) => g.cardId),
+          ]);
+          for (const id of allIds) {
+            modes[id] = "airgap";
+          }
+          await writeNetworkModes(modes);
+        }
+        await appendJournalEntry({ action: "lockdown", outcome: "ok", detail: enabled ? "engaged" : "disengaged" });
+        sendJson(response, 200, await status());
         return;
       }
       if (request.method === "POST" && url.pathname === "/api/guest/memory-profile") {

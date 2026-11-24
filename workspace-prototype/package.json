@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
+    "mcp": "node guest-mcp.mjs",
     "share-gateway": "node share-gateway.mjs",
     "share:worker:dev": "npx wrangler dev -c cloudflare/share/wrangler.toml",
     "share:worker:deploy": "npx wrangler deploy -c cloudflare/share/wrangler.toml",

@@ -127,3 +127,4 @@ test("room environment persistence handles localStorage exceptions gracefully", 
     persistRoomEnvironment("forest-emerald");
   });
 });
+

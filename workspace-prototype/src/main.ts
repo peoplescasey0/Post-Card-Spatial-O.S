@@ -12,7 +12,7 @@ import {
   type OnCardAction,
 } from "./card-actions";
 import { carouselPoseFromAngle } from "./carousel-pose";
-import { CARD_BUTTON_IDS, cardButtonRect, hitCardButton, type CardButtonId } from "./card-buttons";
+import { CARD_BUTTON_IDS, cardButtonRect, hitCardButton, hitFlipDot, FLIP_DOT_LOCATIONS, type CardButtonId, type FlipDotId } from "./card-buttons";
 import {
   BUTLER_CHOICE_LABELS,
   CHECK_IN_COOLDOWN_SECONDS,
@@ -74,7 +74,7 @@ type GuestOS = "linux" | "windows" | "android" | "macos";
 type GuestRuntimeStatus = "offline" | "starting" | "running" | "stopping" | "error";
 type CpuProfile = "eco" | "balanced" | "gaming";
 type GraphicsProfile = "performance" | "balanced" | "quality";
-type CardFacet = "front" | "back" | "left" | "right" | "top" | "bottom";
+type CardFacet = "front" | "back" | "left" | "right" | "top" | "bottom" | "patent-lab" | "slm-enclave" | "diov-streams";
 
 type GuestStatus = {
   os: GuestOS;
@@ -89,6 +89,7 @@ type GuestStatus = {
   serialOutput?: string;
   memoryMb?: number;
   vcpus?: number;
+  sshPort?: number | null;
   diskPath: string;
 };
 
@@ -217,7 +218,7 @@ type BinnedCardEntry = {
   restoreState?: TrashRestoreState;
 };
 
-const FACET_ORDER: CardFacet[] = ["front", "back", "left", "right", "top", "bottom"];
+const FACET_ORDER: CardFacet[] = ["front", "back", "left", "right", "top", "bottom", "patent-lab", "slm-enclave", "diov-streams"];
 const CPU_PROFILE_VCPUS: Record<CpuProfile, number> = {
   eco: 1,
   balanced: 2,
@@ -229,40 +230,58 @@ const FACET_META: Record<
   { badge: string; header: string; shortLabel: string; accent: string }
 > = {
   front: {
-    badge: "01 / 06",
+    badge: "01 / 09",
     header: "POST CARD OS",
     shortLabel: "display",
     accent: "#62d8d0",
   },
   back: {
-    badge: "02 / 06",
+    badge: "02 / 09",
     header: "CARD SETTINGS",
     shortLabel: "settings",
     accent: "#c5a9ff",
   },
   left: {
-    badge: "03 / 06",
+    badge: "03 / 09",
     header: "SECURITY & ISOLATION",
     shortLabel: "security",
     accent: "#8caef4",
   },
   right: {
-    badge: "04 / 06",
+    badge: "04 / 09",
     header: "PAPER PLANES",
     shortLabel: "paper planes",
     accent: "#f0a7a3",
   },
   top: {
-    badge: "05 / 06",
+    badge: "05 / 09",
     header: "QUICK ACTIONS",
     shortLabel: "quick actions",
     accent: "#9b9eff",
   },
   bottom: {
-    badge: "06 / 06",
+    badge: "06 / 09",
     header: "TELEMETRY & PORTS",
     shortLabel: "telemetry",
     accent: "#77d2e8",
+  },
+  "patent-lab": {
+    badge: "07 / 09",
+    header: "SIMULATED · KERNEL PATENT LAB // CHAOS INJECTION",
+    shortLabel: "Patents (Sim)",
+    accent: "#ff8080",
+  },
+  "slm-enclave": {
+    badge: "08 / 09",
+    header: "SIMULATED · INTER-KERNEL SLM MEMORY ENCLAVE",
+    shortLabel: "SLM Tensors (Sim)",
+    accent: "#80d0ff",
+  },
+  "diov-streams": {
+    badge: "09 / 09",
+    header: "SIMULATED · DIOV STREAMS // EHAS VIRTUALIZATION",
+    shortLabel: "DIOV Streams (Sim)",
+    accent: "#ffd080",
   },
 };
 
@@ -1336,6 +1355,38 @@ let guestTargetCardId: string | undefined;
 let guestTargetOs: GuestOS = "linux";
 let secOpsMode = false;
 let cardZoomed = false;
+const ROOM_SECURITY_STORAGE_KEY = "postcard-room-security-v1";
+const SESSION_STATE_STORAGE_KEY = "postcard-session-v1";
+type RoomSecurityMode = "open" | "secured" | "lockdown";
+
+function loadPersistedRoomSecurityMode(): RoomSecurityMode {
+  try {
+    const raw = window.localStorage.getItem(ROOM_SECURITY_STORAGE_KEY);
+    if (raw === "secured" || raw === "lockdown") return raw;
+  } catch {
+    // Ignore storage errors and fail closed to open only when unreadable.
+  }
+  return "open";
+}
+
+let roomSecurityMode: RoomSecurityMode = loadPersistedRoomSecurityMode();
+
+function persistSessionState(): void {
+  try {
+    const gradeSelect = document.querySelector<HTMLSelectElement>("#color-grade-profile");
+    window.localStorage.setItem(
+      SESSION_STATE_STORAGE_KEY,
+      JSON.stringify({
+        benchCount,
+        colorGrade: gradeSelect?.value ?? "default",
+        selectedCardId: selectedCard?.id ?? null,
+      }),
+    );
+  } catch {
+    // Ignore storage quota errors.
+  }
+}
+
 let benchCount: 1 | 2 | 3 = 1;
 
 function frontBenchSlot(index: number): -1 | 0 | 1 | undefined {
@@ -1354,6 +1405,7 @@ function isCardPulledToFront(card: SystemCard): boolean {
 
 function setBenchCount(next: 1 | 2 | 3, announce = true): void {
   benchCount = next;
+  persistSessionState();
   if (benchToggle) {
     benchToggle.textContent = `▣ BENCH · ${benchCount} ${benchCount === 1 ? "CARD" : "CARDS"}`;
     benchToggle.classList.toggle("active", benchCount > 1);
@@ -1738,6 +1790,20 @@ export function getCardTier(card: SystemCard): MonetizationTier {
   return "COMMUNITY";
 }
 
+let currentActiveTier: MonetizationTier = "COMMUNITY";
+
+function tierRank(tier: MonetizationTier): number {
+  return tier === "ENTERPRISE" ? 2 : tier === "PRO" ? 1 : 0;
+}
+
+export function requireTierEntitlement(required: MonetizationTier, featureLabel: string): boolean {
+  if (tierRank(currentActiveTier) >= tierRank(required)) return true;
+  showToast(`${featureLabel} requires ${required} tier (currently ${currentActiveTier}).`);
+  const editionsDialog = document.getElementById("editions-dialog") as HTMLDialogElement | null;
+  if (editionsDialog && !editionsDialog.open) editionsDialog.showModal();
+  return false;
+}
+
 const initialCards = [
   {
     id: "postcard-os",
@@ -2049,6 +2115,10 @@ function downloadTextFile(filename: string, content: string, mimeType = "applica
 }
 
 function butlerChoose(id: ButlerChoiceId): void {
+  if (roomSecurityMode === "lockdown" && id !== "dismiss" && id !== "snooze") {
+    showToast("Room is in Lockdown; butler routing is blocked.");
+    return;
+  }
   const context = butlerContext();
   const card = selectedCard;
   if (id === "display" && card) runCardExtra("display", card);
@@ -2339,7 +2409,58 @@ benchToggle?.addEventListener("click", () => {
   setBenchCount(next, true);
 });
 
+const secureRoomButton = document.querySelector<HTMLButtonElement>("#secure-room-button");
+
+function setRoomSecurityMode(mode: RoomSecurityMode, announce = true): void {
+  const previousMode = roomSecurityMode;
+  roomSecurityMode = mode;
+  try {
+    window.localStorage.setItem(ROOM_SECURITY_STORAGE_KEY, mode);
+  } catch {
+    // Ignore storage errors.
+  }
+  if (secureRoomButton) {
+    secureRoomButton.setAttribute("aria-pressed", String(mode !== "open"));
+    secureRoomButton.classList.toggle("active", mode !== "open");
+    secureRoomButton.textContent =
+      mode === "lockdown" ? "🚨 LOCKDOWN" : mode === "secured" ? "🛡️ SECURED" : "🔒 SECURE NOW";
+  }
+  if (mode !== "open" && guestDialogElement.open) {
+    guestDialogElement.close();
+  }
+  for (const card of cards) {
+    refreshCardTexture(card, true);
+  }
+  if (mode === "lockdown") {
+    void requestGuestApi("/api/guest/lockdown", { enabled: true })
+      .then((status) => updateGuestCardStatus(status))
+      .catch(() => undefined);
+  } else if (previousMode === "lockdown") {
+    void requestGuestApi("/api/guest/lockdown", { enabled: false })
+      .then((status) => updateGuestCardStatus(status))
+      .catch(() => undefined);
+  }
+  if (announce) {
+    showToast(
+      mode === "lockdown"
+        ? "LOCKDOWN engaged: screens hidden, guests airgapped, AI & paper-plane routing blocked."
+        : mode === "secured"
+          ? "Room secured: live guest screens hidden across reloads."
+          : "Room unlocked.",
+    );
+  }
+}
+
+secureRoomButton?.addEventListener("click", (event) => {
+  if (roomSecurityMode !== "open") {
+    setRoomSecurityMode("open", true);
+    return;
+  }
+  setRoomSecurityMode(event.shiftKey ? "lockdown" : "secured", true);
+});
+
 secopsToggleElement.addEventListener("click", () => {
+  if (!secOpsMode && !requireTierEntitlement("ENTERPRISE", "SecOps Lab")) return;
   toggleSecOpsLabMode();
 });
 
@@ -2353,6 +2474,7 @@ document.getElementById("tour-button")?.addEventListener("click", () => {
 });
 
 document.getElementById("record-tour-button")?.addEventListener("click", () => {
+  if (!isTourRecording && !requireTierEntitlement("PRO", "60FPS Demo Recording")) return;
   if (isTourRecording) {
     stopTourRecording();
     stopGuidedTour();
@@ -2454,11 +2576,14 @@ window.addEventListener("keydown", (event) => {
     closeProfilePopover(true);
     return;
   }
-  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+  if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === "l") {
     event.preventDefault();
-    if (butlerBubble?.hidden) butlerSay(butlerGreeting(butlerContext()));
-    omniInputElement.focus();
-    omniInputElement.select();
+    setRoomSecurityMode(roomSecurityMode === "lockdown" ? "open" : "lockdown", true);
+    return;
+  }
+  if ((event.ctrlKey || event.metaKey) && !event.shiftKey && event.key.toLowerCase() === "k") {
+    event.preventDefault();
+    openCommandPalette();
     return;
   }
   const activeTag = (document.activeElement as HTMLElement | null)?.tagName;
@@ -3018,6 +3143,7 @@ function openPerformanceDialog(): void {
         duskLight.color.set("#e495a4");
         renderer.toneMappingExposure = 1.12;
       }
+      persistSessionState();
     };
   }
   performanceGpuInfoElement.textContent =
@@ -3400,10 +3526,20 @@ function makeCardTexture(card: SystemCard, facet: CardFacet): THREE.CanvasTextur
     case "bottom":
       drawCardTelemetry(context, card, theme);
       break;
+    case "patent-lab":
+      drawPatentLabFacet(context, card, theme);
+      break;
+    case "slm-enclave":
+      drawSlmEnclaveFacet(context, card, theme);
+      break;
+    case "diov-streams":
+      drawDiovStreamsFacet(context, card, theme);
+      break;
   }
 
   drawFacetCompassDots(context, facet, card.color);
   drawEdgeFlipGuides(context, facet);
+  draw9DotTactileRivets(context, facet, meta.accent);
 
   drawCompanyLogo(context, 46, 898, 22, false);
   context.fillStyle = meta.accent;
@@ -3577,9 +3713,11 @@ function drawFacetCompassDots(
   activeFacet: CardFacet,
   cardColor: string,
 ): void {
+  // Only show 6 canonical dots in the bottom nav row (the 3 patent facets are accessed via 9-dot)
+  const canonicalFacets: CardFacet[] = ["front", "back", "left", "right", "top", "bottom"];
   const startX = 266;
   const y = 909;
-  for (const [idx, facet] of FACET_ORDER.entries()) {
+  for (const [idx, facet] of canonicalFacets.entries()) {
     const x = startX + idx * 18;
     context.beginPath();
     context.arc(x, y, facet === activeFacet ? 5 : 3, 0, Math.PI * 2);
@@ -3757,7 +3895,25 @@ function drawMockDisplay(context: CanvasRenderingContext2D, card: SystemCard): v
   roundRect(context, x, y, dispW, dispH, 22);
   context.clip();
 
-  if (showLiveOnCard && card.liveCanvas) {
+  if (roomSecurityMode !== "open") {
+    context.fillStyle = roomSecurityMode === "lockdown" ? "#1A0B12" : "#0D111A";
+    context.fillRect(x, y, dispW, dispH);
+    context.strokeStyle = roomSecurityMode === "lockdown" ? "#ff4d6d88" : `${accent}66`;
+    context.lineWidth = 2;
+    roundRect(context, x + 12, y + 12, dispW - 24, dispH - 24, 16);
+    context.stroke();
+    context.fillStyle = roomSecurityMode === "lockdown" ? "#ff6b81" : "#c3c8d1";
+    context.textAlign = "center";
+    context.font = "700 20px Inter, Arial, sans-serif";
+    context.fillText(roomSecurityMode === "lockdown" ? "LOCKDOWN ACTIVE" : "ROOM SECURED", x + dispW / 2, y + dispH / 2 - 8);
+    context.font = "500 13px Inter, Arial, sans-serif";
+    context.fillText(
+      roomSecurityMode === "lockdown" ? "AIRGAPPED · AI ROUTING BLOCKED" : "LIVE SCREEN HIDDEN",
+      x + dispW / 2,
+      y + dispH / 2 + 18,
+    );
+    context.textAlign = "left";
+  } else if (showLiveOnCard && card.liveCanvas) {
     context.drawImage(card.liveCanvas, x, y, dispW, dispH);
   } else if (card.liveCanvas) {
     context.fillStyle = "#0D111A";
@@ -4037,12 +4193,15 @@ function drawCardSecurity(
     : (guestServiceStatus?.preparedCardIds?.includes(card.id) ?? false);
   const checkpoint = guestServiceStatus?.checkpoints?.[card.id];
   const netMode = guestServiceStatus?.networkModes?.[card.id] ?? "nat";
+  const guestRecord = guestServiceStatus?.guests.find((g) => g.cardId === card.id);
   const netLabel =
     netMode === "airgap"
       ? "AIRGAP VAULT · Hardware NIC unplugged (-nic none)"
       : netMode === "cyber-range"
         ? "CYBER-RANGE · Private Card-to-Card VLAN (230.0.0.1:4550)"
-        : "STANDARD NAT · Outbound internet, isolated from peers";
+        : guestRecord?.sshPort && guestRecord.status === "running"
+          ? `STANDARD NAT · Host SSH 127.0.0.1:${guestRecord.sshPort} → :22`
+          : "STANDARD NAT · Outbound internet, isolated from peers";
 
   const rows: [string, string][] = [
     [
@@ -5381,6 +5540,7 @@ function computeCardContentKey(card: SystemCard): string {
     guestServiceStatus?.checkpoints?.[card.id]?.savedAt ?? "",
     guestServiceStatus?.customIsos?.[card.id] ?? "",
     studioGraphicsProfile,
+    roomSecurityMode,
     activeCount,
     latestKernelTelemetry.romy_coprocessor_state,
     latestKernelTelemetry.heap_pressure,
@@ -5880,6 +6040,10 @@ function toggleSecOpsLabMode(): void {
 }
 
 async function runAiOrSecOpsCommand(prompt: string, targetCard?: SystemCard): Promise<void> {
+  if (roomSecurityMode === "lockdown") {
+    showToast("Room is in Lockdown; AI command injection is blocked.");
+    return;
+  }
   const card = targetCard ?? selectedCard ?? cards[0];
   if (!card) return;
   if (/^(gemini\s*3|g-?3|twin\s*star)$/i.test(prompt.trim())) {
@@ -7299,10 +7463,27 @@ function onPointerUp(event: PointerEvent): void {
       } else if (completedDrag.hitUv) {
         const uv = completedDrag.hitUv;
         const printedButton = completedDrag.card.facet === "front" ? hitCardButton(uv.x, uv.y) : undefined;
+        // 9-dot flip matrix: check tactile dots on card border before generic edge swipes
+        const flipDot = hitFlipDot(uv.x, uv.y);
         if (hitTwistBadge(completedDrag.card, uv)) {
           toggleCardTwist(completedDrag.card);
         } else if (printedButton) {
           runCardButton(printedButton, completedDrag.card);
+        } else if (flipDot) {
+          // 9-dot tactile routing
+          const flipDotTarget: Partial<Record<FlipDotId, CardFacet>> = {
+            "top-left": "patent-lab",
+            "top-center": "top",
+            "top-right": "slm-enclave",
+            "mid-left": "left",
+            "center": completedDrag.card.facet === "front" ? "back" : "front",
+            "mid-right": "right",
+            "btm-left": "diov-streams",
+            "btm-center": "bottom",
+            "btm-right": "back",
+          };
+          const target = flipDotTarget[flipDot];
+          if (target) flipCardTo(completedDrag.card, target);
         } else if (
           completedDrag.card.twisted &&
           completedDrag.card.facet === "front" &&
@@ -7960,7 +8141,6 @@ function initCommercialEditions(): void {
 
   const LICENSE_KEY_STORAGE = "postcard_license_key";
   const AI_BUTLER_STORAGE = "postcard_ai_butler_active";
-  let currentActiveTier: MonetizationTier = "COMMUNITY";
 
   const setRestoreStatusMessage = (message: string, tone: "info" | "ok" | "error" = "info") => {
     if (!restoreStatusEl) return;
@@ -8701,13 +8881,511 @@ function initKernelTelemetryBridge(): void {
   connectTelemetryWs();
 }
 
+const commandPaletteDialog = document.querySelector<HTMLDialogElement>("#command-palette-dialog");
+const commandPaletteInput = document.querySelector<HTMLInputElement>("#command-palette-input");
+const commandPaletteList = document.querySelector<HTMLUListElement>("#command-palette-list");
+
+type PaletteCommand = {
+  id: string;
+  label: string;
+  hint: string;
+  run: () => void;
+};
+
+let paletteFiltered: PaletteCommand[] = [];
+let paletteSelectedIndex = 0;
+
+function getPaletteCommands(): PaletteCommand[] {
+  const active = selectedCard ?? cards[0];
+  const commands: PaletteCommand[] = [];
+  if (active) {
+    commands.push(
+      { id: "display", label: `Open 2D Display · ${active.name}`, hint: "Zoomed guest screen", run: () => runCardExtra("display", active) },
+      { id: "flip-front", label: `Flip to Front · ${active.name}`, hint: "Facet 01", run: () => flipCardTo(active, "front") },
+      { id: "flip-settings", label: `Flip to Settings · ${active.name}`, hint: "Facet 02", run: () => flipCardTo(active, "back") },
+      { id: "flip-security", label: `Flip to Security · ${active.name}`, hint: "Facet 05", run: () => flipCardTo(active, "top") },
+      { id: "flip-perf", label: `Flip to Performance · ${active.name}`, hint: "Facet 06", run: () => flipCardTo(active, "bottom") },
+      { id: "savepoint", label: `Savepoint (Time-Travel) · ${active.name}`, hint: "Snapshot", run: () => { void runTimeTravelSnapshot("save", active); } },
+      { id: "rewind", label: `Rewind Savepoint · ${active.name}`, hint: "Restore", run: () => { void runTimeTravelSnapshot("rewind", active); } },
+      { id: "net-cycle", label: `Cycle Network Mode · ${active.name}`, hint: "NAT / Cyber-Range / Airgap", run: () => { void cycleCardNetworkMode(active); } },
+    );
+  }
+  commands.push(
+    { id: "bench-1", label: "Bench · 1 Card", hint: "Layout", run: () => setBenchCount(1, true) },
+    { id: "bench-2", label: "Bench · 2 Cards", hint: "Layout", run: () => setBenchCount(2, true) },
+    { id: "bench-3", label: "Bench · 3 Cards", hint: "Layout", run: () => setBenchCount(3, true) },
+    {
+      id: "secure-toggle",
+      label: roomSecurityMode === "open" ? "Secure Now (Hide Live Screens)" : "Unlock Room",
+      hint: "Privacy",
+      run: () => setRoomSecurityMode(roomSecurityMode === "open" ? "secured" : "open", true),
+    },
+    {
+      id: "lockdown-toggle",
+      label: roomSecurityMode === "lockdown" ? "Exit Lockdown" : "Engage Lockdown (Airgap + Block AI)",
+      hint: "Ctrl+Shift+L",
+      run: () => setRoomSecurityMode(roomSecurityMode === "lockdown" ? "open" : "lockdown", true),
+    },
+    {
+      id: "stop-all",
+      label: "Stop All Running Guests",
+      hint: "Service",
+      run: () => {
+        void requestGuestApi("/api/guest/stop-all", { includeOrphans: true })
+          .then((status) => {
+            updateGuestCardStatus(status);
+            showToast("All guests stopped.");
+          })
+          .catch(reportGuestError);
+      },
+    },
+    { id: "manual", label: "Open User Manual", hint: "?", run: () => { if (helpDialog && !helpDialog.open) helpDialog.showModal(); } },
+    { id: "home", label: "Return to Workspace Home", hint: "H", run: () => showHome() },
+  );
+  for (const card of cards) {
+    commands.push({
+      id: `select-${card.id}`,
+      label: `Select Card · ${card.name}`,
+      hint: card.os,
+      run: () => selectCard(card),
+    });
+  }
+  return commands;
+}
+
+function renderCommandPalette(query: string): void {
+  if (!commandPaletteList) return;
+  const q = query.trim().toLowerCase();
+  const all = getPaletteCommands();
+  paletteFiltered = q
+    ? all.filter((c) => c.label.toLowerCase().includes(q) || c.hint.toLowerCase().includes(q))
+    : all;
+  paletteSelectedIndex = Math.min(paletteSelectedIndex, Math.max(0, paletteFiltered.length - 1));
+  commandPaletteList.replaceChildren();
+  if (paletteFiltered.length === 0) {
+    const empty = document.createElement("li");
+    empty.className = "command-palette-empty";
+    empty.textContent = `Press Enter to send "${query.trim()}" to AI Butler`;
+    commandPaletteList.append(empty);
+    return;
+  }
+  paletteFiltered.slice(0, 12).forEach((cmd, idx) => {
+    const li = document.createElement("li");
+    li.className = "command-palette-item";
+    li.setAttribute("role", "option");
+    li.setAttribute("aria-selected", String(idx === paletteSelectedIndex));
+    const title = document.createElement("span");
+    title.textContent = cmd.label;
+    const hint = document.createElement("small");
+    hint.textContent = cmd.hint;
+    li.append(title, hint);
+    li.addEventListener("click", () => {
+      commandPaletteDialog?.close();
+      cmd.run();
+    });
+    commandPaletteList.append(li);
+  });
+}
+
+function openCommandPalette(): void {
+  if (!commandPaletteDialog || !commandPaletteInput) return;
+  paletteSelectedIndex = 0;
+  commandPaletteInput.value = "";
+  renderCommandPalette("");
+  if (!commandPaletteDialog.open) commandPaletteDialog.showModal();
+  commandPaletteInput.focus();
+}
+
+commandPaletteInput?.addEventListener("input", () => {
+  paletteSelectedIndex = 0;
+  renderCommandPalette(commandPaletteInput.value);
+});
+
+commandPaletteInput?.addEventListener("keydown", (event) => {
+  if (event.key === "ArrowDown") {
+    event.preventDefault();
+    if (paletteFiltered.length > 0) {
+      paletteSelectedIndex = (paletteSelectedIndex + 1) % Math.min(12, paletteFiltered.length);
+      renderCommandPalette(commandPaletteInput.value);
+    }
+  } else if (event.key === "ArrowUp") {
+    event.preventDefault();
+    if (paletteFiltered.length > 0) {
+      const cap = Math.min(12, paletteFiltered.length);
+      paletteSelectedIndex = (paletteSelectedIndex - 1 + cap) % cap;
+      renderCommandPalette(commandPaletteInput.value);
+    }
+  } else if (event.key === "Enter") {
+    event.preventDefault();
+    const chosen = paletteFiltered[paletteSelectedIndex];
+    const raw = commandPaletteInput.value.trim();
+    commandPaletteDialog?.close();
+    if (chosen) {
+      chosen.run();
+    } else if (raw) {
+      void runAiOrSecOpsCommand(raw);
+    }
+  }
+});
+
+commandPaletteDialog?.addEventListener("click", (event) => {
+  if (event.target === commandPaletteDialog) commandPaletteDialog.close();
+});
+
 initCommercialEditions();
 initKernelTelemetryBridge();
 initViewRouter();
 initCardThemePicker();
 applyCardTheme(loadPersistedTheme());
 applyRoomEnvironment(loadPersistedRoomEnvironment());
+if (roomSecurityMode !== "open") {
+  setRoomSecurityMode(roomSecurityMode, false);
+}
+try {
+  const rawSession = window.localStorage.getItem(SESSION_STATE_STORAGE_KEY);
+  if (rawSession) {
+    const parsed = JSON.parse(rawSession) as {
+      benchCount?: 1 | 2 | 3;
+      colorGrade?: string;
+      selectedCardId?: string | null;
+    };
+    if (parsed.benchCount === 1 || parsed.benchCount === 2 || parsed.benchCount === 3) {
+      setBenchCount(parsed.benchCount, false);
+    }
+    const gradeSelect = document.querySelector<HTMLSelectElement>("#color-grade-profile");
+    if (gradeSelect && typeof parsed.colorGrade === "string") {
+      gradeSelect.value = parsed.colorGrade;
+      gradeSelect.onchange?.(new Event("change"));
+    }
+    if (typeof parsed.selectedCardId === "string") {
+      const target = cards.find((c) => c.id === parsed.selectedCardId);
+      if (target) selectCard(target);
+    }
+  }
+} catch {
+  // Ignore malformed session state.
+}
 animate();
+
+// ─── 9-Dot Tactile Rivet Draw Helper ───────────────────────────────────────
+
+function draw9DotTactileRivets(
+  context: CanvasRenderingContext2D,
+  activeFacet: CardFacet,
+  accentColor: string,
+): void {
+  const isPatentFacet =
+    activeFacet === "patent-lab" || activeFacet === "slm-enclave" || activeFacet === "diov-streams";
+  context.save();
+  for (const [id, dot] of Object.entries(FLIP_DOT_LOCATIONS) as [import("./card-buttons").FlipDotId, { x: number; y: number; r: number }][]) {
+    const isCorner = id === "top-left" || id === "top-right" || id === "btm-left" || id === "btm-right";
+    // Corners illuminate in patent accent; edge/center dots show subtle metallic ring
+    const isActiveFacetDot =
+      (id === "top-left" && activeFacet === "patent-lab") ||
+      (id === "top-right" && activeFacet === "slm-enclave") ||
+      (id === "btm-left" && activeFacet === "diov-streams");
+
+    const alpha = isActiveFacetDot ? 0.95 : isPatentFacet ? 0.7 : (isCorner ? 0.42 : 0.22);
+    const r = isActiveFacetDot ? dot.r * 0.6 : dot.r * 0.38;
+
+    // Outer metallic ring
+    context.beginPath();
+    context.arc(dot.x, dot.y, r, 0, Math.PI * 2);
+    context.strokeStyle = isCorner ? `${accentColor}${Math.round(alpha * 255).toString(16).padStart(2, "0")}` : `rgba(121,222,216,${alpha * 0.5})`;
+    context.lineWidth = 1.5;
+    context.stroke();
+
+    // Inner fill for active/corner dots
+    if (isCorner) {
+      context.beginPath();
+      context.arc(dot.x, dot.y, r * 0.45, 0, Math.PI * 2);
+      context.fillStyle = isActiveFacetDot ? accentColor : `${accentColor}66`;
+      context.fill();
+    }
+  }
+  context.restore();
+}
+
+// ─── Patent Diagnostic Facet Canvas Rasterizers ────────────────────────────
+
+function drawPatentLabFacet(
+  context: CanvasRenderingContext2D,
+  _card: SystemCard,
+  _theme?: CardThemeDefinition,
+): void {
+  const engines = latestKernelTelemetry.patent_engines;
+  const omega = engines?.omega_log;
+  const orom = engines?.boot_orom;
+
+  // Header
+  context.fillStyle = "#ff8080";
+  context.font = "700 20px 'DM Mono', monospace";
+  context.fillText("OmegaLog UPG", 48, 137);
+  context.fillStyle = "#f4f5f7";
+  context.font = "700 36px Inter, Arial, sans-serif";
+  context.fillText("Kernel Patent Lab", 48, 194);
+  context.fillStyle = "#c3c8d1";
+  context.font = "500 20px Inter, Arial, sans-serif";
+  context.fillText("Chaos injection · OmegaLog checkpoints · Boot OROM", 48, 230);
+
+  // OmegaLog panel
+  renderNativeHudToCanvas(context, 42, 260, 556, 160, latestKernelTelemetry);
+
+  // OmegaLog checkpoint metrics
+  const checkpointY = 440;
+  context.fillStyle = "#0d1623";
+  roundRect(context, 42, checkpointY, 556, 100, 10);
+  context.fill();
+  context.strokeStyle = "#ff808066";
+  context.lineWidth = 1.5;
+  roundRect(context, 42, checkpointY, 556, 100, 10);
+  context.stroke();
+
+  context.fillStyle = "#ff8080";
+  context.font = "700 13px 'DM Mono', monospace";
+  context.fillText("OMEGALOG UPG CHECKPOINT LOG", 58, checkpointY + 20);
+  context.fillStyle = "#c3c8d1";
+  context.font = "500 11px 'DM Mono', monospace";
+  if (omega) {
+    context.fillText(`Checkpoints: ${omega.checkpoint_count}  |  Last: ${omega.last_checkpoint_ns} ns  |  Latency: ${omega.microsecond_latency} µs`, 58, checkpointY + 40);
+    context.fillText(`State: ${omega.verification_state}  |  Sig: ${omega.signature}`, 58, checkpointY + 60);
+  } else {
+    context.fillText("OmegaLog UPG: STANDBY", 58, checkpointY + 40);
+  }
+
+  // Boot OROM Sandbox panel
+  const oromY = 560;
+  context.fillStyle = "#0d1623";
+  roundRect(context, 42, oromY, 556, 100, 10);
+  context.fill();
+  context.strokeStyle = "#ff808066";
+  context.lineWidth = 1.5;
+  roundRect(context, 42, oromY, 556, 100, 10);
+  context.stroke();
+
+  context.fillStyle = "#ff8080";
+  context.font = "700 13px 'DM Mono', monospace";
+  context.fillText("BOOT OROM SANDBOX", 58, oromY + 20);
+  context.fillStyle = "#c3c8d1";
+  context.font = "500 11px 'DM Mono', monospace";
+  if (orom) {
+    context.fillText(`State: ${orom.sandbox_state}  |  ROM Verified: ${orom.option_rom_verified}  |  Fault: ${orom.fault_injected}`, 58, oromY + 40);
+    context.fillText(`Integrity: ${orom.integrity_hash}`, 58, oromY + 60);
+  } else {
+    context.fillText("Boot OROM Sandbox: STANDBY", 58, oromY + 40);
+  }
+
+  // Interactive hitboxes
+  const btnY = 680;
+  const btnH = 42;
+  const btn1W = 262;
+  const btn2X = 42 + btn1W + 16;
+  const btn2W = 556 - btn1W - 16;
+
+  // [ Trigger OmegaLog Checkpoint ]
+  context.fillStyle = "rgba(255, 128, 128, 0.14)";
+  roundRect(context, 42, btnY, btn1W, btnH, 8);
+  context.fill();
+  context.strokeStyle = "#ff8080aa";
+  context.lineWidth = 1.5;
+  roundRect(context, 42, btnY, btn1W, btnH, 8);
+  context.stroke();
+  context.fillStyle = "#ff8080";
+  context.font = "700 13px 'DM Mono', monospace";
+  context.textAlign = "center";
+  context.fillText("[ Trigger OmegaLog Checkpoint ]", 42 + btn1W / 2, btnY + 25);
+
+  // [ Inject ROM Fault ]
+  context.fillStyle = "rgba(255, 128, 128, 0.10)";
+  roundRect(context, btn2X, btnY, btn2W, btnH, 8);
+  context.fill();
+  context.strokeStyle = "#ff806666";
+  context.lineWidth = 1.5;
+  roundRect(context, btn2X, btnY, btn2W, btnH, 8);
+  context.stroke();
+  context.fillStyle = "#ff8060";
+  context.fillText("[ Inject ROM Fault ]", btn2X + btn2W / 2, btnY + 25);
+  context.textAlign = "left";
+
+  // "Boot OROM Sandbox" label at bottom
+  context.fillStyle = "#ff8080aa";
+  context.font = "600 12px 'DM Mono', monospace";
+  context.textAlign = "center";
+  context.fillText("Boot OROM Sandbox", 320, 850);
+  context.textAlign = "left";
+}
+
+function drawSlmEnclaveFacet(
+  context: CanvasRenderingContext2D,
+  _card: SystemCard,
+  _theme?: CardThemeDefinition,
+): void {
+  const engines = latestKernelTelemetry.patent_engines;
+  const slm = engines?.slm_sharing;
+
+  context.fillStyle = "#80d0ff";
+  context.font = "700 20px 'DM Mono', monospace";
+  context.fillText("Inter-Kernel SLM", 48, 137);
+  context.fillStyle = "#f4f5f7";
+  context.font = "700 36px Inter, Arial, sans-serif";
+  context.fillText("SLM Memory Enclave", 48, 194);
+  context.fillStyle = "#c3c8d1";
+  context.font = "500 20px Inter, Arial, sans-serif";
+  context.fillText("Zero-copy tensor sharing across live VMs", 48, 230);
+
+  // SLM metrics panel
+  const panelY = 270;
+  context.fillStyle = "#071020";
+  roundRect(context, 42, panelY, 556, 180, 12);
+  context.fill();
+  context.strokeStyle = "#80d0ff55";
+  context.lineWidth = 1.5;
+  roundRect(context, 42, panelY, 556, 180, 12);
+  context.stroke();
+
+  context.fillStyle = "#80d0ff";
+  context.font = "700 13px 'DM Mono', monospace";
+  context.fillText("SLM SHARING ENGINE", 58, panelY + 22);
+
+  const rows: [string, string][] = slm ? [
+    ["SHARED MODELS", `${slm.shared_models}`],
+    ["TENSOR POOL", `${slm.tensor_pool_mb} MB`],
+    ["ZERO-COPY HIT RATE", `${slm.zero_copy_hit_rate.toFixed(1)}%`],
+    ["CROSS-KERNEL THROUGHPUT", `${slm.cross_kernel_throughput_mbps} MB/s`],
+  ] : [["STATUS", "STANDBY / NO ACTIVE SHARE"]];
+
+  rows.forEach(([label, val], i) => {
+    const y = panelY + 48 + i * 32;
+    context.fillStyle = "#8a909e";
+    context.font = "600 10.5px 'DM Mono', monospace";
+    context.fillText(label, 58, y);
+    context.fillStyle = "#80d0ff";
+    context.font = "700 14px 'DM Mono', monospace";
+    context.fillText(val, 310, y);
+  });
+
+  // Throughput bar
+  if (slm) {
+    const barY = panelY + 190;
+    const barW = 556;
+    const fillW = Math.round((barW - 4) * Math.min(slm.cross_kernel_throughput_mbps / 5000, 1));
+    context.fillStyle = "#07090e";
+    roundRect(context, 42, barY, barW, 16, 6);
+    context.fill();
+    if (fillW > 0) {
+      context.fillStyle = "#80d0ff";
+      roundRect(context, 44, barY + 2, fillW, 12, 4);
+      context.fill();
+    }
+    context.strokeStyle = "#80d0ff44";
+    context.lineWidth = 1;
+    roundRect(context, 42, barY, barW, 16, 6);
+    context.stroke();
+    context.fillStyle = "#80d0ff99";
+    context.font = "600 10px 'DM Mono', monospace";
+    context.textAlign = "center";
+    context.fillText(`${slm.cross_kernel_throughput_mbps} MB/s THROUGHPUT`, 320, barY + 11);
+    context.textAlign = "left";
+  }
+
+  // [ Benchmark SLM Sharing ] button
+  const btnY = 640;
+  context.fillStyle = "rgba(128, 208, 255, 0.12)";
+  roundRect(context, 42, btnY, 556, 44, 8);
+  context.fill();
+  context.strokeStyle = "#80d0ffaa";
+  context.lineWidth = 1.5;
+  roundRect(context, 42, btnY, 556, 44, 8);
+  context.stroke();
+  context.fillStyle = "#80d0ff";
+  context.font = "700 13px 'DM Mono', monospace";
+  context.textAlign = "center";
+  context.fillText("[ Benchmark SLM Sharing ]", 320, btnY + 26);
+  context.textAlign = "left";
+}
+
+function drawDiovStreamsFacet(
+  context: CanvasRenderingContext2D,
+  _card: SystemCard,
+  _theme?: CardThemeDefinition,
+): void {
+  const engines = latestKernelTelemetry.patent_engines;
+  const diov = engines?.diov_streams;
+
+  context.fillStyle = "#ffd080";
+  context.font = "700 20px 'DM Mono', monospace";
+  context.fillText("DIOV Streams", 48, 137);
+  context.fillStyle = "#f4f5f7";
+  context.font = "700 36px Inter, Arial, sans-serif";
+  context.fillText("EHAS Virtualization", 48, 194);
+  context.fillStyle = "#c3c8d1";
+  context.font = "500 20px Inter, Arial, sans-serif";
+  context.fillText("Low-latency EHAS channels · Packet flow lanes", 48, 230);
+
+  // DIOV metrics panel
+  const panelY = 270;
+  context.fillStyle = "#10080a";
+  roundRect(context, 42, panelY, 556, 180, 12);
+  context.fill();
+  context.strokeStyle = "#ffd08055";
+  context.lineWidth = 1.5;
+  roundRect(context, 42, panelY, 556, 180, 12);
+  context.stroke();
+
+  context.fillStyle = "#ffd080";
+  context.font = "700 13px 'DM Mono', monospace";
+  context.fillText("DIOV STREAMS ENGINE", 58, panelY + 22);
+
+  const rows: [string, string][] = diov ? [
+    ["ACTIVE STREAMS", `${diov.stream_count}`],
+    ["PACKET FLOW", `${diov.packet_flow_mbps} MB/s`],
+    ["LATENCY", `${diov.latency_us} µs`],
+    ["DROPPED FRAMES", `${diov.dropped_frames}`],
+    ["FABRIC STATUS", diov.fabric_status],
+  ] : [["STATUS", "STANDBY / NO ACTIVE STREAMS"]];
+
+  rows.forEach(([label, val], i) => {
+    const y = panelY + 48 + i * 26;
+    context.fillStyle = "#8a909e";
+    context.font = "600 10.5px 'DM Mono', monospace";
+    context.fillText(label, 58, y);
+    const valColor = label === "DROPPED FRAMES" && diov && diov.dropped_frames > 0 ? "#ef4444" : "#ffd080";
+    context.fillStyle = valColor;
+    context.font = "700 13px 'DM Mono', monospace";
+    context.fillText(val, 310, y);
+  });
+
+  // Packet flow sparkline
+  if (diov) {
+    const sparkY = panelY + 190;
+    const sparkW = 556;
+    const sparkH = 56;
+    context.fillStyle = "rgba(8, 10, 18, 0.9)";
+    roundRect(context, 42, sparkY, sparkW, sparkH, 8);
+    context.fill();
+    context.strokeStyle = "#ffd08033";
+    context.lineWidth = 1;
+    roundRect(context, 42, sparkY, sparkW, sparkH, 8);
+    context.stroke();
+    context.strokeStyle = "#ffd080";
+    context.lineWidth = 2;
+    context.beginPath();
+    for (let i = 0; i < 20; i++) {
+      const px = 58 + (i * (sparkW - 32)) / 19;
+      const wave = Math.sin(i * 1.3 + 1.1) * 12 + Math.cos(i * 0.8 + 2.2) * 6;
+      const py = sparkY + 30 + wave;
+      if (i === 0) context.moveTo(px, py);
+      else context.lineTo(px, py);
+    }
+    context.stroke();
+    context.fillStyle = "#ffd08099";
+    context.font = "600 10px 'DM Mono', monospace";
+    context.textAlign = "center";
+    context.fillText(`${diov.packet_flow_mbps} MB/s · EHAS ACTIVE FABRIC`, 320, sparkY + 11);
+    context.textAlign = "left";
+  }
+}
+
 
 
 

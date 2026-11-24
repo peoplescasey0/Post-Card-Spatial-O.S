@@ -6867,4 +6867,78 @@ dialog select option {
   color: #f87171;
 }
 
+.command-palette-dialog {
+  width: min(560px, calc(100vw - 32px));
+  padding: 0;
+  border: 1px solid rgba(121, 222, 216, 0.35);
+  border-radius: 12px;
+  background: rgba(11, 17, 30, 0.96);
+  color: #eef3ff;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.72);
+}
+
+.command-palette-dialog::backdrop {
+  background: rgba(4, 7, 14, 0.72);
+  backdrop-filter: blur(6px);
+}
+
+.command-palette-box {
+  display: grid;
+}
+
+.command-palette-input {
+  width: 100%;
+  padding: 15px 18px;
+  border: 0;
+  border-bottom: 1px solid rgba(148, 173, 210, 0.2);
+  background: transparent;
+  color: #f8fafc;
+  font: 500 14px "Inter", sans-serif;
+  outline: none;
+}
+
+.command-palette-list {
+  max-height: 340px;
+  margin: 0;
+  padding: 6px;
+  overflow: auto;
+  list-style: none;
+}
+
+.command-palette-item,
+.command-palette-empty {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 7px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.command-palette-item[aria-selected="true"],
+.command-palette-item:hover {
+  background: rgba(112, 213, 207, 0.16);
+  color: #ffffff;
+}
+
+.command-palette-item small {
+  color: #8ea1c2;
+  font: 500 10px "DM Mono", monospace;
+}
+
+.command-palette-empty {
+  color: #9eb0cf;
+  cursor: default;
+}
+
+.command-palette-hint {
+  padding: 8px 16px;
+  border-top: 1px solid rgba(148, 173, 210, 0.14);
+  color: #7f91b2;
+  font: 500 10px "DM Mono", monospace;
+}
+
+
 

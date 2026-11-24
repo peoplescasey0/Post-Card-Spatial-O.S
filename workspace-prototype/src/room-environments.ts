@@ -301,3 +301,4 @@ export function persistRoomEnvironment(id: RoomEnvironmentId | string): void {
     console.warn("Unable to persist room environment to localStorage:", err);
   }
 }
+
